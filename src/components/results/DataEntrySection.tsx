@@ -107,7 +107,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           }) || [];
 
           const bureauxSaisis = bureaux.filter((b: any) => 
-            b.status === 'entered' || b.status === 'validated' || b.status === 'anomaly'
+            b.status === 'entered' || b.status === 'validated' || b.status === 'anomaly' || b.status === 'published'
           ).length;
 
           return {
@@ -144,6 +144,8 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
 
   const getStatusIcon = (status: string) => {
     switch (status) {
+      case 'published':
+        return <CheckCircle className="w-4 h-4 text-purple-600" />;
       case 'validé':
       case 'validated':
         return <CheckCircle className="w-4 h-4 text-green-600" />;
@@ -162,6 +164,8 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case 'published':
+        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">🌐 Publié</Badge>;
       case 'validated':
         return <Badge className="bg-green-100 text-green-800 border-green-200">✅ Validé</Badge>;
       case 'entered':

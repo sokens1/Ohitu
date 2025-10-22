@@ -49,32 +49,6 @@ const Login = () => {
     fetchElections();
   }, []);
 
-  const handleElectionRedirect = (type: 'legislative' | 'local') => {
-    // Trouver l'élection correspondante dans la base de données
-    const electionTypeMap = {
-      legislative: ['Législative', 'Législatives', 'Legislative'],
-      local: ['Locale', 'Locales', 'Local', 'Municipale', 'Municipales']
-    };
-    
-    const targetTypes = electionTypeMap[type];
-    const foundElection = elections.find(election => 
-      targetTypes.some(targetType => 
-        election.title?.toLowerCase().includes(targetType.toLowerCase()) ||
-        election.description?.toLowerCase().includes(targetType.toLowerCase()) ||
-        election.localisation?.toLowerCase().includes(targetType.toLowerCase())
-      )
-    );
-    
-    if (foundElection) {
-      navigate(`/election/${foundElection.id}/results`);
-    } else {
-      toast({
-        title: "Élection non disponible",
-        description: `Aucune élection ${type === 'legislative' ? 'Législative' : 'Locale'} n'est disponible pour le moment.`,
-        variant: "destructive",
-      });
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,41 +108,77 @@ const Login = () => {
             </p>
           </div>
 
-           {/* Boutons de sélection d'élection */}
-           <div className="space-y-3 lg:space-y-4 w-full max-w-md">
-             {/* Bouton Élection Législative */}
-            <button
-               onClick={() => handleElectionRedirect('legislative')}
-               disabled={electionsLoading}
-              className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white bg-[#A51C30] border-[#A51C30] hover:bg-[#A51C30] hover:border-[#A51C30] ${
-                 electionsLoading ? 'opacity-50 cursor-not-allowed' : ''
-               }`}
-             >
-              <div className="flex items-center justify-between">
-                <div className="text-left">
-                  <h3 className="font-bold text-base lg:text-lg">Élections Législatives</h3>
-                  <p className="text-xs lg:text-sm opacity-80">Élection des députés</p>
-                </div>
-                {!electionsLoading && <ArrowRight className="w-4 h-4 lg:w-5 lg:h-5 transition-transform text-white/60" />}
-              </div>
-             </button>
-
-             {/* Bouton Élection Locale */}
-            <button
-               onClick={() => handleElectionRedirect('local')}
-               disabled={electionsLoading}
-              className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white bg-[#116917] border-[#116917] hover:bg-[#116917] hover:border-[#116917] ${
-                 electionsLoading ? 'opacity-50 cursor-not-allowed' : ''
-               }`}
-             >
-              <div className="flex items-center justify-between">
-                <div className="text-left">
-                  <h3 className="font-bold text-base lg:text-lg">Élections Locales</h3>
-                  <p className="text-xs lg:text-sm opacity-80">Élection des conseils municipaux</p>
-                </div>
-                {!electionsLoading && <ArrowRight className="w-4 h-4 lg:w-5 lg:h-5 transition-transform text-white/60" />}
-              </div>
-             </button>
+           {/* Boutons de sélection d'élection - Dynamiques */}
+           <div className="w-full max-w-md">
+             {electionsLoading ? (
+               <div className="space-y-3 lg:space-y-4">
+                 <div className="w-full p-4 lg:p-6 rounded-xl border-2 bg-gray-600 animate-pulse">
+                   <div className="flex items-center justify-between">
+                     <div className="text-left">
+                       <div className="h-5 bg-gray-500 rounded mb-2 w-32"></div>
+                       <div className="h-4 bg-gray-500 rounded w-24"></div>
+                     </div>
+                   </div>
+                 </div>
+                 <div className="w-full p-4 lg:p-6 rounded-xl border-2 bg-gray-600 animate-pulse">
+                   <div className="flex items-center justify-between">
+                     <div className="text-left">
+                       <div className="h-5 bg-gray-500 rounded mb-2 w-32"></div>
+                       <div className="h-4 bg-gray-500 rounded w-24"></div>
+                     </div>
+                   </div>
+                 </div>
+               </div>
+             ) : elections.length === 0 ? (
+               <div className="text-center py-8">
+                 <div className="w-16 h-16 mx-auto mb-4 bg-white/10 rounded-full flex items-center justify-center">
+                   <Vote className="w-8 h-8 text-white/60" />
+                 </div>
+                 <h3 className="text-white font-semibold mb-2">Aucune élection disponible</h3>
+                 <p className="text-blue-100 text-sm">Les élections seront bientôt disponibles.</p>
+               </div>
+             ) : (
+               <div className="max-h-96 overflow-y-auto overflow-x-hidden space-y-3 lg:space-y-4 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                 {elections
+                   .sort((a, b) => new Date(b.election_date).getTime() - new Date(a.election_date).getTime())
+                   .map((election) => {
+                     const title = election.title?.toLowerCase() || '';
+                     const description = election.description?.toLowerCase() || '';
+                     const localisation = election.localisation?.toLowerCase() || '';
+                     
+                     const isLocal = ['locale', 'locales', 'local', 'municipale', 'municipales'].some(keyword =>
+                       title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+                     );
+                     
+                     const isLegislative = ['législative', 'législatives', 'legislative'].some(keyword =>
+                       title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+                     );
+                     
+                     const bgColor = isLocal ? 'bg-[#116917]' : isLegislative ? 'bg-[#A51C30]' : 'bg-blue-600';
+                     const borderColor = isLocal ? 'border-[#116917]' : isLegislative ? 'border-[#A51C30]' : 'border-blue-600';
+                     const hoverBgColor = isLocal ? 'hover:bg-[#116917]' : isLegislative ? 'hover:bg-[#A51C30]' : 'hover:bg-blue-600';
+                     const hoverBorderColor = isLocal ? 'hover:border-[#116917]' : isLegislative ? 'hover:border-[#A51C30]' : 'hover:border-blue-600';
+                     
+                     return (
+                       <button
+                         key={election.id}
+                         onClick={() => navigate(`/election/${election.id}/results`)}
+                         className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white ${bgColor} ${borderColor} ${hoverBgColor} ${hoverBorderColor}`}
+                       >
+                         <div className="flex items-center justify-between">
+                           <div className="text-left">
+                             <h3 className="font-bold text-base lg:text-lg">{election.title}</h3>
+                             {election.localisation && (
+                               <p className="text-xs opacity-60 mt-1">{election.localisation}</p>
+                             )}
+                           </div>
+                           <ArrowRight className="w-4 h-4 lg:w-5 lg:h-5 transition-transform text-white/60" />
+                         </div>
+                       </button>
+                     );
+                   })}
+               </div>
+             )}
            </div>
 
           {/* Avantages de la plateforme */}
@@ -219,41 +229,77 @@ const Login = () => {
             </p>
           </div>
 
-          {/* Boutons de sélection d'élection mobile */}
-          <div className="space-y-3">
-            {/* Bouton Élection Législative */}
-            <button
-              onClick={() => handleElectionRedirect('legislative')}
-              disabled={electionsLoading}
-              className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white bg-[#A51C30] border-[#A51C30] hover:bg-[#A51C30] hover:border-[#A51C30] ${
-                electionsLoading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-left flex-1">
-                  <h3 className="font-bold text-base leading-snug whitespace-normal">Élections Législatives</h3>
-                  <p className="text-xs opacity-80 leading-snug whitespace-normal">Élection des députés</p>
+          {/* Boutons de sélection d'élection mobile - Dynamiques */}
+          <div>
+            {electionsLoading ? (
+              <div className="space-y-3">
+                <div className="w-full p-4 rounded-lg border-2 bg-gray-600 animate-pulse">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-left flex-1">
+                      <div className="h-5 bg-gray-500 rounded mb-2 w-32"></div>
+                      <div className="h-4 bg-gray-500 rounded w-24"></div>
+                    </div>
+                  </div>
                 </div>
-                {!electionsLoading && <ArrowRight className="w-4 h-4 text-white/60 shrink-0" />}
-              </div>
-            </button>
-
-            {/* Bouton Élection Locale */}
-            <button
-              onClick={() => handleElectionRedirect('local')}
-              disabled={electionsLoading}
-              className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white bg-[#116917] border-[#116917] hover:bg-[#116917] hover:border-[#116917] ${
-                electionsLoading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-left flex-1">
-                  <h3 className="font-bold text-base leading-snug whitespace-normal">Élections Locales</h3>
-                  <p className="text-xs opacity-80 leading-snug whitespace-normal">Élection des conseils municipaux</p>
+                <div className="w-full p-4 rounded-lg border-2 bg-gray-600 animate-pulse">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-left flex-1">
+                      <div className="h-5 bg-gray-500 rounded mb-2 w-32"></div>
+                      <div className="h-4 bg-gray-500 rounded w-24"></div>
+                    </div>
+                  </div>
                 </div>
-                {!electionsLoading && <ArrowRight className="w-4 h-4 text-white/60 shrink-0" />}
               </div>
-            </button>
+            ) : elections.length === 0 ? (
+              <div className="text-center py-6">
+                <div className="w-12 h-12 mx-auto mb-3 bg-white/10 rounded-full flex items-center justify-center">
+                  <Vote className="w-6 h-6 text-white/60" />
+                </div>
+                <h3 className="text-white font-semibold mb-2 text-sm">Aucune élection disponible</h3>
+                <p className="text-blue-100 text-xs">Les élections seront bientôt disponibles.</p>
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto overflow-x-hidden space-y-3 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                {elections
+                  .sort((a, b) => new Date(b.election_date).getTime() - new Date(a.election_date).getTime())
+                  .map((election) => {
+                    const title = election.title?.toLowerCase() || '';
+                    const description = election.description?.toLowerCase() || '';
+                    const localisation = election.localisation?.toLowerCase() || '';
+                    
+                    const isLocal = ['locale', 'locales', 'local', 'municipale', 'municipales'].some(keyword =>
+                      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+                    );
+                    
+                    const isLegislative = ['législative', 'législatives', 'legislative'].some(keyword =>
+                      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+                    );
+                    
+                    const bgColor = isLocal ? 'bg-[#116917]' : isLegislative ? 'bg-[#A51C30]' : 'bg-blue-600';
+                    const borderColor = isLocal ? 'border-[#116917]' : isLegislative ? 'border-[#A51C30]' : 'border-blue-600';
+                    const hoverBgColor = isLocal ? 'hover:bg-[#116917]' : isLegislative ? 'hover:bg-[#A51C30]' : 'hover:bg-blue-600';
+                    const hoverBorderColor = isLocal ? 'hover:border-[#116917]' : isLegislative ? 'hover:border-[#A51C30]' : 'hover:border-blue-600';
+                    
+                    return (
+                      <button
+                        key={election.id}
+                        onClick={() => navigate(`/election/${election.id}/results`)}
+                        className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white ${bgColor} ${borderColor} ${hoverBgColor} ${hoverBorderColor}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-left flex-1">
+                            <h3 className="font-bold text-base leading-snug whitespace-normal">{election.title}</h3>
+                            {election.localisation && (
+                              <p className="text-xs opacity-60 mt-1 leading-snug whitespace-normal">{election.localisation}</p>
+                            )}
+                          </div>
+                          <ArrowRight className="w-4 h-4 text-white/60 shrink-0" />
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
           </div>
 
           {/* Avantages de la plateforme mobile */}

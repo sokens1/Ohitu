@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchElectionById, fetchAllElections } from '../api/elections';
 import { fetchElectionSummary, fetchCenterSummary, fetchBureauSummary, fetchCenterSummaryByCandidate, fetchBureauSummaryByCandidate } from '../api/results';
@@ -42,6 +42,7 @@ interface CandidateResult {
 interface ElectionResults {
   election: ElectionData | null;
   total_voters: number;
+  total_voters_election?: number; // Nombre total d'inscrits de l'élection
   total_votes_cast: number;
   participation_rate: number;
   candidates: CandidateResult[];
@@ -255,6 +256,9 @@ const ElectionResults: React.FC = () => {
   const [bureauxAvecResultats, setBureauxAvecResultats] = useState<number>(0);
   const [mobileRetryCount, setMobileRetryCount] = useState<number>(0);
   const [isDataEstimated, setIsDataEstimated] = useState<boolean>(false);
+  
+  // État pour stocker les IDs des bureaux avec PV publiés
+  const [publishedBureauIds, setPublishedBureauIds] = useState<Set<string>>(new Set());
 
   // Fonctions pour vérifier la présence de données
   const hasCenterData = () => {
@@ -310,33 +314,8 @@ const ElectionResults: React.FC = () => {
             console.log('🔍 ✅ Nombre total récupéré depuis elections:', totalBureauxCount, 'champ utilisé:', Object.keys(electionData).find(key => electionData[key] === nbBureaux));
           } else {
             console.log('🔍 ❌ Aucun champ nb_bureaux trouvé dans elections. Champs disponibles:', Object.keys(electionData));
-
-            // Méthode spéciale : essayer de déduire depuis le titre ou la description
-            const title = electionData.title || '';
-            const description = electionData.description || '';
-            const titleLower = title.toLowerCase();
-            const descLower = description.toLowerCase();
-
-            const isLocalElection = titleLower.includes('locale') || titleLower.includes('municipale') ||
-              descLower.includes('locale') || descLower.includes('municipale');
-            const isLegislativeElection = titleLower.includes('législative') || titleLower.includes('legislative') ||
-              titleLower.includes('législatives') || titleLower.includes('legislatives') ||
-              descLower.includes('législative') || descLower.includes('legislative') ||
-              descLower.includes('législatives') || descLower.includes('legislatives');
-
-            console.log('🔍 Analyse du titre:', title, 'isLocal:', isLocalElection, 'isLegislative:', isLegislativeElection);
-
-            if (isLocalElection) {
-              // Pour les élections locales, utiliser 29 comme estimation réaliste
-              totalBureauxCount = 29;
-              isEstimated = false;
-              console.log('🔍 ✅ Estimation pour élection locale:', totalBureauxCount);
-            } else if (isLegislativeElection) {
-              // Pour les élections législatives, utiliser 35 comme estimation réaliste
-              totalBureauxCount = 35;
-              isEstimated = false;
-              console.log('🔍 ✅ Estimation pour élection législative:', totalBureauxCount);
-            }
+            // Au lieu d'estimer, utiliser la méthode directe
+            console.log('🔍 Passage directement à la méthode 2 (base de données réelle)');
           }
         } else {
           console.log('🔍 ❌ Erreur lors de la récupération de l\'élection:', electionError);
@@ -345,31 +324,10 @@ const ElectionResults: React.FC = () => {
         console.log('🔍 Erreur méthode 1:', error);
       }
 
-      // Méthode 2: Si la méthode 1 échoue, essayer la méthode directe
+      // Méthode 2: Récupération directe depuis la base via election_centers (MÉTHODE PRINCIPALE)
       if (totalBureauxCount === 0) {
         try {
-          console.log('🔍 Méthode 2: Récupération directe depuis voting_bureaux...');
-          const response = await supabase
-            .from('voting_bureaux')
-            .select('id, election_id, center_id')
-            .eq('election_id', electionId);
-
-          if (!response.error && response.data) {
-            totalBureauxCount = response.data.length;
-            isEstimated = false;
-            console.log('🔍 ✅ Nombre total récupéré depuis voting_bureaux:', totalBureauxCount);
-          } else {
-            console.log('🔍 ❌ Erreur méthode 2:', response.error);
-          }
-        } catch (error) {
-          console.log('🔍 Erreur méthode 2:', error);
-        }
-      }
-
-      // Méthode 3: Si les méthodes précédentes échouent, essayer via election_centers
-      if (totalBureauxCount === 0) {
-        try {
-          console.log('🔍 Méthode 3: Récupération via election_centers...');
+          console.log('🔍 Méthode 2: Récupération via election_centers + voting_bureaux...');
 
           const { data: electionCenters, error: ecError } = await supabase
             .from('election_centers')
@@ -381,24 +339,53 @@ const ElectionResults: React.FC = () => {
             console.log('🔍 centerIds trouvés:', centerIds);
 
             // Récupérer les bureaux de ces centres
-            const { data: bureauxDataFallback, error: bureauxErrorFallback } = await supabase
+            const { data: bureauxData, error: bureauxError } = await supabase
               .from('voting_bureaux')
               .select('id, center_id')
               .in('center_id', centerIds);
 
-            if (!bureauxErrorFallback && bureauxDataFallback) {
-              totalBureauxCount = bureauxDataFallback.length;
+            if (!bureauxError && bureauxData) {
+              totalBureauxCount = bureauxData.length;
               isEstimated = false;
-              console.log('🔍 ✅ Nombre total récupéré via election_centers:', totalBureauxCount);
+              console.log('🔍 ✅ Nombre total récupéré via election_centers:', totalBureauxCount, 'bureaux');
             } else {
-              console.log('🔍 ❌ Erreur méthode 3:', bureauxErrorFallback);
+              console.log('🔍 ❌ Erreur méthode 2:', bureauxError);
             }
           } else {
             console.log('🔍 ❌ Aucun centre trouvé pour cette élection:', ecError);
           }
         } catch (error) {
+          console.log('🔍 Erreur méthode 2:', error);
+        }
+      }
+
+      // Méthode 3: Dernière tentative avec requête directe (si les autres méthodes échouent)
+      if (totalBureauxCount === 0) {
+        try {
+          console.log('🔍 Méthode 3: Récupération directe depuis voting_bureaux...');
+          const response = await supabase
+            .from('voting_bureaux')
+            .select('id, election_id, center_id')
+            .eq('election_id', electionId);
+
+          if (!response.error && response.data) {
+            totalBureauxCount = response.data.length;
+            isEstimated = false;
+            console.log('🔍 ✅ Nombre total récupéré depuis voting_bureaux:', totalBureauxCount);
+          } else {
+            console.log('🔍 ❌ Erreur méthode 3:', response.error);
+          }
+        } catch (error) {
           console.log('🔍 Erreur méthode 3:', error);
         }
+      }
+
+      // Méthode 4: Estimation seulement si vraiment nécessaire (supprimer l'estimation automatique)
+      if (totalBureauxCount === 0) {
+        console.log('🔍 Aucune donnée trouvée dans la base. Utilisation d\'une estimation par défaut.');
+        // Ne plus utiliser d'estimation automatique - laisser à 0
+        totalBureauxCount = 0;
+        isEstimated = false;
       }
 
       // Vérifier le résultat final
@@ -416,6 +403,8 @@ const ElectionResults: React.FC = () => {
 
       console.log('🔍 avecResultats:', avecResultats);
       console.log('🔍 bureauRows.length:', bureauRows.length);
+      console.log('🔍 Élection ID:', electionId);
+      console.log('🔍 Bureaux avec données:', bureauRows.filter(b => b.total_voters > 0).map(b => ({ id: b.id, name: b.name, voters: b.total_voters })));
 
       setTotalBureaux(totalBureauxCount);
       setBureauxAvecResultats(avecResultats);
@@ -577,36 +566,242 @@ const ElectionResults: React.FC = () => {
         throw new Error('Élection non trouvée');
       }
 
-      // Récupérer les résultats depuis election_result_summary
-      // Utilise le service de résultats
-      const [summaryData, centers, bureaux] = await Promise.all([
-        fetchElectionSummary(id),
-        fetchCenterSummary(id),
-        fetchBureauSummary(id)
-      ]);
+      // Vérifier si l'élection est publiée
+      if (!election.is_published) {
+        console.log('⚠️ Élection non publiée - Aucun résultat affiché');
+        setPublishedBureauIds(new Set());
+        setResults({
+          election,
+          total_voters: 0,
+          total_voters_election: election.nb_electeurs || 0,
+          total_votes_cast: 0,
+          participation_rate: 0,
+          candidates: [],
+          last_updated: new Date().toISOString()
+        });
+        setCenterRows([]);
+        setBureauRows([]);
+        setLoading(false);
+        return;
+      }
 
-      // Calculer les totaux globaux à partir des tableaux de bureaux (plus fiable)
-      const votersSum = (bureaux || []).reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
-      const expressedSum = (bureaux || []).reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
+      console.log('✅ Élection publiée - Chargement des résultats');
+
+      // Récupérer UNIQUEMENT les PV avec statut 'published'
+      const { data: publishedPVs, error: pvError } = await supabase
+        .from('procès_verbaux')
+        .select('bureau_id, id, status')
+        .eq('election_id', id)
+        .eq('status', 'published');
+
+      if (pvError) {
+        console.error('❌ Erreur lors de la récupération des PV publiés:', pvError);
+      }
+
+      console.log('🔍 [ElectionResults] PV récupérés:', publishedPVs);
+      console.log('🔍 [ElectionResults] Election ID recherché:', id);
+
+      const publishedBureauIdsSet = new Set((publishedPVs || []).map(pv => pv.bureau_id));
+      setPublishedBureauIds(publishedBureauIdsSet);
+      console.log('📊 [ElectionResults] Nombre de PV publiés:', publishedBureauIdsSet.size);
+      console.log('📊 [ElectionResults] IDs des bureaux publiés:', Array.from(publishedBureauIdsSet));
+
+      // Si aucun PV publié, afficher des résultats vides
+      if (publishedBureauIdsSet.size === 0) {
+        console.log('⚠️ Aucun PV publié - Affichage de résultats vides');
+        
+        // Calculer quand même le vrai total d'inscrits pour l'affichage
+        const { data: electionCenters } = await supabase
+          .from('election_centers')
+          .select('center_id')
+          .eq('election_id', id);
+
+        let allBureauxRegistered = 0;
+        if (electionCenters && electionCenters.length > 0) {
+          const centerIds = electionCenters.map(ec => ec.center_id);
+          const { data: allBureauxData } = await supabase
+            .from('voting_bureaux')
+            .select('registered_voters')
+            .in('center_id', centerIds);
+
+          if (allBureauxData) {
+            allBureauxRegistered = allBureauxData.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
+          }
+        }
+        
+        setResults({
+          election,
+          total_voters: 0,
+          total_voters_election: allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0),
+          total_votes_cast: 0,
+          participation_rate: 0,
+          candidates: [],
+          last_updated: new Date().toISOString()
+        });
+        setCenterRows([]);
+        setBureauRows([]);
+        setLoading(false);
+        return;
+      }
+
+      // Récupérer TOUS les bureaux de l'élection pour calculer le vrai total d'inscrits
+      const { data: electionCenters, error: centersError } = await supabase
+        .from('election_centers')
+        .select('center_id')
+        .eq('election_id', id);
+
+      let allBureauxRegistered = 0;
+      if (electionCenters && electionCenters.length > 0) {
+        const centerIds = electionCenters.map(ec => ec.center_id);
+        const { data: allBureauxData, error: bureauxError } = await supabase
+          .from('voting_bureaux')
+          .select('registered_voters')
+          .in('center_id', centerIds);
+
+        if (allBureauxData) {
+          allBureauxRegistered = allBureauxData.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
+        }
+      }
+
+      console.log('📊 [ElectionResults] Total inscrits calculé depuis TOUS les bureaux:', allBureauxRegistered);
+
+      // Récupérer les données DIRECTEMENT depuis les PV publiés
+      const publishedPVIds = (publishedPVs || []).map(pv => pv.id);
+      
+      // 1. Récupérer les données des PV publiés
+      const { data: pvsData, error: pvsDataError } = await supabase
+        .from('procès_verbaux')
+        .select(`
+          id,
+          bureau_id,
+          total_registered,
+          total_voters,
+          votes_expressed,
+          null_votes,
+          voting_bureaux!inner(id, name, center_id, registered_voters)
+        `)
+        .in('id', publishedPVIds);
+
+      if (pvsDataError) {
+        console.error('❌ Erreur chargement PV:', pvsDataError);
+      }
+
+      console.log('📊 [ElectionResults] PV data chargés:', pvsData);
+      
+      // Récupérer les noms des centres
+      const centerIds = [...new Set((pvsData || []).map((pv: any) => pv.voting_bureaux?.center_id).filter(Boolean))];
+      const { data: centersNamesData } = await supabase
+        .from('voting_centers')
+        .select('id, name')
+        .in('id', centerIds);
+      
+      const centerNamesMap = new Map((centersNamesData || []).map((c: any) => [c.id, c.name]));
+
+      // 2. Récupérer les résultats des candidats pour ces PV
+      const { data: candidateResultsData, error: crError } = await supabase
+        .from('candidate_results')
+        .select(`
+          pv_id,
+          candidate_id,
+          votes,
+          candidates!inner(id, name, party)
+        `)
+        .in('pv_id', publishedPVIds);
+
+      if (crError) {
+        console.error('❌ Erreur chargement résultats candidats:', crError);
+      }
+
+      console.log('📊 [ElectionResults] Résultats candidats chargés:', candidateResultsData);
+
+      // Construire les données des bureaux
+      const filteredBureaux = (pvsData || []).map((pv: any) => ({
+        bureau_id: pv.bureau_id,
+        bureau_name: pv.voting_bureaux?.name || '',
+        center_id: pv.voting_bureaux?.center_id || '',
+        total_registered: Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0,
+        total_voters: Number(pv.total_voters) || 0,
+        total_expressed_votes: Number(pv.votes_expressed) || 0,
+        total_null_votes: Number(pv.null_votes) || 0,
+        participation_pct: Number(pv.total_registered) > 0 ? (Number(pv.total_voters) / Number(pv.total_registered)) * 100 : 0
+      }));
+
+      // Construire les données des centres (agrégées par center_id)
+      const centersMap = new Map();
+      filteredBureaux.forEach((b: any) => {
+        if (!centersMap.has(b.center_id)) {
+          centersMap.set(b.center_id, {
+            center_id: b.center_id,
+            center_name: centerNamesMap.get(b.center_id) || '',
+            total_registered: 0,
+            total_voters: 0,
+            total_expressed_votes: 0,
+            total_null_votes: 0
+          });
+        }
+        const center = centersMap.get(b.center_id);
+        center.total_registered += b.total_registered;
+        center.total_voters += b.total_voters;
+        center.total_expressed_votes += b.total_expressed_votes;
+        center.total_null_votes += b.total_null_votes;
+        center.participation_pct = center.total_registered > 0 ? (center.total_voters / center.total_registered) * 100 : 0;
+      });
+
+      const filteredCenters = Array.from(centersMap.values());
+
+      console.log('📊 [ElectionResults] Bureaux construits:', filteredBureaux.length);
+      console.log('📊 [ElectionResults] Centres construits:', filteredCenters.length);
+
+      // Agréger les votes par candidat
+      const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number }>();
+      (candidateResultsData || []).forEach((cr: any) => {
+        const existing = candidateVotesMap.get(cr.candidate_id) || {
+          candidate_id: cr.candidate_id,
+          candidate_name: cr.candidates?.name || '',
+          party: cr.candidates?.party || '',
+          total_votes: 0
+        };
+        existing.total_votes += Number(cr.votes) || 0;
+        candidateVotesMap.set(cr.candidate_id, existing);
+      });
+
+      const filteredSummaryData = Array.from(candidateVotesMap.values());
+
+      // Calculer les totaux globaux
+      const votersSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
+      const expressedSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
+      const registeredInBureauxWithResults = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
 
       // Totaux affichés en tête
       const totalVotesCast = expressedSum; // bulletins exprimés
-      const totalRegistered = election.nb_electeurs || 0; // Utiliser le nombre d'inscrits de l'élection par défaut
+      const totalRegistered = registeredInBureauxWithResults; // Inscrits des bureaux dépouillés
+      const totalRegisteredElection = allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0); // Total réel de TOUS les bureaux
       const participationRate = totalRegistered > 0 ? Math.min(Math.max((votersSum / totalRegistered) * 100, 0), 100) : 0;
 
-      setCenterRows(centers || []);
-      setBureauRows(bureaux || []);
+      console.log('📊 [ElectionResults] Election data:', election);
+      console.log('📊 [ElectionResults] election.nb_electeurs (BDD):', election.nb_electeurs);
+      console.log('📊 [ElectionResults] Total inscrits TOUS bureaux (calculé):', allBureauxRegistered);
+      console.log('📊 [ElectionResults] Inscrits bureaux avec résultats (totalRegistered):', totalRegistered);
+      console.log('📊 [ElectionResults] Inscrits total élection (totalRegisteredElection):', totalRegisteredElection);
+      console.log('📊 [ElectionResults] Votants:', votersSum);
+      console.log('📊 [ElectionResults] Taux participation:', participationRate.toFixed(2) + '%');
+      console.log('📊 [ElectionResults] Taux abstention:', (100 - participationRate).toFixed(2) + '%');
+
+      // Utiliser les données filtrées (uniquement bureaux publiés)
+      setCenterRows(filteredCenters);
+      setBureauRows(filteredBureaux);
 
       setResults({
         election,
         total_voters: totalRegistered,
+        total_voters_election: totalRegisteredElection, // Ajouter le total pour affichage
         total_votes_cast: totalVotesCast,
         participation_rate: participationRate,
-        candidates: (summaryData || [])
+        candidates: filteredSummaryData
           .map((c: any) => ({
             candidate_id: c.candidate_id,
             candidate_name: c.candidate_name,
-            party_name: c.candidate_party ?? c.party ?? '',
+            party_name: c.party || '',
             total_votes: c.total_votes || 0,
             percentage: totalVotesCast > 0 ? (100 * (c.total_votes || 0)) / totalVotesCast : 0,
             rank: 0
@@ -910,14 +1105,90 @@ const ElectionResults: React.FC = () => {
   const handleOpenCandidate = async (candidateId: string) => {
     setOpenCandidateId(candidateId);
     if (results?.election) {
-      const [centers, bureaux] = await Promise.all([
-        fetchCenterSummaryByCandidate(results.election.id, candidateId),
-        fetchBureauSummaryByCandidate(results.election.id, candidateId)
-      ]);
-      setCandidateCenters(centers || []);
-      setCandidateBureaux(bureaux || []);
+      // Récupérer les PV publiés
+      const { data: publishedPVs } = await supabase
+        .from('procès_verbaux')
+        .select('id, bureau_id')
+        .eq('election_id', results.election.id)
+        .eq('status', 'published');
+
+      const publishedPVIds = (publishedPVs || []).map(pv => pv.id);
+      const publishedBureauIdsForModal = new Set((publishedPVs || []).map(pv => pv.bureau_id));
+
+      if (publishedPVIds.length === 0) {
+        setCandidateCenters([]);
+        setCandidateBureaux([]);
+        return;
+      }
+
+      // Récupérer les résultats du candidat pour les PV publiés
+      const { data: candidateResults } = await supabase
+        .from('candidate_results')
+        .select(`
+          pv_id,
+          votes,
+          procès_verbaux!inner(
+            id,
+            bureau_id,
+            total_registered,
+            total_voters,
+            votes_expressed,
+            voting_bureaux!inner(id, name, center_id, registered_voters)
+          )
+        `)
+        .in('pv_id', publishedPVIds)
+        .eq('candidate_id', candidateId);
+
+      console.log('📊 Modal candidat - Résultats bruts:', candidateResults);
+
+      // Construire les données des bureaux
+      const filteredBureaux = (candidateResults || []).map((cr: any) => {
+        const pv = cr.procès_verbaux;
+        const bureau = pv?.voting_bureaux;
+        return {
+          bureau_id: pv?.bureau_id,
+          bureau_name: bureau?.name || '',
+          center_id: bureau?.center_id || '',
+          candidate_votes: Number(cr.votes) || 0,
+          candidate_percentage: Number(pv?.votes_expressed) > 0 ? (Number(cr.votes) / Number(pv.votes_expressed)) * 100 : 0,
+          candidate_participation_pct: Number(pv?.total_registered) > 0 ? (Number(pv?.total_voters) / Number(pv?.total_registered)) * 100 : 0
+        };
+      });
+
+      // Récupérer les noms des centres
+      const centerIdsForModal = [...new Set(filteredBureaux.map(b => b.center_id).filter(Boolean))];
+      const { data: centersNamesForModal } = await supabase
+        .from('voting_centers')
+        .select('id, name')
+        .in('id', centerIdsForModal);
+      
+      const centerNamesMapForModal = new Map((centersNamesForModal || []).map((c: any) => [c.id, c.name]));
+
+      // Agréger par centre
+      const centersMap = new Map();
+      filteredBureaux.forEach((b: any) => {
+        if (!centersMap.has(b.center_id)) {
+          centersMap.set(b.center_id, {
+            center_id: b.center_id,
+            center_name: centerNamesMapForModal.get(b.center_id) || '',
+            candidate_votes: 0,
+            total_votes: 0,
+            candidate_percentage: 0
+          });
+        }
+        const center = centersMap.get(b.center_id);
+        center.candidate_votes += b.candidate_votes;
+      });
+
+      const filteredCenters = Array.from(centersMap.values());
+      
+      console.log('📊 Modal candidat - Bureaux filtrés:', filteredBureaux.length);
+      console.log('📊 Modal candidat - Centres filtrés:', filteredCenters.length);
+      
+      setCandidateCenters(filteredCenters);
+      setCandidateBureaux(filteredBureaux);
       const nameMap: Record<string, string> = {};
-      (centers || []).forEach((c: any) => { if (c.center_id && c.center_name) nameMap[c.center_id] = c.center_name; });
+      filteredCenters.forEach((c: any) => { if (c.center_id && c.center_name) nameMap[c.center_id] = c.center_name; });
       setCandidateCenterNameById(nameMap);
     }
   };
@@ -1197,16 +1468,17 @@ const ElectionResults: React.FC = () => {
         </section>
 
         {/* Statistiques principales modernisées */}
+        {results?.election?.is_published && (
         <section id="statistiques" className="bg-gradient-to-br from-gray-50 to-gray-100 py-6 sm:py-8 lg:py-12 xl:py-16 -mt-2 sm:-mt-4 lg:-mt-6 xl:-mt-8 relative z-10">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
               <MetricCard
                 title="Électeurs inscrits"
-                value={results.total_voters}
+                value={results.total_voters_election || 0}
                 icon={<Users className="w-8 h-8" />}
                 color="bg-gradient-to-br from-blue-500 to-blue-600"
-                subtitle="Citoyens éligibles au vote"
+                subtitle={`Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()}`}
                 animated={true}
               />
               <MetricCard
@@ -1217,20 +1489,55 @@ const ElectionResults: React.FC = () => {
                 subtitle="Votes comptabilisés"
                 animated={true}
               />
+              {results.total_voters > 0 ? (
               <MetricCard
                 title="Taux d'abstention"
                 value={typeof results.participation_rate === 'number' ? 100 - results.participation_rate : 0}
                 icon={<div className="w-8 h-8 bg-white rounded-full flex items-center justify-center"><span className="text-blue-600 font-bold text-lg">%</span></div>}
-                color="bg-gradient-to-br from-purple-500 to-purple-600"
+                color="bg-gradient-to-br from-red-500 to-red-600"
                 subtitle="Pourcentage d'abstention"
                 animated={true}
                 showDecimals={true}
               />
+              ) : (
+                <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 flex flex-col items-center justify-center">
+                  <div className="w-16 h-16 mb-3 bg-gray-100 rounded-full flex items-center justify-center">
+                    <Clock className="w-8 h-8 text-gray-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-700 mb-1">Taux d'abstention</h3>
+                  <p className="text-sm text-gray-500 text-center">Sera calculé après publication des premiers résultats</p>
+                </div>
+              )}
             </div>
           </div>
         </section>
+        )}
+
+        {/* Message si élection non publiée */}
+        {results?.election && !results.election.is_published && (
+          <section className="py-12 sm:py-16 lg:py-24 bg-gradient-to-br from-gray-50 to-gray-100">
+            <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="max-w-2xl mx-auto text-center">
+                <div className="w-24 h-24 mx-auto mb-6 bg-blue-100 rounded-full flex items-center justify-center">
+                  <Clock className="w-12 h-12 text-blue-600" />
+                </div>
+                <h2 className="text-3xl font-bold text-gray-900 mb-4">Résultats en cours de traitement</h2>
+                <p className="text-lg text-gray-600 mb-6">
+                  Les résultats de cette élection ne sont pas encore publiés publiquement.
+                </p>
+                <div className="bg-white p-6 rounded-lg shadow-sm border">
+                  <p className="text-sm text-gray-700">
+                    Les opérations de dépouillement et de validation sont en cours. 
+                    Les résultats seront publiés dès que le processus de validation sera terminé.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Section Couverture des bureaux - Version dynamique */}
+        {results?.election?.is_published && (
         <section className="py-6 sm:py-8 lg:py-12 bg-gray-50">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center">
@@ -1500,11 +1807,10 @@ const ElectionResults: React.FC = () => {
                       console.log('🔍 Utilisation du vrai total:', displayTotal);
                     }
 
-                    const bureauxAvecResultats = bureauRows.filter(bureau =>
-                      bureau.total_voters > 0 || bureau.total_registered > 0 || bureau.total_expressed_votes > 0
-                    ).length;
+                    // Utiliser le nombre de PV publiés
+                    const bureauxAvecResultats = publishedBureauIds.size;
 
-                    const coveragePercentage = displayTotal > 0 ? Math.round((bureauxAvecResultats / displayTotal) * 100) : 0;
+                    const coveragePercentage = displayTotal > 0 ? Math.round((publishedBureauIds.size / displayTotal) * 100) : 0;
                     const isComplete = coveragePercentage >= 100;
                     const isRealData = totalFromRows || totalBureaux > 0;
 
@@ -1534,7 +1840,7 @@ const ElectionResults: React.FC = () => {
                           </div>
                           <div className="text-xs sm:text-sm text-gray-600">
                             {isRealData
-                              ? (isComplete ? "Tous les bureaux ont été traités" : "Après dépouillement")
+                              ? (isComplete ? "Tous les bureaux ont été publiés" : "PV publiés / Total bureaux")
                               : (
                                 <div className="flex items-center justify-center gap-2">
                                   <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
@@ -1585,16 +1891,15 @@ const ElectionResults: React.FC = () => {
                   }
                 }
 
-                const bureauxAvecResultats = bureauRows.filter(bureau =>
-                  bureau.total_voters > 0 || bureau.total_registered > 0 || bureau.total_expressed_votes > 0
-                ).length;
+                // Utiliser le nombre de PV publiés
+                const bureauxAvecResultats = publishedBureauIds.size;
 
                 // Logs pour debug mobile
-                console.log('🔍 Mobile Coverage Debug - totalBureaux:', totalBureaux, 'bureauRows.length:', bureauRows.length, 'totalBureauxCount:', totalBureauxCount, 'bureauxAvecResultats:', bureauxAvecResultats);
+                console.log('🔍 Mobile Coverage Debug - totalBureaux:', totalBureaux, 'bureauRows.length:', bureauRows.length, 'totalBureauxCount:', totalBureauxCount, 'PV publiés:', publishedBureauIds.size);
 
                 // Les données sont maintenant gérées par les useEffect
 
-                const coveragePercentage = totalBureauxCount > 0 ? Math.round((bureauxAvecResultats / totalBureauxCount) * 100) : 0;
+                const coveragePercentage = totalBureauxCount > 0 ? Math.round((publishedBureauIds.size / totalBureauxCount) * 100) : 0;
                 const isComplete = coveragePercentage >= 100;
 
                 const bgColor = isComplete
@@ -1625,8 +1930,8 @@ const ElectionResults: React.FC = () => {
                         {isDataEstimated
                           ? "Données estimées"
                           : isComplete
-                            ? "Tous les bureaux ont été traités"
-                            : "Après dépouillement"
+                            ? "Tous les bureaux ont été publiés"
+                            : "PV publiés / Total bureaux"
                         }
                       </div>
                     </div>
@@ -1636,8 +1941,10 @@ const ElectionResults: React.FC = () => {
             </div>
           </div>
         </section>
+        )}
 
         {/* Résultats des candidats modernisés */}
+        {results?.election?.is_published && (
         <section id="candidats" className="py-6 sm:py-8 lg:py-12 xl:py-16 bg-white">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-6 sm:mb-8 lg:mb-12">
@@ -1747,8 +2054,10 @@ const ElectionResults: React.FC = () => {
             )}
           </div>
         </section>
+        )}
 
         {/* Modal détail candidat */}
+        {results?.election?.is_published && (
         <Dialog open={!!openCandidateId} onOpenChange={(o) => !o && setOpenCandidateId(null)}>
           <DialogContent
             className="w-[min(28rem,calc(100vw-2rem))] sm:w-full sm:max-w-4xl lg:max-w-5xl max-h-[calc(100vh-2rem)] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6"
@@ -1914,8 +2223,10 @@ const ElectionResults: React.FC = () => {
             })()}
           </DialogContent>
         </Dialog>
+        )}
 
         {/* Vue détaillée par centre / par bureau modernisée */}
+        {results?.election?.is_published && (
         <section id="analyse" className="py-6 sm:py-8 lg:py-12 xl:py-16 bg-gradient-to-br from-gray-50 to-gray-100">
           {hasAnyDetailedData() ? (
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -2036,9 +2347,9 @@ const ElectionResults: React.FC = () => {
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
                               <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Abstention</div>
                               <div className={`font-bold text-xs sm:text-sm lg:text-lg ${typeof c.participation_pct === 'number'
-                                ? ((100 - c.participation_pct) > 65
+                                ? ((100 - c.participation_pct) >= 49.51
                                   ? 'text-red-600'
-                                  : ( (100 - c.participation_pct) < 65 && (100 - c.participation_pct) >= 30 ? 'text-yellow-600' : 'text-green-600'))
+                                  : (((100 - c.participation_pct) > 20.5 && (100 - c.participation_pct) <= 49.5) ? 'text-yellow-600' : 'text-green-600'))
                                 : 'text-green-600'}`}>
                                 {typeof c.participation_pct === 'number' ? `${(100 - Math.min(Math.max(c.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
                               </div>
@@ -2106,8 +2417,8 @@ const ElectionResults: React.FC = () => {
                                     <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_voters?.toLocaleString() ?? '-'}</td>
                                     <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_expressed_votes?.toLocaleString() ?? '-'}</td>
                                     <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
-                                      <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) > 65 ? 'bg-red-100 text-red-800' :
-                                        typeof b.participation_pct === 'number' && (100 - b.participation_pct) < 65 && (100 - b.participation_pct) >= 30 ? 'bg-yellow-100 text-yellow-800' :
+                                      <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
+                                        typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
                                           'bg-green-100 text-green-800'
                                         }`}>
                                         {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
@@ -2231,8 +2542,8 @@ const ElectionResults: React.FC = () => {
                               <span className="font-bold text-blue-600">{b.total_expressed_votes?.toLocaleString?.() || b.total_expressed_votes}</span>
                             </td>
                             <td className="px-2 py-2 text-right text-[8px] sm:text-xs">
-                              <span className={`px-1 py-0.5 rounded-full text-[8px] font-bold ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) > 65 ? 'bg-red-100 text-red-800' :
-                                typeof b.participation_pct === 'number' && (100 - b.participation_pct) < 65 && (100 - b.participation_pct) >= 30 ? 'bg-yellow-100 text-yellow-800' :
+                              <span className={`px-1 py-0.5 rounded-full text-[8px] font-bold ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
+                                typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
                                   'bg-green-100 text-green-800'
                                 }`}>
                                 {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : (b.participation_pct || '-')}
@@ -2328,65 +2639,98 @@ const ElectionResults: React.FC = () => {
             </div>
           )}
         </section>
+        )}
 
         {/* Nouvelle section : Analyse croisée */}
-        {results?.election?.id && (
+        {results?.election?.is_published && results?.election?.id && (
           <CrossAnalysisSection electionId={String(results.election.id)} />
         )}
 
         {/* Section de navigation vers autre élection */}
-        {getAlternativeElection() && (
+        {results?.election?.is_published && getAlternativeElection() && (
           <section className="py-6 sm:py-8 lg:py-12 bg-gray-50">
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex justify-center">
-                {(() => {
-                  const alt = getAlternativeElection()!;
-                  const altTitle = (alt.title || '').toLowerCase();
-                  const isAltLegislative = ['législative', 'législatives', 'legislative'].some(k => altTitle.includes(k));
-                  const currentType = isAltLegislative ? 'Législative' : 'Locale';
-                  const currentColor = isAltLegislative ? '#A51C30' : '#116917';
-                  const currentBgColor = isAltLegislative ? 'bg-[#A51C30]/10' : 'bg-[#116917]/10';
-                  const currentBorderColor = isAltLegislative ? 'border-[#A51C30]/30' : 'border-[#116917]/30';
-                  const currentTextColor = isAltLegislative ? 'text-[#A51C30]' : 'text-[#116917]';
-
-                  return (
-                    <div className={`max-w-md w-full ${currentBgColor} ${currentBorderColor} border-2 rounded-xl p-4 sm:p-6 shadow-lg hover:shadow-xl transition-all duration-300`}>
-                      <div className="text-center">
-                        <div className="flex items-center justify-center mb-2 sm:mb-3">
-                          <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center mr-2 sm:mr-3`} style={{ backgroundColor: currentColor }}>
-                            <ArrowRightLeft className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                          </div>
-                          <h3 className={`text-sm sm:text-base font-semibold ${currentTextColor}`}>
-                            Autres élections disponibles
-                          </h3>
-                        </div>
-                        <p className="text-gray-600 text-xs sm:text-sm mb-3 sm:mb-4">
-                          Consultez les résultats des élections {currentType.toLowerCase()}s
-                        </p>
-                        <Button
-                          onClick={() => handleElectionSwitch(alt.id)}
-                          disabled={electionsLoading}
-                          className={`w-full text-white font-semibold py-2 sm:py-3 px-4 sm:px-6 rounded-lg transition-all duration-300 hover:scale-105 shadow-md hover:shadow-lg`}
-                          style={{ backgroundColor: currentColor }}
-                          size="lg"
-                        >
-                          {electionsLoading ? (
-                            <div className="flex items-center justify-center">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                              <span>Chargement...</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center">
-                              <span>Voir Élections {currentType}s</span>
-                              <ArrowRightLeft className="w-4 h-4 ml-2" />
-                            </div>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })()}
+              <div className="text-center mb-6 sm:mb-8">
+                <div className="flex items-center justify-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                  <ArrowRightLeft className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-800">
+                    Autres élections disponibles
+                  </h2>
+                </div>
+                <p className="text-gray-600 text-sm sm:text-base">
+                  Consultez les résultats des autres élections
+                </p>
               </div>
+              
+              <div className="overflow-x-auto -mx-4 sm:-mx-6 lg:-mx-8">
+                <div className="flex gap-4 sm:gap-6 px-4 sm:px-6 lg:px-8 w-full justify-center">
+                  {availableElections
+                    .filter(election => election.id !== electionId)
+                    .sort((a, b) => new Date(b.election_date).getTime() - new Date(a.election_date).getTime())
+                    .map((election) => {
+                    const title = election.title?.toLowerCase() || '';
+                    const description = election.description?.toLowerCase() || '';
+                    const localisation = election.localisation?.toLowerCase() || '';
+                    
+                    const isLocal = ['locale', 'locales', 'local', 'municipale', 'municipales'].some(keyword =>
+                      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+                    );
+                    
+                    const isLegislative = ['législative', 'législatives', 'legislative'].some(keyword =>
+                      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+                    );
+                    
+                    const bgColor = isLocal ? 'bg-[#116917]' : isLegislative ? 'bg-[#A51C30]' : 'bg-blue-600';
+                    const borderColor = isLocal ? 'border-[#116917]' : isLegislative ? 'border-[#A51C30]' : 'border-blue-600';
+                    const hoverBgColor = isLocal ? 'hover:bg-[#116917]' : isLegislative ? 'hover:bg-[#A51C30]' : 'hover:bg-blue-600';
+                    const hoverBorderColor = isLocal ? 'hover:border-[#116917]' : isLegislative ? 'hover:border-[#A51C30]' : 'hover:border-blue-600';
+                    
+                    const typeLabel = isLocal ? 'Élections Locales' : isLegislative ? 'Élections Législatives' : 'Élection';
+                    const typeDescription = isLocal ? 'Élection des conseils municipaux' : isLegislative ? 'Élection des députés' : 'Élection générale';
+                    
+                    return (
+                      <div
+                        key={election.id}
+                        className={`bg-white rounded-lg border-2 ${borderColor} ${hoverBorderColor} p-4 sm:p-6 shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:scale-105 flex-shrink-0 w-64 sm:w-72`}
+                        onClick={() => handleElectionSwitch(election.id)}
+                      >
+                        <div className="text-center">
+                          <div className={`w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 rounded-full flex items-center justify-center ${bgColor}`}>
+                            <Vote className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                          </div>
+                          <h3 className="text-sm sm:text-base font-bold text-gray-800 mb-1 sm:mb-2 leading-tight">
+                            {election.title}
+                          </h3>
+                          {election.localisation && (
+                            <p className="text-xs text-gray-500 mb-3 sm:mb-4">
+                              {election.localisation}
+                            </p>
+                          )}
+                          <Button
+                            className={`w-full text-white font-semibold py-2 sm:py-3 px-3 sm:px-4 rounded-lg transition-all duration-300 ${bgColor} ${hoverBgColor}`}
+                            size="sm"
+                          >
+                            <div className="flex items-center justify-center gap-2">
+                              <span className="text-xs sm:text-sm">Voir les résultats</span>
+                              <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4" />
+                            </div>
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                    })}
+                </div>
+              </div>
+              
+              {availableElections.filter(election => election.id !== electionId).length === 0 && (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                    <Vote className="w-8 h-8 text-gray-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Aucune autre élection disponible</h3>
+                  <p className="text-gray-600 text-sm">Cette élection est la seule disponible pour le moment.</p>
+                </div>
+              )}
             </div>
           </section>
         )}
