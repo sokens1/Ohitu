@@ -58,37 +58,57 @@ const DashboardModernSimple = () => {
         setLoading(true);
 
         // 1. Statistiques des élections
-        const { data: electionsData } = await supabase
+        const { data: electionsData, error: electionsError } = await supabase
           .from('elections')
           .select('id, status, election_date, created_at');
 
-        const electionsByStatus = electionsData?.reduce((acc, election) => {
-          acc[election.status || 'À venir'] = (acc[election.status || 'À venir'] || 0) + 1;
+        if (electionsError) {
+          console.error('Erreur lors du chargement des élections:', electionsError);
+          throw electionsError;
+        }
+
+        // Normaliser les statuts et compter par statut
+        const electionsByStatus = (electionsData || []).reduce((acc, election) => {
+          // Normaliser le statut pour éviter les problèmes de casse
+          const normalizedStatus = election.status?.trim() || 'À venir';
+          acc[normalizedStatus] = (acc[normalizedStatus] || 0) + 1;
           return acc;
-        }, {} as { [key: string]: number }) || {};
+        }, {} as { [key: string]: number });
 
-        const upcomingElections = electionsData?.filter(e => 
-          new Date(e.election_date) > new Date()
-        ).length || 0;
+        // Compter les élections "À venir" (basé sur le statut, pas la date)
+        const upcomingElections = (electionsData || []).filter(e => {
+          const status = e.status?.trim() || '';
+          return status === 'À venir';
+        }).length;
 
-        const completedElections = electionsData?.filter(e => 
-          e.status === 'Terminée'
-        ).length || 0;
+        // Compter les élections "Terminées" (normaliser le statut)
+        const completedElections = (electionsData || []).filter(e => {
+          const status = e.status?.trim() || '';
+          return status === 'Terminée';
+        }).length;
 
         // 2. Statistiques des électeurs - Valeur d'une élection spécifique (la plus récente)
-        const { data: latestElection } = await supabase
+        const { data: latestElection, error: latestElectionError } = await supabase
           .from('elections')
           .select('nb_electeurs')
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle(); // Utiliser maybeSingle() au lieu de single() pour éviter les erreurs si aucune élection n'existe
+
+        if (latestElectionError) {
+          console.error('Erreur lors du chargement de la dernière élection:', latestElectionError);
+        }
 
         const totalVoters = latestElection?.nb_electeurs || 0;
 
         // Garder les données des électeurs pour d'autres usages si nécessaire
-        const { data: votersData } = await supabase
+        const { data: votersData, error: votersError } = await supabase
           .from('voters')
           .select('id, created_at');
+
+        if (votersError) {
+          console.error('Erreur lors du chargement des électeurs:', votersError);
+        }
 
         // 3. Infrastructure
         const { count: centersCount } = await supabase
@@ -114,7 +134,7 @@ const DashboardModernSimple = () => {
 
         setStats({
           elections: {
-            total: electionsData?.length || 0,
+            total: (electionsData || []).length,
             byStatus: electionsByStatus,
             upcoming: upcomingElections,
             completed: completedElections
