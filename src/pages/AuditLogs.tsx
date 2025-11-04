@@ -19,8 +19,11 @@ import {
   Activity,
   Shield,
   Clock,
-  TrendingUp
+  TrendingUp,
+  LayoutGrid,
+  List as ListIcon
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import auditService, { AuditAction, ResourceType, AuditLog } from '@/services/auditService';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -48,6 +51,9 @@ const AuditLogs = () => {
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
   const [totalLogs, setTotalLogs] = useState(0);
+  
+  // Mode de vue
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // Charger les logs et statistiques
   const loadLogs = async () => {
@@ -435,6 +441,31 @@ const AuditLogs = () => {
               <h2 className="text-lg sm:text-xl font-bold text-gray-900">
                 Logs d'audit ({totalLogs})
               </h2>
+              {/* Boutons de vue */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setViewMode('grid')}
+                  className={cn(
+                    "h-9 w-9 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors",
+                    viewMode === 'grid' && "bg-gov-blue/10 text-gov-blue hover:bg-gov-blue/20"
+                  )}
+                >
+                  <LayoutGrid className="h-4 w-4 sm:h-5 sm:w-5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setViewMode('list')}
+                  className={cn(
+                    "h-9 w-9 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors",
+                    viewMode === 'list' && "bg-gov-blue/10 text-gov-blue hover:bg-gov-blue/20"
+                  )}
+                >
+                  <ListIcon className="h-4 w-4 sm:h-5 sm:w-5" />
+                </Button>
+              </div>
             </div>
 
             {loading ? (
@@ -446,7 +477,79 @@ const AuditLogs = () => {
                 <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                 <p className="text-sm sm:text-base">Aucun log trouvé</p>
               </div>
+            ) : viewMode === 'list' ? (
+              /* Vue Liste */
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="text-left py-3 px-4 text-xs sm:text-sm font-semibold text-gray-700">Action</th>
+                      <th className="text-left py-3 px-4 text-xs sm:text-sm font-semibold text-gray-700">Utilisateur</th>
+                      <th className="text-left py-3 px-4 text-xs sm:text-sm font-semibold text-gray-700">Ressource</th>
+                      <th className="text-left py-3 px-4 text-xs sm:text-sm font-semibold text-gray-700">Description</th>
+                      <th className="text-left py-3 px-4 text-xs sm:text-sm font-semibold text-gray-700">Date</th>
+                      <th className="text-right py-3 px-4 text-xs sm:text-sm font-semibold text-gray-700">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map((log) => {
+                      const colors = getActionColor(log.action);
+                      return (
+                        <tr
+                          key={log.id}
+                          className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                          onClick={() => handleViewDetails(log)}
+                        >
+                          <td className="py-3 px-4">
+                            <Badge className={`${colors.bg} ${colors.text} ${colors.border} border text-xs`}>
+                              {log.action}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium text-gray-900">
+                                {log.user_name || log.user_email || 'Inconnu'}
+                              </span>
+                              {log.user_role && (
+                                <span className="text-xs text-gray-500 capitalize">{log.user_role}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-sm text-gray-700">
+                              {getResourceTypeLabel(log.resource_type)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="text-sm text-gray-600 line-clamp-1 max-w-xs">
+                              {log.description || `${log.action} sur ${getResourceTypeLabel(log.resource_type)}`}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-xs text-gray-500">
+                              {format(new Date(log.created_at), 'dd/MM/yyyy HH:mm', { locale: fr })}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewDetails(log);
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
+              /* Vue Grille (Carte) */
               <div className="space-y-2 sm:space-y-3">
                 {logs.map((log) => {
                   const colors = getActionColor(log.action);
@@ -536,74 +639,74 @@ const AuditLogs = () => {
           </CardContent>
         </Card>
 
-        {/* Dialog détails */}
+        {/* Dialog détails - Modernisé */}
         <Dialog open={showDetails} onOpenChange={setShowDetails}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Détails du log</DialogTitle>
+              <DialogTitle className="text-xl font-bold text-gray-900">Détails de l'action</DialogTitle>
             </DialogHeader>
             {selectedLog && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Action</label>
-                    <div className="mt-1">
-                      <Badge className={getActionColor(selectedLog.action).bg + ' ' + getActionColor(selectedLog.action).text}>
-                        {selectedLog.action}
-                      </Badge>
-                    </div>
+              <div className="space-y-6">
+                {/* Type d'action */}
+                <div className="flex items-center gap-3 pb-4 border-b border-gray-200">
+                  <div className={`p-2 rounded-lg ${getActionColor(selectedLog.action).bg}`}>
+                    <Activity className={`h-5 w-5 ${getActionColor(selectedLog.action).icon}`} />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-600">Type de ressource</label>
-                    <p className="text-sm mt-1">{getResourceTypeLabel(selectedLog.resource_type)}</p>
+                    <p className="text-sm font-medium text-gray-600">Type d'action</p>
+                    <Badge className={`${getActionColor(selectedLog.action).bg} ${getActionColor(selectedLog.action).text} ${getActionColor(selectedLog.action).border} border mt-1`}>
+                      {selectedLog.action}
+                    </Badge>
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Utilisateur</label>
-                    <p className="text-sm mt-1">{selectedLog.user_name || selectedLog.user_email || 'Inconnu'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Date</label>
-                    <p className="text-sm mt-1">
-                      {format(new Date(selectedLog.created_at), 'dd/MM/yyyy HH:mm:ss', { locale: fr })}
-                    </p>
-                  </div>
-                  {selectedLog.resource_id && (
-                    <div className="col-span-2">
-                      <label className="text-sm font-medium text-gray-600">ID de la ressource</label>
-                      <p className="text-sm font-mono mt-1 break-all">{selectedLog.resource_id}</p>
-                    </div>
-                  )}
-                  {selectedLog.ip_address && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Adresse IP</label>
-                      <p className="text-sm mt-1">{selectedLog.ip_address}</p>
-                    </div>
-                  )}
-                  {selectedLog.user_agent && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">User Agent</label>
-                      <p className="text-sm text-xs break-all mt-1">{selectedLog.user_agent}</p>
-                    </div>
-                  )}
                 </div>
 
-                {selectedLog.description && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Description</label>
-                    <p className="text-sm mt-1">{selectedLog.description}</p>
+                {/* Utilisateur */}
+                <div className="flex items-start gap-4 pb-4 border-b border-gray-200">
+                  <div className="p-2 bg-gray-100 rounded-full">
+                    <User className="h-5 w-5 text-gray-600" />
                   </div>
-                )}
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-600 mb-1">Utilisateur</p>
+                    <p className="text-base font-semibold text-gray-900">
+                      {selectedLog.user_name || selectedLog.user_email || 'Utilisateur inconnu'}
+                    </p>
+                    {selectedLog.user_email && (
+                      <p className="text-sm text-gray-500 mt-1">{selectedLog.user_email}</p>
+                    )}
+                    {selectedLog.user_role && (
+                      <Badge variant="outline" className="mt-2 capitalize">
+                        {selectedLog.user_role.replace('-', ' ')}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
 
-                {selectedLog.changes && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Changements</label>
-                    <div className="mt-2 p-4 bg-gray-50 rounded-lg">
-                      <pre className="text-xs overflow-x-auto">
-                        {JSON.stringify(selectedLog.changes, null, 2)}
-                      </pre>
+                {/* Description de l'action */}
+                <div className="pb-4 border-b border-gray-200">
+                  <div className="flex items-start gap-3">
+                    <FileText className="h-5 w-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-600 mb-2">Description</p>
+                      <p className="text-sm text-gray-900 leading-relaxed">
+                        {selectedLog.description || 
+                          `${selectedLog.action} effectué sur ${getResourceTypeLabel(selectedLog.resource_type)}`}
+                      </p>
                     </div>
                   </div>
-                )}
+                </div>
+
+                {/* Date */}
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-gray-100 rounded-full">
+                    <Calendar className="h-5 w-5 text-gray-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Date et heure</p>
+                    <p className="text-base font-semibold text-gray-900">
+                      {format(new Date(selectedLog.created_at), 'dd MMMM yyyy à HH:mm:ss', { locale: fr })}
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </DialogContent>

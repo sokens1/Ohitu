@@ -72,6 +72,7 @@ export interface AuditLog {
   // Champs supplémentaires pour l'affichage
   user_name?: string;
   user_email?: string;
+  user_role?: string;
 }
 
 /**
@@ -221,7 +222,8 @@ class AuditService {
           users:user_id (
             id,
             name,
-            email
+            email,
+            role
           )
         `)
         .order('created_at', { ascending: false });
@@ -279,6 +281,7 @@ class AuditService {
         created_at: log.created_at,
         user_name: log.users?.name || null,
         user_email: log.users?.email || null,
+        user_role: log.users?.role || null, // Ajout du rôle utilisateur
       }));
 
       return { data: transformedData, error: null };
