@@ -1,6 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import auditService from '@/services/auditService';
 
 export type UserRole = 'super-admin' | 'agent-saisie' | 'validateur' | 'observateur';
 
@@ -113,6 +114,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setUser(user);
         localStorage.setItem('ohitu-user', JSON.stringify(user));
+        
+        // Enregistrer la connexion dans l'audit
+        await auditService.log({
+          action: 'LOGIN',
+          resource_type: 'user',
+          resource_id: user.id,
+          description: `Connexion de ${user.name} (${user.email})`,
+          user_id: user.id,
+        });
+        
         return true;
       }
 
@@ -123,9 +134,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Enregistrer la déconnexion dans l'audit avant de supprimer l'utilisateur
+    if (user) {
+      await auditService.log({
+        action: 'LOGOUT',
+        resource_type: 'user',
+        resource_id: user.id,
+        description: `Déconnexion de ${user.name} (${user.email})`,
+        user_id: user.id,
+      });
+    }
+    
     setUser(null);
     localStorage.removeItem('ohitu-user');
+    await supabase.auth.signOut();
   };
 
   return (

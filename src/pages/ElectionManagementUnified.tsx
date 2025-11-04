@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useElectionState } from '@/hooks/useElectionState';
 import { Election, CreateElectionData } from '@/types/elections';
 import { validateCreateElection, formatValidationErrors } from '@/lib/validation/electionSchemas';
+import { useAudit } from '@/hooks/useAudit';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ const ElectionManagementUnified = () => {
     setFilters,
     setSearchQuery,
   } = useElectionState();
+  const { logCreate, logUpdate, logDelete, logExport } = useAudit();
 
   const [showWizard, setShowWizard] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -393,10 +395,10 @@ const ElectionManagementUnified = () => {
         throw new Error('ID de l\'élection manquant');
       }
 
-      // D'abord vérifier que l'élection existe
+      // D'abord vérifier que l'élection existe et récupérer les anciennes valeurs pour l'audit
       const { data: existingElection, error: fetchError } = await supabase
         .from('elections')
-        .select('id, title')
+        .select('*')
         .eq('id', editingElection.id)
         .single();
 
@@ -406,6 +408,16 @@ const ElectionManagementUnified = () => {
       }
 
       console.log('Élection trouvée:', existingElection);
+      
+      // Sauvegarder les anciennes valeurs pour l'audit
+      const oldValues = {
+        title: existingElection.title,
+        type: existingElection.type || existingElection.election_type,
+        election_date: existingElection.election_date,
+        status: existingElection.status,
+        description: existingElection.description,
+        nb_electeurs: existingElection.nb_electeurs,
+      };
 
       const { error } = await supabase
         .from('elections')
@@ -462,6 +474,15 @@ const ElectionManagementUnified = () => {
       // Recharger les données depuis la base de données
       await refreshElectionsData();
       
+      // Enregistrer dans l'audit
+      await logUpdate(
+        'election',
+        editingElection.id,
+        oldValues,
+        supabaseData,
+        `Modification de l'élection "${existingElection.title}"`
+      );
+      
       setShowEditModal(false);
       setEditingElection(null);
       toast.success('Élection modifiée avec succès');
@@ -477,7 +498,26 @@ const ElectionManagementUnified = () => {
     if (window.confirm('Êtes-vous sûr de vouloir supprimer cette élection ?')) {
       try {
         setLoading(true);
+        
+        // Récupérer les données de l'élection avant suppression pour l'audit
+        const { data: electionData } = await supabase
+          .from('elections')
+          .select('*')
+          .eq('id', electionId)
+          .single();
+        
         await deleteElection(electionId);
+        
+        // Enregistrer dans l'audit
+        if (electionData) {
+          await logDelete(
+            'election',
+            electionId,
+            `Suppression de l'élection "${electionData.title}"`,
+            electionData
+          );
+        }
+        
         toast.success('Élection supprimée avec succès');
       } catch (error) {
         console.error('Erreur lors de la suppression:', error);
@@ -507,7 +547,7 @@ const ElectionManagementUnified = () => {
     }
   };
 
-  const handleExportElection = (election: Election) => {
+  const handleExportElection = async (election: Election) => {
     const data = {
       title: election.title,
       type: election.type,
@@ -528,10 +568,17 @@ const ElectionManagementUnified = () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
+    // Enregistrer dans l'audit
+    await logExport(
+      'election',
+      `Export de l'élection "${election.title}"`,
+      election.id
+    );
+    
     toast.success('Élection exportée avec succès');
   };
 
-  const handleExportAllElections = () => {
+  const handleExportAllElections = async () => {
     const data = {
       elections: filteredElections.map(election => ({
         title: election.title,
@@ -555,6 +602,12 @@ const ElectionManagementUnified = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    
+    // Enregistrer dans l'audit
+    await logExport(
+      'election',
+      `Export de ${filteredElections.length} élection(s)`
+    );
     
     toast.success(`${filteredElections.length} élection(s) exportée(s) avec succès`);
   };
@@ -771,6 +824,14 @@ const ElectionManagementUnified = () => {
 
       // Recharger les données depuis la base de données
       await refreshElectionsData();
+      
+      // Enregistrer dans l'audit
+      await logCreate(
+        'election',
+        electionId,
+        `Création de l'élection "${electionData.title}" (${electionData.type})`,
+        { new_values: supabaseData }
+      );
       
       setShowWizard(false);
       toast.success('Élection créée avec succès');
