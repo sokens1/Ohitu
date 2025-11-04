@@ -27,8 +27,13 @@ import { cn } from '@/lib/utils';
 import auditService, { AuditAction, ResourceType, AuditLog } from '@/services/auditService';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { exportToExcel, exportToPDF } from '@/utils/exportUtils';
+import { toast } from 'sonner';
+import { FileSpreadsheet } from 'lucide-react';
+import { useAudit } from '@/hooks/useAudit';
 
 const AuditLogs = () => {
+  const { logExport } = useAudit();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
@@ -179,7 +184,7 @@ const AuditLogs = () => {
     return labels[type] || type;
   };
 
-  const handleExport = () => {
+  const handleExportJSON = () => {
     const data = {
       logs: logs.map(log => ({
         id: log.id,
@@ -209,6 +214,90 @@ const AuditLogs = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    toast.success('Export JSON réussi');
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      const exportData = logs.map(log => ({
+        'Date': format(new Date(log.created_at), 'dd/MM/yyyy HH:mm:ss', { locale: fr }),
+        'Action': log.action,
+        'Utilisateur': log.user_name || log.user_email || 'Inconnu',
+        'Rôle': log.user_role || 'N/A',
+        'Type de ressource': getResourceTypeLabel(log.resource_type),
+        'ID ressource': log.resource_id || 'N/A',
+        'Description': log.description || `${log.action} sur ${getResourceTypeLabel(log.resource_type)}`,
+        'Adresse IP': log.ip_address || 'N/A',
+      }));
+
+      const headers = [
+        { key: 'Date', label: 'Date' },
+        { key: 'Action', label: 'Action' },
+        { key: 'Utilisateur', label: 'Utilisateur' },
+        { key: 'Rôle', label: 'Rôle' },
+        { key: 'Type de ressource', label: 'Type de ressource' },
+        { key: 'ID ressource', label: 'ID ressource' },
+        { key: 'Description', label: 'Description' },
+        { key: 'Adresse IP', label: 'Adresse IP' },
+      ];
+
+      await exportToExcel(
+        exportData,
+        `audit-logs-${new Date().toISOString().split('T')[0]}`,
+        headers
+      );
+      
+      toast.success('Export Excel réussi');
+      
+      // Enregistrer dans l'audit
+      await logExport(
+        'activity_logs',
+        `Export Excel de ${logs.length} logs d'audit`
+      );
+    } catch (error) {
+      console.error('Erreur lors de l\'export Excel:', error);
+      toast.error('Erreur lors de l\'export Excel');
+    }
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      const exportData = logs.map(log => ({
+        'Date': format(new Date(log.created_at), 'dd/MM/yyyy HH:mm:ss', { locale: fr }),
+        'Action': log.action,
+        'Utilisateur': log.user_name || log.user_email || 'Inconnu',
+        'Rôle': log.user_role || 'N/A',
+        'Type de ressource': getResourceTypeLabel(log.resource_type),
+        'Description': log.description || `${log.action} sur ${getResourceTypeLabel(log.resource_type)}`,
+      }));
+
+      const headers = [
+        { key: 'Date', label: 'Date' },
+        { key: 'Action', label: 'Action' },
+        { key: 'Utilisateur', label: 'Utilisateur' },
+        { key: 'Rôle', label: 'Rôle' },
+        { key: 'Type de ressource', label: 'Type de ressource' },
+        { key: 'Description', label: 'Description' },
+      ];
+
+      await exportToPDF(
+        exportData,
+        `audit-logs-${new Date().toISOString().split('T')[0]}`,
+        headers,
+        `Rapport d'audit - ${new Date().toLocaleDateString('fr-FR')}`
+      );
+      
+      toast.success('Export PDF réussi');
+      
+      // Enregistrer dans l'audit
+      await logExport(
+        'activity_logs',
+        `Export PDF de ${logs.length} logs d'audit`
+      );
+    } catch (error) {
+      console.error('Erreur lors de l\'export PDF:', error);
+      toast.error('Erreur lors de l\'export PDF');
+    }
   };
 
   const handleViewDetails = (log: AuditLog) => {
@@ -254,16 +343,28 @@ const AuditLogs = () => {
                   <span className="hidden xs:inline">Actualiser</span>
                   <span className="xs:hidden">Actualiser</span>
                 </Button>
-                <Button 
-                  onClick={handleExport}
-                  variant="outline"
-                  className="shadow-lg hover:shadow-xl transition-all duration-300 w-full xs:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
-                  size="lg"
-                >
-                  <Download className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                  <span className="hidden xs:inline">Exporter</span>
-                  <span className="xs:hidden">Exporter</span>
-                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={handleExportExcel}
+                    variant="outline"
+                    className="shadow-lg hover:shadow-xl transition-all duration-300 bg-green-50 hover:bg-green-100 border-green-200 text-green-700 text-sm sm:text-base px-3 sm:px-4 py-2 sm:py-3"
+                    size="lg"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    <span className="hidden xs:inline">Excel</span>
+                    <span className="xs:hidden">XLS</span>
+                  </Button>
+                  <Button 
+                    onClick={handleExportPDF}
+                    variant="outline"
+                    className="shadow-lg hover:shadow-xl transition-all duration-300 bg-red-50 hover:bg-red-100 border-red-200 text-red-700 text-sm sm:text-base px-3 sm:px-4 py-2 sm:py-3"
+                    size="lg"
+                  >
+                    <FileText className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    <span className="hidden xs:inline">PDF</span>
+                    <span className="xs:hidden">PDF</span>
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

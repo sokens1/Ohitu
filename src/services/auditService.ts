@@ -30,7 +30,8 @@ export type ResourceType =
   | 'election_candidate'
   | 'election_center'
   | 'campaign_operation'
-  | 'notification';
+  | 'notification'
+  | 'activity_logs';
 
 /**
  * Interface pour les changements dans l'audit
