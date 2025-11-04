@@ -150,6 +150,36 @@ class AuditService {
         }
       }
 
+      // Générer une description personnalisée si aucune n'est fournie
+      let description = params.description;
+      if (!description) {
+        const { generateAuditDescription } = await import('@/utils/auditDescriptions');
+        
+        // Préparer les changements pour la génération de description
+        const changesForDescription = changesJson ? {
+          old_values: changesJson.old_values,
+          new_values: changesJson.new_values,
+          diff: changesJson.diff,
+        } : params.changes ? {
+          old_values: params.changes.old_values,
+          new_values: params.changes.new_values,
+        } : undefined;
+
+        description = await generateAuditDescription(
+          params.action,
+          params.resource_type,
+          {
+            resourceId: params.resource_id,
+            changes: changesForDescription,
+            deletedData: params.changes?.old_values,
+            userId: params.user_id,
+            userName: undefined, // Sera récupéré dans generateAuditDescription si nécessaire
+            userEmail: undefined, // Sera récupéré dans generateAuditDescription si nécessaire
+            date: new Date(),
+          }
+        );
+      }
+
       // Insérer dans la base de données
       // Note: La structure de la table doit correspondre à celle définie dans STRUCTURE_BD_COMPLETE.md
       // Utiliser entity_type et entity_id si la table utilise ces colonnes, sinon resource_type/resource_id
@@ -160,6 +190,7 @@ class AuditService {
           action: params.action,
           entity_type: params.resource_type, // Mapping resource_type -> entity_type
           entity_id: params.resource_id || null, // Mapping resource_id -> entity_id
+          description: description, // Description personnalisée
           details: changesJson as any, // JSONB - mapping changes -> details
           ip_address: ip_address,
           user_agent: user_agent,
