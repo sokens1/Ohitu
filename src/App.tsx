@@ -22,6 +22,7 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import VotingCenters from "./pages/VotingCenters";
 import Voters from "./pages/Voters";
+import AuditLogs from "./pages/AuditLogs";
 // Create QueryClient outside of component to avoid recreation on every render
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -51,6 +52,7 @@ const App = () => {
                   <Route path="/centers" element={<ProtectedRoute><VotingCenters /></ProtectedRoute>} />
                   <Route path="/voters" element={<ProtectedRoute><Voters /></ProtectedRoute>} />
                   <Route path="/users" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
+                  <Route path="/audit" element={<ProtectedRoute><AuditLogs /></ProtectedRoute>} />
                   <Route path="/results" element={<Results />} />
                   <Route path="/campaign" element={<CampaignManagement />} />
                   <Route path="/campaign/operation/:id" element={<OperationDetail />} />

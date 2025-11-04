@@ -18,7 +18,8 @@ import {
   Info,
   Check,
   Trash2,
-  IdCard
+  IdCard,
+  FileText
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
@@ -66,6 +67,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     // { icon: IdCard, label: 'Inscrits', path: '/voters' },
     { icon: BarChart3, label: 'Résultats', path: '/results' },
     { icon: Users, label: 'Gestion Utilisateurs', path: '/users' },
+    { icon: FileText, label: 'Piste d\'Audit', path: '/audit' },
     // { icon: Megaphone, label: 'Gestion Campagne', path: '/campaign' }, // Désactivé
     // { icon: MessageSquare, label: 'Conversations', path: '/conversations' }, // Désactivé
   ];
