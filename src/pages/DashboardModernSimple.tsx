@@ -99,16 +99,14 @@ const DashboardModernSimple = () => {
           console.error('Erreur lors du chargement de la dernière élection:', latestElectionError);
         }
 
-        const totalVoters = latestElection?.nb_electeurs || 0;
+        // Calculer le total d'électeurs depuis les bureaux de vote
+        const { data: bureauxData } = await supabase
+          .from('voting_bureaux')
+          .select('registered_voters');
 
-        // Garder les données des électeurs pour d'autres usages si nécessaire
-        const { data: votersData, error: votersError } = await supabase
-          .from('voters')
-          .select('id, created_at');
-
-        if (votersError) {
-          console.error('Erreur lors du chargement des électeurs:', votersError);
-        }
+        const totalVoters = (bureauxData || []).reduce((sum, bureau) => {
+          return sum + (Number(bureau.registered_voters) || 0);
+        }, 0);
 
         // 3. Infrastructure
         const { count: centersCount } = await supabase
@@ -141,7 +139,7 @@ const DashboardModernSimple = () => {
           },
           voters: {
             total: totalVoters,
-            registered: votersData?.length || 0,
+            registered: totalVoters,
             trend: 12.5 // Simulé
           },
           infrastructure: {

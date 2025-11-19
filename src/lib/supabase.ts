@@ -43,7 +43,7 @@ try {
       }
     }
   )
-  console.log('✅ Client Supabase créé avec succès!')
+  // console.log('✅ Client Supabase créé avec succès!')
 } catch (error) {
   console.error('❌ Erreur lors de la création du client Supabase:', error)
   throw error
