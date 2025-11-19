@@ -183,20 +183,20 @@ const Results = () => {
 
   return (
     <Layout>
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 sm:space-y-6 animate-fade-in">
         {/* En-tête avec sélecteur d'élection */}
-        <div className="space-y-4">
-          <h1 className="text-3xl font-bold text-gov-gray">Résultats</h1>
+        <div className="space-y-3 sm:space-y-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gov-gray">Résultats</h1>
           
           {/* Sélecteur d'élection */}
           <Card className="gov-card bg-blue-50 border-blue-200">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-4">
-                <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <label className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
                   Élection active :
                 </label>
                 <Select value={selectedElection} onValueChange={setSelectedElection}>
-                  <SelectTrigger className="w-80 bg-white">
+                  <SelectTrigger className="w-full sm:w-80 bg-white">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -216,38 +216,41 @@ const Results = () => {
         <Card className="gov-card">
           <CardContent className="p-0">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <div className="border-b">
+              <div className="border-b overflow-x-auto">
                 <TabsList className="grid w-full grid-cols-3 bg-transparent h-auto p-0">
                   <TabsTrigger 
                     value="entry" 
-                    className="flex items-center justify-center space-x-2 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50"
+                    className="flex items-center justify-center space-x-1 sm:space-x-2 py-3 sm:py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50 text-xs sm:text-sm"
                   >
-                    <FileText className="w-4 h-4" />
-                    <span>Saisir les résultats</span>
+                    <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span className="hidden sm:inline">Saisir les résultats</span>
+                    <span className="sm:hidden">Saisir</span>
                   </TabsTrigger>
                   <TabsTrigger 
                     value="validation" 
-                    className="flex items-center justify-center space-x-2 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50"
+                    className="flex items-center justify-center space-x-1 sm:space-x-2 py-3 sm:py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50 text-xs sm:text-sm"
                   >
-                    <FileCheck className="w-4 h-4" />
-                    <span>Valider les résultats</span>
+                    <FileCheck className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span className="hidden sm:inline">Valider les résultats</span>
+                    <span className="sm:hidden">Valider</span>
                     {globalStats.pvsEnAttente > 0 && (
-                      <Badge className="bg-red-500 text-white text-xs">
+                      <Badge className="bg-red-500 text-white text-xs ml-1">
                         {globalStats.pvsEnAttente}
                       </Badge>
                     )}
                   </TabsTrigger>
                   <TabsTrigger 
                     value="publish" 
-                    className="flex items-center justify-center space-x-2 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50"
+                    className="flex items-center justify-center space-x-1 sm:space-x-2 py-3 sm:py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50 text-xs sm:text-sm"
                   >
-                    <Upload className="w-4 h-4" />
-                    <span>Publier les résultats</span>
+                    <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span className="hidden sm:inline">Publier les résultats</span>
+                    <span className="sm:hidden">Publier</span>
                   </TabsTrigger>
                 </TabsList>
               </div>
 
-              <div className="p-6">
+              <div className="p-3 sm:p-4 lg:p-6">
                 <TabsContent value="entry" className="space-y-6 mt-0">
                   <DataEntrySection stats={globalStats} selectedElection={selectedElection} />
                 </TabsContent>
