@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -42,7 +43,7 @@ try {
       }
     }
   )
-  console.log('✅ Client Supabase créé avec succès!')
+  // console.log('✅ Client Supabase créé avec succès!')
 } catch (error) {
   console.error('❌ Erreur lors de la création du client Supabase:', error)
   throw error

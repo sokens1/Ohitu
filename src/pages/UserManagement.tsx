@@ -19,7 +19,9 @@ import {
   Eye,
   FileText,
   CheckCircle,
-  Mail
+  Mail,
+  Trash2,
+  AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -43,8 +45,13 @@ const UserManagement = () => {
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [creating, setCreating] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -248,6 +255,124 @@ const UserManagement = () => {
     }
   };
 
+  const handleEditUser = (user: User) => {
+    setEditingUser(user);
+    setNewName(user.name);
+    setNewEmail(user.email);
+    setNewRole(user.role);
+    setNewActive(user.isActive);
+    setNewPassword(''); // Le mot de passe reste vide, optionnel
+    setShowEditModal(true);
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+    
+    try {
+      if (!newName.trim() || !newEmail.trim()) {
+        toast.error('Nom et email sont requis');
+        return;
+      }
+      setUpdating(true);
+
+      // Mettre à jour dans la table users
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({
+          name: newName.trim(),
+          email: newEmail.trim(),
+          role: newRole,
+          is_active: newActive
+        })
+        .eq('id', editingUser.id);
+
+      if (updateError) {
+        console.error('Erreur lors de la mise à jour:', updateError);
+        toast.error('Échec de la mise à jour');
+        return;
+      }
+
+      // Si un nouveau mot de passe est fourni, le mettre à jour dans Auth
+      if (newPassword && newPassword.length >= 6) {
+        const { error: pwdError } = await supabase.auth.admin.updateUserById(
+          editingUser.id,
+          { password: newPassword }
+        );
+        if (pwdError) {
+          console.warn('Erreur mise à jour mot de passe (possible si pas admin):', pwdError);
+          toast.warning('Utilisateur mis à jour, mais le mot de passe n\'a pas pu être changé');
+        }
+      }
+
+      // Mettre à jour l'état local
+      setUsers(users.map(u => 
+        u.id === editingUser.id 
+          ? { 
+              ...u, 
+              name: newName.trim(), 
+              email: newEmail.trim(), 
+              role: newRole, 
+              isActive: newActive 
+            } 
+          : u
+      ));
+
+      toast.success('Utilisateur mis à jour avec succès');
+      setShowEditModal(false);
+      setEditingUser(null);
+      resetNewUserForm();
+    } catch (e) {
+      console.error(e);
+      toast.error('Erreur inattendue lors de la mise à jour');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+    
+    try {
+      setDeleting(true);
+
+      // Supprimer de la table users
+      const { error: deleteError } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', deletingUser.id);
+
+      if (deleteError) {
+        console.error('Erreur lors de la suppression:', deleteError);
+        toast.error('Échec de la suppression');
+        return;
+      }
+
+      // Supprimer de Auth (nécessite des privilèges admin)
+      try {
+        const { error: authDeleteError } = await supabase.auth.admin.deleteUser(
+          deletingUser.id
+        );
+        if (authDeleteError) {
+          console.warn('Erreur suppression Auth (possible si pas admin):', authDeleteError);
+        }
+      } catch (authError) {
+        console.warn('Impossible de supprimer l\'utilisateur Auth:', authError);
+      }
+
+      // Mettre à jour l'état local
+      setUsers(users.filter(u => u.id !== deletingUser.id));
+      
+      toast.success('Utilisateur supprimé avec succès');
+      setShowDeleteModal(false);
+      setDeletingUser(null);
+    } catch (e) {
+      console.error(e);
+      toast.error('Erreur inattendue lors de la suppression');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading) {
     return (
       <Layout>
@@ -265,23 +390,24 @@ const UserManagement = () => {
     <Layout>
       <div className="space-y-6 animate-fade-in">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Gestion des Utilisateurs</h1>
-            <p className="text-gray-600 mt-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Gestion des Utilisateurs</h1>
+            <p className="text-sm sm:text-base text-gray-600 mt-1">
               Gérez les comptes utilisateurs et leurs permissions
             </p>
           </div>
-          <Button onClick={() => setShowAddModal(true)}>
+          <Button onClick={() => setShowAddModal(true)} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
-            Ajouter un utilisateur
+            <span className="hidden sm:inline">Ajouter un utilisateur</span>
+            <span className="sm:hidden">Ajouter</span>
           </Button>
         </div>
 
         {/* Filters */}
         <Card>
-          <CardContent className="pt-6">
-            <div className="flex flex-col sm:flex-row gap-4">
+          <CardContent className="p-3 sm:p-4 lg:pt-6">
+            <div className="flex flex-col gap-3 sm:gap-4">
               <div className="flex-1">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -289,45 +415,47 @@ const UserManagement = () => {
                     placeholder="Rechercher par nom ou email..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm"
                   />
                 </div>
               </div>
-              <Select value={roleFilter} onValueChange={setRoleFilter}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Filtrer par rôle" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les rôles</SelectItem>
-                  <SelectItem value="super-admin">Super Admin</SelectItem>
-                  <SelectItem value="agent-saisie">Agent de Saisie</SelectItem>
-                  <SelectItem value="validateur">Validateur</SelectItem>
-                  <SelectItem value="observateur">Observateur</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Filtrer par statut" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les statuts</SelectItem>
-                  <SelectItem value="active">Actifs</SelectItem>
-                  <SelectItem value="inactive">Inactifs</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="grid grid-cols-2 gap-3 sm:flex sm:gap-4">
+                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                  <SelectTrigger className="w-full sm:w-48 text-xs sm:text-sm">
+                    <SelectValue placeholder="Rôle" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les rôles</SelectItem>
+                    <SelectItem value="super-admin">Super Admin</SelectItem>
+                    <SelectItem value="agent-saisie">Agent de Saisie</SelectItem>
+                    <SelectItem value="validateur">Validateur</SelectItem>
+                    <SelectItem value="observateur">Observateur</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full sm:w-48 text-xs sm:text-sm">
+                    <SelectValue placeholder="Statut" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les statuts</SelectItem>
+                    <SelectItem value="active">Actifs</SelectItem>
+                    <SelectItem value="inactive">Inactifs</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Users List */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
+          <CardHeader className="pb-3 sm:pb-6">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Users className="h-4 w-4 sm:h-5 sm:w-5" />
               Utilisateurs ({filteredUsers.length})
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-3 sm:p-6">
             {filteredUsers.length === 0 ? (
               <div className="text-center py-8">
                 <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -347,34 +475,40 @@ const UserManagement = () => {
                 )}
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 {filteredUsers.map((user) => (
                   <div
                     key={user.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-3 sm:p-4 border rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                        <span className="text-blue-600 font-semibold">
+                    {/* User Info */}
+                    <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                        <span className="text-blue-600 font-semibold text-sm sm:text-base">
                           {user.name.charAt(0).toUpperCase()}
                         </span>
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{user.name}</h3>
-                        <p className="text-sm text-gray-600">{user.email}</p>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-900 text-sm sm:text-base truncate">{user.name}</h3>
+                        <p className="text-xs sm:text-sm text-gray-600 truncate">{user.email}</p>
                         {user.assignedCenter && (
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-gray-500 truncate">
                             Centre: {user.assignedCenter}
                           </p>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <Badge variant={getRoleBadgeVariant(user.role)}>
+
+                    {/* Actions - Mobile & Desktop */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                      {/* Badge Role */}
+                      <Badge variant={getRoleBadgeVariant(user.role)} className="text-xs justify-center sm:justify-start">
                         {getRoleLabel(user.role)}
                       </Badge>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-600">
+
+                      {/* Status Toggle */}
+                      <div className="flex items-center justify-between sm:justify-start gap-2 py-2 sm:py-0">
+                        <span className="text-xs sm:text-sm text-gray-600">
                           {user.isActive ? 'Actif' : 'Inactif'}
                         </span>
                         <Switch
@@ -382,15 +516,39 @@ const UserManagement = () => {
                           onCheckedChange={() => handleToggleStatus(user.id, user.isActive)}
                         />
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button variant="ghost" size="sm">
-                          <Edit className="h-4 w-4" />
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-1 sm:gap-2">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="flex-1 sm:flex-none"
+                          onClick={() => handleEditUser(user)}
+                        >
+                          <Edit className="h-3 w-3 sm:h-4 sm:w-4" />
+                          <span className="ml-1 sm:hidden text-xs">Modifier</span>
                         </Button>
-                        <Button variant="ghost" size="sm">
-                          <Eye className="h-4 w-4" />
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="flex-1 sm:flex-none"
+                          onClick={() => handleResendConfirmation(user.email)} 
+                          title="Renvoyer l'email de confirmation"
+                        >
+                          <Mail className="h-3 w-3 sm:h-4 sm:w-4" />
+                          <span className="ml-1 sm:hidden text-xs">Email</span>
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleResendConfirmation(user.email)} title="Renvoyer l'email de confirmation">
-                          <Mail className="h-4 w-4" />
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="flex-1 sm:flex-none text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => {
+                            setDeletingUser(user);
+                            setShowDeleteModal(true);
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                          <span className="ml-1 sm:hidden text-xs">Supprimer</span>
                         </Button>
                       </div>
                     </div>
@@ -404,27 +562,27 @@ const UserManagement = () => {
         {/* Add User Modal */}
         {showAddModal && (
           <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-            <DialogContent>
+            <DialogContent className="max-w-[95vw] sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>Ajouter un nouvel utilisateur</DialogTitle>
+                <DialogTitle className="text-base sm:text-lg">Ajouter un nouvel utilisateur</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <Label htmlFor="name">Nom complet</Label>
-                  <Input id="name" placeholder="Nom complet" value={newName} onChange={(e)=>setNewName(e.target.value)} />
+                  <Label htmlFor="name" className="text-xs sm:text-sm">Nom complet</Label>
+                  <Input id="name" placeholder="Nom complet" value={newName} onChange={(e)=>setNewName(e.target.value)} className="text-sm" />
                 </div>
                 <div>
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" placeholder="email@example.com" value={newEmail} onChange={(e)=>setNewEmail(e.target.value)} />
+                  <Label htmlFor="email" className="text-xs sm:text-sm">Email</Label>
+                  <Input id="email" type="email" placeholder="email@example.com" value={newEmail} onChange={(e)=>setNewEmail(e.target.value)} className="text-sm" />
                 </div>
                 <div>
-                  <Label htmlFor="password">Mot de passe</Label>
-                  <Input id="password" type="password" placeholder="••••••••" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} />
+                  <Label htmlFor="password" className="text-xs sm:text-sm">Mot de passe</Label>
+                  <Input id="password" type="password" placeholder="••••••••" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} className="text-sm" />
                 </div>
                 <div>
-                  <Label htmlFor="role">Rôle</Label>
+                  <Label htmlFor="role" className="text-xs sm:text-sm">Rôle</Label>
                   <Select value={newRole} onValueChange={(v: UserRole)=>setNewRole(v)}>
-                    <SelectTrigger>
+                    <SelectTrigger className="text-sm">
                       <SelectValue placeholder="Sélectionner un rôle" />
                     </SelectTrigger>
                     <SelectContent>
@@ -437,15 +595,108 @@ const UserManagement = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <Switch checked={newActive} onCheckedChange={(v)=>setNewActive(!!v)} />
-                  <span className="text-sm text-gray-600">Actif</span>
+                  <span className="text-xs sm:text-sm text-gray-600">Actif</span>
                 </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setShowAddModal(false)}>
+                <div className="flex flex-col sm:flex-row justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowAddModal(false)} className="w-full sm:w-auto">
                     Annuler
                   </Button>
-                  <Button disabled={creating} onClick={handleCreateUser}>
+                  <Button disabled={creating} onClick={handleCreateUser} className="w-full sm:w-auto">
                     <CheckCircle className="h-4 w-4 mr-2" />
                     {creating ? 'Création...' : "Créer l'utilisateur"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Edit User Modal */}
+        {showEditModal && (
+          <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+            <DialogContent className="max-w-[95vw] sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-base sm:text-lg">Modifier l'utilisateur</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 sm:space-y-4">
+                <div>
+                  <Label htmlFor="edit-name" className="text-xs sm:text-sm">Nom complet</Label>
+                  <Input id="edit-name" placeholder="Nom complet" value={newName} onChange={(e)=>setNewName(e.target.value)} className="text-sm" />
+                </div>
+                <div>
+                  <Label htmlFor="edit-email" className="text-xs sm:text-sm">Email</Label>
+                  <Input id="edit-email" type="email" placeholder="email@example.com" value={newEmail} onChange={(e)=>setNewEmail(e.target.value)} className="text-sm" />
+                </div>
+                <div>
+                  <Label htmlFor="edit-password" className="text-xs sm:text-sm">Nouveau mot de passe (optionnel)</Label>
+                  <Input id="edit-password" type="password" placeholder="Laissez vide pour ne pas changer" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} className="text-sm" />
+                </div>
+                <div>
+                  <Label htmlFor="edit-role" className="text-xs sm:text-sm">Rôle</Label>
+                  <Select value={newRole} onValueChange={(v: UserRole)=>setNewRole(v)}>
+                    <SelectTrigger className="text-sm">
+                      <SelectValue placeholder="Sélectionner un rôle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="super-admin">Super Admin</SelectItem>
+                      <SelectItem value="agent-saisie">Agent de Saisie</SelectItem>
+                      <SelectItem value="validateur">Validateur</SelectItem>
+                      <SelectItem value="observateur">Observateur</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={newActive} onCheckedChange={(v)=>setNewActive(!!v)} />
+                  <span className="text-xs sm:text-sm text-gray-600">Actif</span>
+                </div>
+                <div className="flex flex-col sm:flex-row justify-end gap-2">
+                  <Button variant="outline" onClick={() => { setShowEditModal(false); setEditingUser(null); }} className="w-full sm:w-auto">
+                    Annuler
+                  </Button>
+                  <Button disabled={updating} onClick={handleUpdateUser} className="w-full sm:w-auto">
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    {updating ? 'Mise à jour...' : 'Mettre à jour'}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && deletingUser && (
+          <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+            <DialogContent className="max-w-[95vw] sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-base sm:text-lg text-red-600">
+                  <AlertCircle className="h-5 w-5" />
+                  Confirmer la suppression
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Êtes-vous sûr de vouloir supprimer l'utilisateur <strong>{deletingUser.name}</strong> ({deletingUser.email}) ?
+                </p>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-xs sm:text-sm text-red-800">
+                    ⚠️ Cette action est irréversible. L'utilisateur perdra l'accès à la plateforme.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row justify-end gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => { setShowDeleteModal(false); setDeletingUser(null); }}
+                    className="w-full sm:w-auto"
+                  >
+                    Annuler
+                  </Button>
+                  <Button 
+                    disabled={deleting} 
+                    onClick={handleDeleteUser}
+                    className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    {deleting ? 'Suppression...' : 'Supprimer'}
                   </Button>
                 </div>
               </div>

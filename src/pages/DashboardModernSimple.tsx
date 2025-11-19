@@ -99,16 +99,14 @@ const DashboardModernSimple = () => {
           console.error('Erreur lors du chargement de la dernière élection:', latestElectionError);
         }
 
-        const totalVoters = latestElection?.nb_electeurs || 0;
+        // Calculer le total d'électeurs depuis les bureaux de vote
+        const { data: bureauxData } = await supabase
+          .from('voting_bureaux')
+          .select('registered_voters');
 
-        // Garder les données des électeurs pour d'autres usages si nécessaire
-        const { data: votersData, error: votersError } = await supabase
-          .from('voters')
-          .select('id, created_at');
-
-        if (votersError) {
-          console.error('Erreur lors du chargement des électeurs:', votersError);
-        }
+        const totalVoters = (bureauxData || []).reduce((sum, bureau) => {
+          return sum + (Number(bureau.registered_voters) || 0);
+        }, 0);
 
         // 3. Infrastructure
         const { count: centersCount } = await supabase
@@ -141,7 +139,7 @@ const DashboardModernSimple = () => {
           },
           voters: {
             total: totalVoters,
-            registered: votersData?.length || 0,
+            registered: totalVoters,
             trend: 12.5 // Simulé
           },
           infrastructure: {
@@ -217,7 +215,7 @@ const DashboardModernSimple = () => {
           </div>
         </div>
 
-        {/* Statistiques principales - Ordre: Centres, Bureaux, Candidats, Électeurs */}
+        {/* Statistiques principales - 2 par 2 sur mobile, 4 sur desktop */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
           <MetricCard
             title="Centres de Vote"
@@ -225,7 +223,7 @@ const DashboardModernSimple = () => {
             subtitle="Centres actifs"
             icon={Building}
             color="#8b5cf6"
-            className="col-span-2 lg:col-span-1"
+            className=""
           />
           
           <MetricCard
@@ -234,7 +232,7 @@ const DashboardModernSimple = () => {
             subtitle="Bureaux total"
             icon={Vote}
             color="#1e40af"
-            className="col-span-2 lg:col-span-1"
+            className=""
           />
           
           <MetricCard
@@ -243,7 +241,7 @@ const DashboardModernSimple = () => {
             subtitle="Candidats inscrits"
             icon={Users}
             color="#10b981"
-            className="col-span-2 lg:col-span-1"
+            className=""
           />
           
           <MetricCard
@@ -253,51 +251,51 @@ const DashboardModernSimple = () => {
             icon={Target}
             color="#f59e0b"
             // trend={{ value: stats.voters.trend, isPositive: true, label: "croissance" }}
-            className="col-span-2 lg:col-span-1"
+            className=""
           />
         </div>
 
         {/* Section Élections - Mobile First */}
-        <div className="space-y-4 sm:space-y-6">
-          <h2 className="text-lg sm:text-xl font-bold text-gray-900">Statut des Élections</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+        <div className="space-y-3 sm:space-y-4 lg:space-y-6">
+          <h2 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">Statut des Élections</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
             <Card className="election-card">
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">À venir</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-gray-900">{stats.elections.upcoming}</p>
+              <CardContent className="p-3 sm:p-4 lg:p-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
+                  <div className="flex-1">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">À venir</p>
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900">{stats.elections.upcoming}</p>
                   </div>
-                  <div className="p-3 bg-blue-100 rounded-full">
-                    <Calendar className="h-6 w-6 text-blue-600" />
+                  <div className="p-2 sm:p-3 bg-blue-100 rounded-full">
+                    <Calendar className="h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 text-blue-600" />
                   </div>
                 </div>
               </CardContent>
             </Card>
 
             <Card className="election-card">
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">En cours</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-orange-600">{stats.elections.byStatus['En cours'] || 0}</p>
+              <CardContent className="p-3 sm:p-4 lg:p-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
+                  <div className="flex-1">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">En cours</p>
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-orange-600">{stats.elections.byStatus['En cours'] || 0}</p>
                   </div>
-                  <div className="p-3 bg-orange-100 rounded-full">
-                    <Activity className="h-6 w-6 text-orange-600" />
+                  <div className="p-2 sm:p-3 bg-orange-100 rounded-full">
+                    <Activity className="h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 text-orange-600" />
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="election-card">
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Terminées</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-green-600">{stats.elections.completed}</p>
+            <Card className="election-card col-span-2 sm:col-span-1">
+              <CardContent className="p-3 sm:p-4 lg:p-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
+                  <div className="flex-1">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Terminées</p>
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-green-600">{stats.elections.completed}</p>
                   </div>
-                  <div className="p-3 bg-green-100 rounded-full">
-                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  <div className="p-2 sm:p-3 bg-green-100 rounded-full">
+                    <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 text-green-600" />
                   </div>
                 </div>
               </CardContent>
@@ -306,9 +304,9 @@ const DashboardModernSimple = () => {
         </div>
 
         {/* Actions rapides - Mobile First */}
-        <div className="space-y-4 sm:space-y-6">
-          <h2 className="text-lg sm:text-xl font-bold text-gray-900">Actions Rapides</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div className="space-y-3 sm:space-y-4 lg:space-y-6">
+          <h2 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">Actions Rapides</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 lg:gap-4">
             <Button 
               onClick={() => navigate('/elections')}
               className="h-16 sm:h-20 flex flex-col items-center justify-center gap-2 bg-[#1e40af] hover:bg-[#1e3a8a] text-white"

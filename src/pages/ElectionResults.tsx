@@ -1164,26 +1164,72 @@ const ElectionResults: React.FC = () => {
       
       const centerNamesMapForModal = new Map((centersNamesForModal || []).map((c: any) => [c.id, c.name]));
 
+      // Récupérer tous les PV des centres pour calculer les totaux corrects
+      const { data: allPVsForCenters } = await supabase
+        .from('procès_verbaux')
+        .select(`
+          bureau_id,
+          total_registered,
+          total_voters,
+          votes_expressed,
+          voting_bureaux!inner(id, center_id, registered_voters)
+        `)
+        .in('id', publishedPVIds);
+
+      // Créer un map des bureaux vers leurs données PV
+      const bureauToPVMap = new Map();
+      (allPVsForCenters || []).forEach((pv: any) => {
+        bureauToPVMap.set(pv.bureau_id, {
+          total_registered: Number(pv.total_registered) || 0,
+          total_voters: Number(pv.total_voters) || 0,
+          votes_expressed: Number(pv.votes_expressed) || 0,
+          center_id: pv.voting_bureaux?.center_id
+        });
+      });
+
       // Agréger par centre
       const centersMap = new Map();
       filteredBureaux.forEach((b: any) => {
+        const pvData = bureauToPVMap.get(b.bureau_id);
+        if (!pvData) return;
+
         if (!centersMap.has(b.center_id)) {
           centersMap.set(b.center_id, {
             center_id: b.center_id,
             center_name: centerNamesMapForModal.get(b.center_id) || '',
             candidate_votes: 0,
-            total_votes: 0,
-            candidate_percentage: 0
+            total_registered: 0,
+            total_voters: 0,
+            total_expressed: 0,
+            candidate_percentage: 0,
+            candidate_participation_pct: 0
           });
         }
         const center = centersMap.get(b.center_id);
         center.candidate_votes += b.candidate_votes;
+        center.total_registered += pvData.total_registered;
+        center.total_voters += pvData.total_voters;
+        center.total_expressed += pvData.votes_expressed;
+      });
+
+      // Calculer les pourcentages après agrégation
+      centersMap.forEach((center: any) => {
+        // Score du candidat = ses voix / total des voix exprimées dans le centre
+        center.candidate_percentage = center.total_expressed > 0 
+          ? (center.candidate_votes / center.total_expressed) * 100 
+          : 0;
+        
+        // Taux de participation = votants / inscrits
+        center.candidate_participation_pct = center.total_registered > 0 
+          ? (center.total_voters / center.total_registered) * 100 
+          : 0;
       });
 
       const filteredCenters = Array.from(centersMap.values());
       
       console.log('📊 Modal candidat - Bureaux filtrés:', filteredBureaux.length);
       console.log('📊 Modal candidat - Centres filtrés:', filteredCenters.length);
+      console.log('📊 Modal candidat - Exemple centre:', filteredCenters[0]);
       
       setCandidateCenters(filteredCenters);
       setCandidateBureaux(filteredBureaux);
