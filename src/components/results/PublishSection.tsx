@@ -1,5 +1,5 @@
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,9 +45,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
   const [nonValidatedByBureau, setNonValidatedByBureau] = useState<any[]>([]);
   const [nonValidatedCount, setNonValidatedCount] = useState<number>(0);
 
-  // Charger les résultats (provisoires = entered + validés) et calculer les agrégats
-  useEffect(() => {
-    const loadFinalResults = async () => {
+  // Fonction pour charger les résultats (provisoires = entered + validés) et calculer les agrégats
+  const loadFinalResults = useCallback(async () => {
       if (!selectedElection) return;
       try {
         setLoading(true);
@@ -366,9 +365,12 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
       } finally {
         setLoading(false);
       }
-    };
-    loadFinalResults();
   }, [selectedElection]);
+
+  // Charger les résultats au montage et lors du changement d'élection
+  useEffect(() => {
+    loadFinalResults();
+  }, [loadFinalResults]);
 
   const pieChartData = useMemo(() => (
     finalResults && Array.isArray(finalResults.candidates)
