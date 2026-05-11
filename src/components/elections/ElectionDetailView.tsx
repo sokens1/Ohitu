@@ -49,6 +49,7 @@ interface Election {
   department: string;
   commune: string;
   arrondissement: string;
+  enterpriseId?: string;
 }
 
 interface Center {
@@ -69,6 +70,9 @@ interface Candidate {
   photo?: string;
   votes?: number;
   percentage?: number;
+  college?: string;
+  titulaires?: any[];
+  suppleants?: any[];
 }
 
 interface ElectionDetailViewProps {
@@ -109,7 +113,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           .from('election_centers')
           .select(`
             voting_centers(
-              id, name, address, contact_name, contact_phone,
+              id, name, address, contact_name, contact_phone, enterprise_id,
               voting_bureaux!center_id(id, name, registered_voters)
             )
           `)
@@ -155,6 +159,34 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   // Fonction pour charger les candidats liés à cette élection
   const fetchCandidates = useCallback(async () => {
       try {
+        if (election.type === 'Élection Professionnelle') {
+          const { data, error } = await supabase
+            .from('union_lists')
+            .select(`
+              id,
+              college,
+              titulaires,
+              suppleants,
+              unions(id, name, acronym)
+            `)
+            .eq('election_id', election.id);
+
+          if (error) throw error;
+
+          const transformed: Candidate[] = data?.map((list: any) => ({
+            id: list.id,
+            name: list.unions?.name || 'Syndicat inconnu',
+            party: list.unions?.acronym || 'Indépendant',
+            isOurCandidate: false, 
+            college: list.college,
+            titulaires: list.titulaires || [],
+            suppleants: list.suppleants || []
+          })) || [];
+
+          setCandidates(transformed);
+          return;
+        }
+
         const { data, error } = await supabase
           .from('election_candidates')
           .select(`
@@ -182,7 +214,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
       } catch (error) {
         console.error('Erreur lors du chargement des candidats:', error);
       }
-    }, [election.id]);
+    }, [election.id, election.type]);
 
   // Charger les candidats liés à cette élection
   useEffect(() => {
@@ -214,28 +246,26 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const handleAddCenter = async (centersData: Center[]) => {
     try {
       console.log('handleAddCenter appelé avec:', centersData);
-      console.log('ID de l\'élection:', election.id);
       
-      // Lier les centres sélectionnés à l'élection
-      const centerLinks = centersData.map(center => ({
-        election_id: election.id,
-        center_id: center.id
-      }));
+      // Si ce n'est pas une élection professionnelle, on doit lier les centres manuellement
+      // Pour les pro, le modal a déjà créé le lien election_centers lors de la création du site
+      if (election.type !== 'Élection Professionnelle') {
+        // Lier les centres sélectionnés à l'élection
+        const centerLinks = centersData.map(center => ({
+          election_id: election.id,
+          center_id: center.id
+        }));
 
-      console.log('Liens centres à créer:', centerLinks);
+        const { error: linkError } = await supabase
+          .from('election_centers')
+          .insert(centerLinks);
 
-      const { data, error: linkError } = await supabase
-        .from('election_centers')
-        .insert(centerLinks)
-        .select();
-
-      if (linkError) {
-        console.error('Erreur lors de l\'association centres-élection:', linkError);
-        toast.error(`Erreur lors de l'association des centres: ${linkError.message}`);
-        return;
+        if (linkError) {
+          console.error('Erreur lors de l\'association centres-élection:', linkError);
+          toast.error(`Erreur lors de l'association des centres: ${linkError.message}`);
+          return;
+        }
       }
-
-      console.log('Centres liés avec succès:', data);
 
       // Recharger les centres depuis la base de données
       await fetchCenters();
@@ -256,29 +286,26 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const handleAddCandidate = async (candidatesData: Candidate[]) => {
     try {
       console.log('handleAddCandidate appelé avec:', candidatesData);
-      console.log('ID de l\'élection:', election.id);
       
-      // Lier les candidats sélectionnés à l'élection
-      const candidateLinks = candidatesData.map(candidate => ({
-        election_id: election.id,
-        candidate_id: candidate.id,
-        is_our_candidate: candidate.isOurCandidate
-      }));
+      // Si c'est une élection professionnelle, le modal a déjà fait l'insertion
+      if (election.type !== 'Élection Professionnelle') {
+        // Lier les candidats sélectionnés à l'élection
+        const candidateLinks = candidatesData.map(candidate => ({
+          election_id: election.id,
+          candidate_id: candidate.id,
+          is_our_candidate: candidate.isOurCandidate
+        }));
 
-      console.log('Liens candidats à créer:', candidateLinks);
+        const { error: linkError } = await supabase
+          .from('election_candidates')
+          .insert(candidateLinks);
 
-      const { data, error: linkError } = await supabase
-        .from('election_candidates')
-        .insert(candidateLinks)
-        .select();
-
-      if (linkError) {
-        console.error('Erreur lors de l\'association candidats-élection:', linkError);
-        toast.error(`Erreur lors de l'association des candidats: ${linkError.message}`);
-        return;
+        if (linkError) {
+          console.error('Erreur lors de l\'association candidats-élection:', linkError);
+          toast.error(`Erreur lors de l'association des candidats: ${linkError.message}`);
+          return;
+        }
       }
-
-      console.log('Candidats liés avec succès:', data);
 
       // Recharger les candidats depuis la base de données
       await fetchCandidates();
@@ -544,7 +571,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <div className="p-1 sm:p-1.5 bg-purple-500 rounded-md sm:rounded-lg">
                       <Star className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
                     </div>
-                    <span className="text-xs font-medium text-purple-700 uppercase tracking-wide">Candidats</span>
+                    <span className="text-xs font-medium text-purple-700 uppercase tracking-wide">
+                      {election.type === 'Élection Professionnelle' ? 'Listes' : 'Candidats'}
+                    </span>
                   </div>
                   <div className="text-sm sm:text-xl font-bold text-purple-900">
                     {statistics.totalCandidates}
@@ -556,7 +585,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <div className="p-1 sm:p-1.5 bg-[#1e40af] rounded-md sm:rounded-lg">
                       <Users className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
                     </div>
-                    <span className="text-xs font-medium text-[#1e40af] uppercase tracking-wide">Électeurs</span>
+                    <span className="text-xs font-medium text-[#1e40af] uppercase tracking-wide">
+                      {election.type === 'Élection Professionnelle' ? 'Salariés Électeurs' : 'Électeurs'}
+                    </span>
                   </div>
                   <div className="text-sm sm:text-xl font-bold text-[#1e40af]">
                     {statistics.totalVoters.toLocaleString('fr-FR')}
@@ -609,11 +640,17 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   <Users className="w-3 h-3 sm:w-4 sm:h-4 text-purple-600 data-[state=active]:text-white" />
                 </div>
                 <div className="text-left hidden xs:block">
-                  <div className="font-medium text-xs sm:text-sm">Candidats</div>
-                  <div className="text-xs text-gray-500">Liste des candidats</div>
+                  <div className="font-medium text-xs sm:text-sm">
+                    {election.type === 'Élection Professionnelle' ? 'Listes Syndicales' : 'Candidats'}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {election.type === 'Élection Professionnelle' ? 'Listes en compétition' : 'Liste des candidats'}
+                  </div>
                 </div>
                 <div className="text-left xs:hidden">
-                  <div className="font-medium text-xs">Candidats</div>
+                  <div className="font-medium text-xs">
+                    {election.type === 'Élection Professionnelle' ? 'Listes' : 'Candidats'}
+                  </div>
                 </div>
               </TabsTrigger>
             </TabsList>
@@ -674,49 +711,53 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                 </CardContent>
               </Card>
 
-              {/* Informations géographiques modernisées */}
+              {/* Informations géographiques ou Entreprise */}
               <Card className="election-card group hover:shadow-lg transition-all duration-300">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <div className="p-2 bg-green-100 rounded-lg">
-                      <MapPin className="w-5 h-5 text-green-600" />
+                      {election.type === 'Élection Professionnelle' ? (
+                        <Building className="w-5 h-5 text-green-600" />
+                      ) : (
+                        <MapPin className="w-5 h-5 text-green-600" />
+                      )}
                     </div>
-                    Circonscription Électorale
+                    {election.type === 'Élection Professionnelle' ? 'Informations Entreprise' : 'Circonscription Électorale'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Province</label>
-                        <p className="text-sm font-bold text-gray-900 mt-1">{election.province || 'Non spécifiée'}</p>
+                    {election.type === 'Élection Professionnelle' ? (
+                      <div className="p-4 bg-gray-50 rounded-lg text-sm text-gray-700">
+                        <p>Les détails de l'entreprise (secteur, effectifs, syndicats) seront affichés ici.</p>
                       </div>
-                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    </div>
-                    
-                    {/* <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Département</label>
-                        <p className="text-sm font-bold text-gray-900 mt-1">{election.department || 'Non spécifié'}</p>
-                      </div>
-                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    </div> */}
-                    
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Commune</label>
-                        <p className="text-sm font-bold text-gray-900 mt-1">{election.commune || 'Non spécifiée'}</p>
-                      </div>
-                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Arrondissement</label>
-                        <p className="text-sm font-bold text-gray-900 mt-1">{election.arrondissement || 'Non spécifié'}</p>
-                      </div>
-                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Province</label>
+                            <p className="text-sm font-bold text-gray-900 mt-1">{election.province || 'Non spécifiée'}</p>
+                          </div>
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Commune</label>
+                            <p className="text-sm font-bold text-gray-900 mt-1">{election.commune || 'Non spécifiée'}</p>
+                          </div>
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Arrondissement</label>
+                            <p className="text-sm font-bold text-gray-900 mt-1">{election.arrondissement || 'Non spécifié'}</p>
+                          </div>
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -727,8 +768,12 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           <TabsContent value="centers" className="p-4 sm:p-6 space-y-4 sm:space-y-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4">
               <div>
-                <h3 className="text-lg sm:text-xl font-bold text-gray-900">Centres de Vote</h3>
-                <p className="text-xs sm:text-sm text-gray-600 mt-1">Gérez les centres de vote et leurs bureaux</p>
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900">
+                  {election.type === 'Élection Professionnelle' ? 'Établissements (Centres)' : 'Centres de Vote'}
+                </h3>
+                <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                  {election.type === 'Élection Professionnelle' ? 'Gérez les établissements et leurs urnes (bureaux)' : 'Gérez les centres de vote et leurs bureaux'}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 {/* Boutons de vue */}
@@ -916,8 +961,12 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           <TabsContent value="candidates" className="p-4 sm:p-6 space-y-4 sm:space-y-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4">
               <div>
-                <h3 className="text-lg sm:text-xl font-bold text-gray-900">Candidats Validés</h3>
-                <p className="text-xs sm:text-sm text-gray-600 mt-1">Gérez la liste des candidats à l'élection</p>
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900">
+                  {election.type === 'Élection Professionnelle' ? 'Listes Syndicales Validées' : 'Candidats Validés'}
+                </h3>
+                <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                  {election.type === 'Élection Professionnelle' ? 'Gérez les listes en compétition pour cette élection' : 'Gérez la liste des candidats à l\'élection'}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 {/* Boutons de vue */}
@@ -952,7 +1001,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   className="bg-purple-600 hover:bg-purple-700 text-white px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
                 >
                   <Plus className="w-4 h-4 mr-1 sm:mr-2" />
-                  <span className="hidden xs:inline">Ajouter un candidat</span>
+                  <span className="hidden xs:inline">
+                    {election.type === 'Élection Professionnelle' ? 'Ajouter une liste' : 'Ajouter un candidat'}
+                  </span>
                   <span className="xs:hidden">Ajouter</span>
                 </Button>
               </div>
@@ -972,14 +1023,26 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   <CardContent className="p-3 sm:p-4">
                     <div className="flex items-start space-x-2 sm:space-x-3">
                       <div className="relative flex-shrink-0">
-                        <InitialsAvatar 
-                          name={candidate.name}
-                          size="lg"
-                          className="shadow-lg border-2 border-white"
-                          backgroundColor={candidate.isOurCandidate ? '#7c3aed' : '#1e40af'}
-                        />
+                        {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] ? (
+                          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl overflow-hidden shadow-lg border-2 border-white bg-purple-50">
+                            {candidate.titulaires[0].photo ? (
+                              <img src={candidate.titulaires[0].photo} alt="Head" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-xl font-bold text-purple-600 bg-purple-100">
+                                {candidate.titulaires[0].name?.charAt(0) || 'T'}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <InitialsAvatar 
+                            name={candidate.name}
+                            size="lg"
+                            className="shadow-lg border-2 border-white"
+                            backgroundColor={candidate.isOurCandidate ? '#7c3aed' : '#1e40af'}
+                          />
+                        )}
                         {candidate.isOurCandidate && (
-                          <div className="absolute -top-1 -right-1 p-0.5 bg-purple-500 rounded-full">
+                          <div className="absolute -top-1 -right-1 p-0.5 bg-purple-500 rounded-full z-10">
                             <Star className="w-2 h-2 sm:w-3 sm:h-3 text-white" />
                           </div>
                         )}
@@ -988,17 +1051,41 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <h3 className="font-bold text-sm sm:text-lg text-gray-900 group-hover:text-purple-600 transition-colors duration-300 line-clamp-1">
-                              {candidate.name}
+                              {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] 
+                                ? candidate.titulaires[0].name 
+                                : candidate.name}
                             </h3>
-                            <p className="text-xs sm:text-sm text-gray-600 font-medium line-clamp-1">{candidate.party}</p>
+                            <p className="text-xs sm:text-sm text-gray-600 font-medium line-clamp-1">
+                              {election.type === 'Élection Professionnelle' 
+                                ? `${candidate.name} (${candidate.party})` 
+                                : candidate.party}
+                            </p>
                           </div>
                           {candidate.isOurCandidate && (
                             <Badge className="bg-purple-500 text-white px-1.5 sm:px-2 py-1 text-xs font-medium flex-shrink-0">
                               <Star className="w-2 h-2 sm:w-3 sm:h-3 mr-1" />
-                              Notre Candidat
+                              {election.type === 'Élection Professionnelle' ? 'Notre liste' : 'Notre Candidat'}
                             </Badge>
                           )}
                         </div>
+
+                        {election.type === 'Élection Professionnelle' && candidate.suppleants && candidate.suppleants.length > 0 && (
+                          <div className="space-y-2 mt-2 border-t border-gray-100 pt-2">
+                            <div className="flex items-center gap-2 bg-blue-50/50 p-1.5 rounded-lg">
+                              <div className="w-6 h-6 rounded-full overflow-hidden bg-blue-100 flex-shrink-0">
+                                {candidate.suppleants[0].photo ? (
+                                  <img src={candidate.suppleants[0].photo} alt="Deputy" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-blue-600">S</div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[9px] text-blue-600 uppercase font-bold tracking-tighter leading-none">Suppléant</p>
+                                <p className="text-xs font-bold text-gray-700 truncate">{candidate.suppleants[0].name || 'Non défini'}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         
                         {candidate.votes && (
                           <div className="p-2 bg-gray-50 rounded-lg">
@@ -1084,7 +1171,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             {candidate.isOurCandidate && (
                               <Badge className="bg-purple-500 text-white px-2 py-0.5 text-xs mt-1">
                                 <Star className="w-3 h-3 mr-1" />
-                                Notre candidat
+                                {election.type === 'Élection Professionnelle' ? 'Notre liste' : 'Notre candidat'}
                               </Badge>
                             )}
                           </div>
@@ -1123,6 +1210,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           <AddCenterModal
             onClose={() => setShowAddCenter(false)}
             onSubmit={handleAddCenter}
+            electionId={election.id}
+            enterpriseId={election.enterpriseId}
+            electionType={election.type}
           />
         )}
 
@@ -1130,6 +1220,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           <AddCandidateModal
             onClose={() => setShowAddCandidate(false)}
             onSubmit={handleAddCandidate}
+            electionId={election.id}
+            enterpriseId={election.enterpriseId}
+            electionType={election.type}
           />
         )}
 

@@ -33,6 +33,7 @@ import {
   FileDown
 } from 'lucide-react';
 import ElectionWizard from '@/components/elections/ElectionWizard';
+import ProfessionalElectionWizard from '@/components/elections/ProfessionalElectionWizard';
 import ElectionDetailView from '@/components/elections/ElectionDetailView';
 import EditElectionModal from '@/components/elections/EditElectionModal';
 import { toast } from 'sonner';
@@ -58,6 +59,7 @@ const ElectionManagementUnified = () => {
   const { logCreate, logUpdate, logDelete, logExport } = useAudit();
 
   const [showWizard, setShowWizard] = useState(false);
+  const [showProWizard, setShowProWizard] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingElection, setEditingElection] = useState<Election | null>(null);
   const [searchQuery, setSearchQueryLocal] = useState('');
@@ -275,6 +277,7 @@ const ElectionManagementUnified = () => {
           createdAt: new Date(election.created_at),
           updatedAt: new Date(election.updated_at),
           createdBy: election.created_by || 'system',
+          enterpriseId: election.enterprise_id,
         };
       });
 
@@ -843,6 +846,100 @@ const ElectionManagementUnified = () => {
     }
   };
 
+  const handleCreateProElection = async (electionData: any) => {
+    try {
+      setLoading(true);
+      // Récupérer l'utilisateur
+      let createdBy: string | null = null;
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        createdBy = auth?.user?.id ?? null;
+      } catch (e) {}
+
+      // Créer l'entreprise d'abord si elle n'existe pas ou l'insérer
+      const { data: enterprise, error: entError } = await supabase
+        .from('enterprises')
+        .insert({
+          name: electionData.enterpriseName,
+          sector: electionData.enterpriseSector,
+          total_employees: parseInt(electionData.totalEmployees),
+          employees_by_category: {
+            cadres: parseInt(electionData.employeesCadres),
+            employes: parseInt(electionData.employeesEmployes),
+            ouvriers: parseInt(electionData.employeesOuvriers)
+          }
+        })
+        .select()
+        .single();
+        
+      if (entError) throw entError;
+
+      // Créer l'élection
+      const supabaseData = {
+        title: electionData.name,
+        type: electionData.type,
+        election_date: electionData.date,
+        status: 'À venir',
+        enterprise_id: enterprise.id,
+        nb_electeurs: parseInt(electionData.totalEmployees),
+        legal_framework: electionData.legalFramework,
+        carence: electionData.carence,
+        list_display_date: electionData.listDisplayDate || null,
+        campaign_start: electionData.campaignStart || null,
+        campaign_end: electionData.campaignEnd || null,
+        has_second_round: electionData.hasSecondRound,
+        second_round_date: electionData.secondRoundDate || null,
+        recours_period_start: electionData.recoursStart || null,
+        recours_period_end: electionData.recoursEnd || null,
+        seats_available: electionData.colleges.reduce((acc: number, c: any) => acc + (parseInt(c.seats) || 0), 0)
+      };
+      
+      // Ajouter le created_by seulement s'il est défini (comme pour l'élection classique)
+      if (createdBy) {
+        (supabaseData as any).created_by = createdBy;
+      }
+
+      const { data, error } = await supabase
+        .from('elections')
+        .insert(supabaseData)
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      const electionId = String(data.id);
+
+      // Insérer les collèges
+      if (electionData.colleges && electionData.colleges.length > 0) {
+        const collegesData = electionData.colleges.map((c: any) => ({
+          election_id: electionId,
+          name: c.name,
+          college_type: c.type,
+          total_voters: c.voters,
+          seats_to_fill: c.seats
+        }));
+        await supabase.from('electoral_colleges').insert(collegesData);
+      }
+
+      await refreshElectionsData();
+      
+      await logCreate(
+        'election',
+        electionId,
+        `Création de l'élection professionnelle "${electionData.name}"`,
+        { new_values: supabaseData }
+      );
+      
+      setShowProWizard(false);
+      toast.success('Élection professionnelle créée avec succès');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Erreur: ${error.message || 'Erreur lors de la création'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (selectedElection) {
     console.log('Élection sélectionnée pour la vue détaillée:', selectedElection);
     console.log('Données de localisation de l\'élection sélectionnée:', selectedElection.location);
@@ -923,15 +1020,33 @@ const ElectionManagementUnified = () => {
                 </p>
               </div>
               <div className="flex flex-col xs:flex-row gap-2 sm:gap-3 w-full">
-                <Button 
-                  onClick={() => setShowWizard(true)}
-                  className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full xs:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
-                  size="lg"
-                >
-                  <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                  <span className="hidden xs:inline">Nouvelle Élection</span>
-                  <span className="xs:hidden">Nouvelle</span>
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full xs:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
+                      size="lg"
+                    >
+                      <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                      <span className="hidden xs:inline">Nouvelle Élection</span>
+                      <span className="xs:hidden">Nouvelle</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuItem onClick={() => setShowWizard(true)} className="py-3">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Classique</span>
+                        <span className="text-xs text-gray-500">Législatives, Locales</span>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setShowProWizard(true)} className="py-3">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-purple-700">Professionnelle</span>
+                        <span className="text-xs text-gray-500">Délégués du personnel (Entreprises)</span>
+                      </div>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           </div>
@@ -1060,6 +1175,7 @@ const ElectionManagementUnified = () => {
                     <SelectItem value="all">Tous les types</SelectItem>
                     <SelectItem value="Législatives">Législatives</SelectItem>
                     <SelectItem value="Locales">Locales</SelectItem>
+                    <SelectItem value="Élection Professionnelle">Professionnelle</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1112,15 +1228,33 @@ const ElectionManagementUnified = () => {
                   : 'Commencez par créer votre première élection pour gérer le processus électoral.'
                 }
               </p>
-              <Button 
-                onClick={() => setShowWizard(true)}
-                className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full sm:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
-                size="lg"
-              >
-                <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                <span className="hidden xs:inline">Créer une élection</span>
-                <span className="xs:hidden">Créer</span>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full sm:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
+                    size="lg"
+                  >
+                    <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    <span className="hidden xs:inline">Créer une élection</span>
+                    <span className="xs:hidden">Créer</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuItem onClick={() => setShowWizard(true)} className="py-3">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Classique</span>
+                      <span className="text-xs text-gray-500">Législatives, Locales</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setShowProWizard(true)} className="py-3">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-purple-700">Professionnelle</span>
+                      <span className="text-xs text-gray-500">Délégués du personnel</span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </CardContent>
           </Card>
         ) : (
@@ -1374,6 +1508,14 @@ const ElectionManagementUnified = () => {
               setShowWizard(false);
               toast.success('Élection créée avec succès');
             }}
+          />
+        )}
+
+        {/* Professional Election Wizard Modal */}
+        {showProWizard && (
+          <ProfessionalElectionWizard 
+            onClose={() => setShowProWizard(false)}
+            onSubmit={handleCreateProElection}
           />
         )}
 
