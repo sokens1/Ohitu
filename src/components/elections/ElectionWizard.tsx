@@ -13,6 +13,8 @@ import FloatingCheckbox from '@/components/ui/floating-checkbox';
 import Select2, { Select2Option } from '@/components/ui/select2';
 import { ModernForm, ModernFormSection, ModernFormGrid, ModernFormActions } from '@/components/ui/modern-form';
 import MultiSelect from '@/components/ui/multi-select';
+import ImageUploader from '@/components/ui/ImageUploader';
+
 
 interface Candidate {
   id: string;
@@ -49,8 +51,10 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
     
     // Étape 4 - Centres sélectionnés
     selectedCenters: [] as string[],
-    totalVoters: ''
+    totalVoters: '',
+    coverImage: ''
   });
+
 
   // Initialiser la date avec la date d'aujourd'hui
   useEffect(() => {
@@ -244,7 +248,7 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
   };
 
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (onSubmit) {
       const selectedCandidatesData = formData.selectedCandidates.map(id => 
         candidates.find(c => c.identifiant === id)
@@ -259,6 +263,7 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
 
       const election = {
         name: formData.name,
+        title: formData.name, // Doubler pour compatibilité
         type: formData.type,
         date: formData.date,
         seatsAvailable: Number(formData.seatsAvailable) || 1,
@@ -269,23 +274,18 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
         arrondissement: formData.arrondissement,
         candidates: selectedCandidatesData,
         centers: selectedCentersData,
-        totalCenters: selectedCentersData.length,
-        totalBureaux: totalBureaux,
-        totalVoters: totalElecteurs || Number(formData.totalVoters) || 0
-      };
-
-      console.log('📋 Données de l\'élection à valider:', election);
-      console.log('📅 Date formatée:', formData.date, 'Type:', typeof formData.date);
-      console.log('👥 Candidats sélectionnés:', selectedCandidatesData);
-      console.log('🏢 Centres sélectionnés:', selectedCentersData);
-      console.log('🔢 Statistiques calculées:', {
         totalCandidates: selectedCandidatesData.length,
         totalCenters: selectedCentersData.length,
-        totalBureaux,
-        totalElecteurs
-      });
+        totalBureaux: totalBureaux,
+        totalVoters: totalElecteurs || Number(formData.totalVoters) || 0,
+        coverImage: formData.coverImage
+      };
+
+      await onSubmit(election);
       
-      onSubmit(election);
+      if (onSuccess) {
+        onSuccess();
+      }
     } else if (onSuccess) {
       onSuccess();
     }
@@ -383,7 +383,15 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
                 required
               />
             </ModernFormGrid>
+
+            <div className="mt-4">
+              <ImageUploader 
+                onUploadSuccess={(url) => setFormData({ ...formData, coverImage: url })}
+                defaultValue={formData.coverImage}
+              />
+            </div>
           </ModernFormSection>
+
         );
         
       case 2:

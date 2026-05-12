@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect } from 'react';
 import { Election } from '@/types/elections';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import Select2, { Select2Option } from '@/components/ui/select2';
 import { X, Save, Calendar, MapPin, Users, Building, Vote, Target, Star } from 'lucide-react';
@@ -14,6 +14,8 @@ import FloatingTextarea from '@/components/ui/floating-textarea';
 import FloatingSelect from '@/components/ui/floating-select';
 import { ModernForm, ModernFormSection, ModernFormGrid, ModernFormActions } from '@/components/ui/modern-form';
 import MultiSelect from '@/components/ui/multi-select';
+import ImageUploader from '@/components/ui/ImageUploader';
+
 
 interface EditElectionModalProps {
   election: Election;
@@ -41,6 +43,7 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
     nbElecteurs: election.statistics.totalVoters || '',
     selectedCandidates: [] as string[],
     selectedCenters: [] as string[],
+    coverImage: (election as any).cover_image || '',
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,32 +124,54 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
     }
   };
 
-  // Charger les candidats (essaie EN puis FR avec alias PostgREST)
+  // Charger les candidats (politiques ou syndicaux selon le type)
   const loadCandidates = async () => {
     try {
-      const { data, error } = await supabase
-        .from('candidates')
-        .select('identifiant:id, nom:name, parti:party, est_notre_candidat:is_our_candidate')
-        .order('name');
-      if (!error) {
-        setCandidates(data || []);
-        return;
-      }
-      throw error;
-    } catch (_) {
-      try {
+      if (formData.type === 'Élection Professionnelle') {
         const { data, error } = await supabase
-          .from('candidats')
-          .select('identifiant, nom, parti, est_notre_candidat')
-          .order('nom');
+          .from('unions')
+          .select('identifiant:id, nom:name, acronym')
+          .order('name');
+        
         if (error) throw error;
-        setCandidates(data || []);
-      } catch (error) {
-        console.error('Erreur lors du chargement des candidats:', error);
-        setCandidates([]);
+        
+        // Formater les syndicats pour qu'ils ressemblent à des candidats
+        const formattedUnions = (data || []).map(u => ({
+          identifiant: u.identifiant,
+          nom: u.acronym ? `${u.acronym} - ${u.nom}` : u.nom,
+          parti: u.acronym || 'Syndicat',
+          est_notre_candidat: false
+        }));
+        setCandidates(formattedUnions);
+      } else {
+        const { data, error } = await supabase
+          .from('candidates')
+          .select('identifiant:id, nom:name, parti:party, est_notre_candidat:is_our_candidate')
+          .order('name');
+        if (!error) {
+          setCandidates(data || []);
+          return;
+        }
+        throw error;
+      }
+    } catch (_) {
+      // Fallback si la table 'candidates' n'existe pas (cas de 'candidats')
+      if (formData.type !== 'Élection Professionnelle') {
+        try {
+          const { data, error } = await supabase
+            .from('candidats')
+            .select('identifiant, nom, parti, est_notre_candidat')
+            .order('nom');
+          if (error) throw error;
+          setCandidates(data || []);
+        } catch (error) {
+          console.error('Erreur lors du chargement des candidats:', error);
+          setCandidates([]);
+        }
       }
     }
   };
+
 
   // Charger les centres de vote (essaie EN puis FR)
   const loadCenters = async () => {
@@ -181,9 +206,14 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
     // loadDepartments();
     loadCommunes();
     loadArrondissements();
-    loadCandidates();
     loadCenters();
   }, []);
+
+  // Recharger les candidats quand le type change
+  useEffect(() => {
+    loadCandidates();
+  }, [formData.type]);
+
 
   // Pré-sélectionner candidats et centres liés à l'élection (via tables de jonction)
   useEffect(() => {
@@ -277,8 +307,9 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
       console.log('Anciens liens supprimés avec succès');
 
       // Créer les nouveaux liens candidats
-      if (candidateIds.length > 0) {
-        const candidateLinks = candidateIds.map(candidateId => ({
+      const uniqueCandidateIds = Array.from(new Set(candidateIds));
+      if (uniqueCandidateIds.length > 0) {
+        const candidateLinks = uniqueCandidateIds.map(candidateId => ({
           election_id: electionId,
           candidate_id: candidateId,
           is_our_candidate: false // Par défaut, sera mis à jour si nécessaire
@@ -302,8 +333,9 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
       }
 
       // Créer les nouveaux liens centres
-      if (centerIds.length > 0) {
-        const centerLinks = centerIds.map(centerId => ({
+      const uniqueCenterIds = Array.from(new Set(centerIds));
+      if (uniqueCenterIds.length > 0) {
+        const centerLinks = uniqueCenterIds.map(centerId => ({
           election_id: electionId,
           center_id: centerId
         }));
@@ -380,6 +412,7 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
           // Utiliser la valeur calculée automatiquement depuis la base de données
           totalVoters: election.statistics.totalVoters || 0,
         },
+        cover_image: (formData as any).coverImage || (formData as any).cover_image,
       };
 
       // Mettre à jour les liens candidats/centres
@@ -399,22 +432,36 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
   };
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl xl:max-w-5xl max-h-[90vh] lg:max-h-[85vh] overflow-y-auto p-4 sm:p-6 lg:p-8">
-        <DialogHeader className="pb-4 sm:pb-6 lg:pb-8">
-          <DialogTitle className="flex items-center gap-2 sm:gap-3 lg:gap-4 text-xl sm:text-2xl lg:text-3xl xl:text-4xl font-bold text-gray-900">
-            <div className="p-2 sm:p-3 lg:p-4 bg-gov-blue/10 rounded-lg">
-              <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-gov-blue" />
+    <Sheet open={true} onOpenChange={onClose}>
+      <SheetContent side="bottom" className="h-[90vh] sm:h-[85vh] p-0 overflow-hidden border-t-2 border-gov-blue/20 rounded-t-3xl">
+        <div className="flex flex-col h-full">
+          <SheetHeader className="p-4 sm:p-6 bg-gradient-to-r from-gov-blue to-gov-blue-light text-white shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/20 rounded-lg">
+                  <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+                </div>
+                <div>
+                  <SheetTitle className="text-xl sm:text-2xl font-bold text-white">
+                    Modification de l'élection
+                  </SheetTitle>
+                  <SheetDescription className="text-gov-blue-light/90 text-xs sm:text-sm mt-0.5">
+                    Modifiez les informations de l'élection sélectionnée
+                  </SheetDescription>
+                </div>
+              </div>
+              <Button 
+                variant="ghost" 
+                onClick={onClose}
+                className="text-white hover:bg-white/20 -mr-2"
+              >
+                <X className="h-5 w-5" />
+              </Button>
             </div>
-            <span className="hidden sm:inline">Modification de l'élection</span>
-            <span className="sm:hidden">Modifier élection</span>
-          </DialogTitle>
-          <DialogDescription className="text-gray-600 mt-2 text-sm sm:text-base lg:text-lg">
-            Modifiez les informations de l'élection sélectionnée. Les champs marqués d'un astérisque (*) sont obligatoires.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetHeader>
 
-        <ModernForm onSubmit={handleSubmit}>
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <ModernForm onSubmit={handleSubmit}>
           {/* Informations générales */}
           <ModernFormSection
             title="Informations Générales"
@@ -438,11 +485,20 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
                 options={[
                   { value: "Législatives", label: "Législatives" },
                   { value: "Locales", label: "Locales" },
+                  { value: "Élection Professionnelle", label: "Professionnelle" },
                 ]}
                 icon={<Vote className="w-4 h-4 sm:w-5 sm:h-5" />}
                 required
               />
             </ModernFormGrid>
+
+            <div className="mt-4">
+              <label className="text-sm font-medium text-gray-700 mb-2 block">Image de couverture</label>
+              <ImageUploader 
+                onUploadSuccess={(url) => setFormData({ ...formData, coverImage: url } as any)}
+                defaultValue={(election as any).cover_image || (election as any).coverImage}
+              />
+            </div>
 
             <ModernFormGrid cols={2}>
               <FloatingInput
@@ -782,11 +838,13 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
               <span className="hidden sm:inline">{isSubmitting ? 'Enregistrement...' : 'Enregistrer les modifications'}</span>
               <span className="sm:hidden">{isSubmitting ? 'Sauvegarde...' : 'Sauvegarder'}</span>
             </Button>
-          </ModernFormActions>
-        </ModernForm>
-      </DialogContent>
-    </Dialog>
-  );
+</ModernFormActions>
+</ModernForm>
+</div>
+</div>
+</SheetContent>
+</Sheet>
+);
 };
 
 export default EditElectionModal;

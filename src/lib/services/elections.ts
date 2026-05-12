@@ -9,6 +9,8 @@ export interface ElectionEntity {
   localisation?: string;
   nb_electeurs?: number;
   is_published?: boolean;
+  cover_image_url?: string;
+  type?: string;
 }
 
 export async function fetchAllElections(): Promise<ElectionEntity[]> {

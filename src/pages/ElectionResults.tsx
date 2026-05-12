@@ -28,6 +28,9 @@ interface ElectionData {
   status: string;
   description?: string;
   localisation?: string;
+  is_published?: boolean;
+  nb_electeurs?: number;
+  cover_image_url?: string;
 }
 
 interface CandidateResult {
@@ -601,7 +604,7 @@ const ElectionResults: React.FC = () => {
       console.log('🔍 [ElectionResults] PV récupérés:', publishedPVs);
       console.log('🔍 [ElectionResults] Election ID recherché:', id);
 
-      const publishedBureauIdsSet = new Set((publishedPVs || []).map(pv => pv.bureau_id));
+      const publishedBureauIdsSet = new Set<string>((publishedPVs || []).map(pv => String(pv.bureau_id)));
       setPublishedBureauIds(publishedBureauIdsSet);
       console.log('📊 [ElectionResults] Nombre de PV publiés:', publishedBureauIdsSet.size);
       console.log('📊 [ElectionResults] IDs des bureaux publiés:', Array.from(publishedBureauIdsSet));
@@ -1454,9 +1457,11 @@ const ElectionResults: React.FC = () => {
                           }`} style={{ backgroundColor: results.election?.status === 'Terminée' ? electionColor : undefined }} />
                         <span className="text-xs sm:text-sm font-medium">
                           {results.election?.status} • {(() => {
+                            if (results.election?.type === 'Élection Professionnelle') return 'Élection Professionnelle';
                             return isLocal ? 'Élections Locales' : 'Élections Législatives';
                           })()}
                         </span>
+
                       </div>
                     </div>
                   );
@@ -1486,8 +1491,13 @@ const ElectionResults: React.FC = () => {
 
                   {/* Texte d'information sur les résultats provisoires */}
                   <div className="w-full mt-2">
-                    <p className="text-xs text-gray-500">* Résultats provisoires (à confirmer par le Ministère de l'Intérieur).</p>
+                    <p className="text-xs text-gray-500">
+                      * {results.election?.type === 'Élection Professionnelle' 
+                        ? "Résultat provisoire avant communication officielle par le Ministère du Travail." 
+                        : "Résultats provisoires (à confirmer par le Ministère de l'Intérieur)."}
+                    </p>
                   </div>
+
                   {results.election?.localisation && (
                     <span className="flex items-center gap-1.5 sm:gap-2 text-gray-700 bg-white rounded-full px-2.5 sm:px-3 py-1.5 sm:py-2 border text-xs sm:text-sm w-full sm:w-auto justify-center">
                       <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-gov-blue" />
@@ -1500,14 +1510,19 @@ const ElectionResults: React.FC = () => {
               {/* Colonne droite: illustration */}
               <div className="relative order-1 lg:order-2">
                 {/* Image */}
-                <div className="relative rounded-xl sm:rounded-2xl shadow-2xl border bg-white overflow-hidden">
-                  <img src={'/images/resultat_election.jpg'} alt="Aperçu des résultats" className="w-full h-auto object-cover" />
+                <div className="relative rounded-xl sm:rounded-2xl shadow-2xl border bg-white overflow-hidden aspect-video lg:aspect-auto">
+                  <img 
+                    src={results.election?.cover_image_url || '/images/resultat_election.jpg'} 
+                    alt="Aperçu des résultats" 
+                    className="w-full h-full object-cover" 
+                  />
                 </div>
+
               </div>
             </div>
             {/* Copyright aligné à gauche, léger décalage à droite et police légèrement agrandie */}
             <div className="mt-3 sm:mt-2 lg:mt-2 pl-1 sm:pl-2 text-gray-600 text-[11px] leading-none text-left">
-              © 2025 Équipe de Campagne LEBOMO Arnauld Clobert
+              © 2026 solution o'Hitu - Tous droits réservés
             </div>
             {/* Supprimé: copyright dupliqué en desktop */}
           </div>
@@ -2171,7 +2186,9 @@ const ElectionResults: React.FC = () => {
                             <details key={idx} className="bg-white rounded border">
                               <summary className="cursor-pointer px-3 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-100">
                                 <span className="font-semibold text-sm sm:text-base">{row.center_name}</span>
-                                <div className="grid grid-cols-3 gap-2 sm:gap-3 text-xs sm:text-sm">
+                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 text-xs sm:text-sm">
+                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Inscrits</div><div className="font-semibold text-xs sm:text-sm">{row.total_registered?.toLocaleString() || '-'}</div></div>
+                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Votants</div><div className="font-semibold text-xs sm:text-sm">{row.total_voters?.toLocaleString() || '-'}</div></div>
                                   <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Voix</div><div className="font-semibold text-xs sm:text-sm">{row.candidate_votes}</div></div>
                                   <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Score</div><div className="font-semibold text-xs sm:text-sm">{typeof row.candidate_percentage === 'number' ? `${Math.min(Math.max(row.candidate_percentage, 0), 100).toFixed(2)}%` : '-'}</div></div>
                                   <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Abstention</div><div className="font-semibold text-xs sm:text-sm">{typeof row.candidate_participation_pct === 'number' ? `${(100 - Math.min(Math.max(row.candidate_participation_pct, 0), 100)).toFixed(2)}%` : '-'}</div></div>
@@ -2377,10 +2394,14 @@ const ElectionResults: React.FC = () => {
                               <p className="text-gray-600 text-xs sm:text-sm">Centre de vote</p>
                             </div>
                           </div>
-                          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
+                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
                               <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Inscrits</div>
                               <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_registered?.toLocaleString?.() || c.total_registered}</div>
+                            </div>
+                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Votants</div>
+                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_voters?.toLocaleString?.() || c.total_voters}</div>
                             </div>
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
                               <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Exprimés</div>

@@ -91,6 +91,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
           return;
         }
 
+        console.log(`📊 ${data?.length || 0} centres chargés pour l'entreprise ${enterpriseId}`);
         const transformedCenters = (data || []).map((center: any) => ({
           id: center.id,
           name: center.name || center.nom || '',
@@ -178,8 +179,35 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
         voters: data.total_voters || 0
       };
 
-      onSubmit([createdCenter]);
-      toast.success('Site créé avec succès');
+      // Refresh lists
+      let query = supabase.from('voting_centers').select('*');
+      if (isPro) query = query.eq('enterprise_id', enterpriseId);
+      const { data: updatedCenters } = await query.order('name');
+      
+      const transformed = (updatedCenters || []).map((c: any) => ({
+        id: c.id,
+        name: c.name || c.nom || '',
+        address: c.address || c.adresse || '',
+        totalVoters: c.total_voters || 0,
+        totalBureaux: c.total_bureaux || 0
+      }));
+      setCenters(transformed);
+      
+      // Auto-select
+      setSelectedCenters(prev => [...prev, data.id]);
+      
+      // Reset and switch mode
+      setNewSite({
+        name: '',
+        address: '',
+        contact_name: '',
+        contact_phone: '',
+        total_voters: 0,
+        total_bureaux: 1
+      });
+      setMode('select');
+      
+      toast.success('Site créé avec succès. Vous pouvez maintenant le sélectionner dans la liste.');
     } catch (error: any) {
       console.error(error);
       toast.error(`Erreur: ${error.message}`);
@@ -214,7 +242,6 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
                 variant={mode === 'select' ? 'default' : 'ghost'} 
                 size="sm"
                 onClick={() => setMode('select')}
-                disabled={centers.length === 0}
                 className="text-xs"
               >
                 <Search className="w-3 h-3 mr-1" /> Sélectionner
@@ -244,7 +271,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
                 title={isPro ? "Sites" : "Centres"}
                 icon={<Building className="w-4 h-4 sm:w-5 sm:h-5 text-[#1e40af]" />}
                 searchable={true}
-                emptyMessage={isPro ? "Aucun site existant pour cette entreprise" : "Aucun centre sélectionné"}
+                emptyMessage={isPro ? "Aucun site trouvé pour cette entreprise. Utilisez l'onglet 'Créer Nouveau' pour en ajouter un." : "Aucun centre trouvé."}
                 className="w-full"
               />
 

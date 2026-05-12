@@ -7,6 +7,8 @@ import FloatingInput from '@/components/ui/floating-input';
 import FloatingSelect from '@/components/ui/floating-select';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import ImageUploader from '@/components/ui/ImageUploader';
+
 
 interface ProfessionalElectionWizardProps {
   onClose: () => void;
@@ -64,8 +66,10 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     hasSecondRound: true,
     secondRoundDate: '',
     recoursStart: '',
-    recoursEnd: ''
+    recoursEnd: '',
+    coverImage: ''
   });
+
 
   // Auto-calculate dates based on election date
   useEffect(() => {
@@ -128,11 +132,8 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
   const handleSubmit = async () => {
     try {
       if (onSubmit) {
-        onSubmit(formData);
+        await onSubmit(formData);
       }
-      
-      // Ici on pourrait insérer directement dans Supabase si on veut gérer ça dans le composant
-      // Mais on va laisser ElectionManagementUnified le faire comme pour l'ancien wizard
       
       if (onSuccess) {
         onSuccess();
@@ -191,7 +192,15 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 disabled
               />
             </ModernFormGrid>
+
+            <div className="mt-4">
+              <ImageUploader 
+                onUploadSuccess={(url) => setFormData({ ...formData, coverImage: url })}
+                defaultValue={formData.coverImage}
+              />
+            </div>
           </ModernFormSection>
+
         );
       case 2:
         return (

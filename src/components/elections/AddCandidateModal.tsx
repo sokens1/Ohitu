@@ -40,7 +40,8 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
   
   // Pro state: Unions
   const [unions, setUnions] = useState<any[]>([]);
-  const [selectedUnionId, setSelectedUnionId] = useState('');
+  const [selectedUnions, setSelectedUnions] = useState<string[]>([]);
+  const [selectedUnionId, setSelectedUnionId] = useState(''); // Added back for single selection in Create flow
   const [newUnion, setNewUnion] = useState({ name: '', acronym: '' });
   const [college, setCollege] = useState('general');
   
@@ -136,18 +137,66 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
     loadData();
   }, [isPro]);
 
-  const handleSubmitPolitical = (e: React.FormEvent) => {
+  const handleSubmitSelection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedCandidates.length > 0) {
-      const candidatesToAdd = candidates
-        .filter(c => selectedCandidates.includes(c.id))
-        .map(c => ({
-          ...c,
-          photo: '/placeholder.svg'
-        }));
-      onSubmit(candidatesToAdd);
+    if (isPro) {
+      if (selectedUnions.length === 0) {
+        toast.error('Veuillez sélectionner au moins un syndicat');
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const candidatesToAdd: Candidate[] = [];
+
+        for (const unionId of selectedUnions) {
+          const union = unions.find(u => u.id === unionId);
+          
+          // Créer une entrée dans union_lists pour chaque syndicat sélectionné
+          const { data: listData, error: listError } = await supabase
+            .from('union_lists')
+            .insert({
+              election_id: electionId,
+              union_id: unionId,
+              college: college,
+              titulaires: [{ name: `Tête de liste ${union.acronym || union.name}`, role: 'Tête de liste' }],
+              suppleants: [{ name: `Suppléant ${union.acronym || union.name}`, role: 'Suppléant' }]
+            })
+            .select()
+            .single();
+
+          if (listError) throw listError;
+
+          candidatesToAdd.push({
+            id: listData.id,
+            name: union.name,
+            party: union.acronym || 'Indépendant',
+            isOurCandidate: false,
+            unionId: unionId,
+            college: college
+          });
+        }
+
+        onSubmit(candidatesToAdd);
+        toast.success(`${selectedUnions.length} liste${selectedUnions.length > 1 ? 's' : ''} ajoutée${selectedUnions.length > 1 ? 's' : ''}`);
+      } catch (error: any) {
+        console.error(error);
+        toast.error(`Erreur: ${error.message}`);
+      } finally {
+        setLoading(false);
+      }
     } else {
-      toast.error('Veuillez sélectionner au moins un candidat');
+      if (selectedCandidates.length > 0) {
+        const candidatesToAdd = candidates
+          .filter(c => selectedCandidates.includes(c.id))
+          .map(c => ({
+            ...c,
+            photo: '/placeholder.svg'
+          }));
+        onSubmit(candidatesToAdd);
+      } else {
+        toast.error('Veuillez sélectionner au moins un candidat');
+      }
     }
   };
 
@@ -216,8 +265,20 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
         college: college
       };
 
-      onSubmit([proCandidate]);
-      toast.success('Liste syndicale ajoutée');
+      // Refresh lists
+      const { data: updatedUnions } = await supabase.from('unions').select('*').order('name');
+      setUnions(updatedUnions || []);
+      
+      // Auto-select the newly created union
+      setSelectedUnions(prev => [...prev, unionId]);
+      
+      // Reset form and switch mode
+      setNewUnion({ name: '', acronym: '' });
+      setTeteDeListe({ name: '', photo: '', file: null, preview: '' });
+      setSuppleant({ name: '', photo: '', file: null, preview: '' });
+      setMode('select');
+      
+      toast.success('Liste syndicale ajoutée. Vous pouvez maintenant la sélectionner dans la liste.');
     } catch (error: any) {
       console.error(error);
       toast.error(`Erreur: ${error.message}`);
@@ -252,7 +313,6 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                 variant={mode === 'select' ? 'default' : 'ghost'} 
                 size="sm"
                 onClick={() => setMode('select')}
-                disabled={unions.length === 0}
                 className="text-xs"
               >
                 <Search className="w-3 h-3 mr-1" /> Sélectionner Syndicat
@@ -268,59 +328,63 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
             </div>
           )}
 
-          {!isPro ? (
-            <form onSubmit={handleSubmitPolitical} className="space-y-6">
+          {mode === 'select' ? (
+            <form onSubmit={handleSubmitSelection} className="space-y-6">
               <MultiSelect
-                options={candidates.map(c => ({
-                  value: c.id,
-                  label: c.name,
-                  subtitle: c.party
-                }))}
-                selected={selectedCandidates}
-                onSelectionChange={setSelectedCandidates}
-                placeholder="Sélectionnez des candidats..."
-                title="Candidats"
-                icon={<Users className="w-4 h-4 sm:w-5 sm:h-5 text-[#1e40af]" />}
+                options={isPro 
+                  ? unions.map(u => ({ value: u.id, label: u.name, subtitle: u.acronym || 'N/A' }))
+                  : candidates.map(c => ({ value: c.id, label: c.name, subtitle: c.party }))
+                }
+                selected={isPro ? selectedUnions : selectedCandidates}
+                onSelectionChange={isPro ? setSelectedUnions : setSelectedCandidates}
+                placeholder={isPro ? "Sélectionnez des syndicats..." : "Sélectionnez des candidats..."}
+                title={isPro ? "Syndicats" : "Candidats"}
+                icon={isPro ? <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" /> : <Users className="w-4 h-4 sm:w-5 sm:h-5 text-[#1e40af]" />}
                 searchable={true}
-                emptyMessage="Aucun candidat sélectionné"
+                emptyMessage={isPro ? "Aucun syndicat trouvé. Utilisez l'onglet 'Nouveau Syndicat' pour en créer un." : "Aucun candidat trouvé."}
                 className="w-full"
               />
+
+              {isPro && (
+                <FloatingSelect
+                  label="Collège électoral pour ces listes"
+                  value={college}
+                  onChange={(val) => setCollege(val)}
+                  options={[
+                    { value: 'general', label: 'Collège Unique / Général' },
+                    { value: 'cadres', label: 'Cadres' },
+                    { value: 'employes', label: 'Employés' },
+                    { value: 'ouvriers', label: 'Ouvriers' }
+                  ]}
+                />
+              )}
+
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
                 <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
                 <Button 
                   type="submit" 
                   className="bg-purple-600 hover:bg-purple-700 text-white" 
-                  disabled={selectedCandidates.length === 0}
+                  disabled={loading || (isPro ? selectedUnions.length === 0 : selectedCandidates.length === 0)}
                 >
-                  Ajouter {selectedCandidates.length} candidat{selectedCandidates.length > 1 ? 's' : ''}
+                  {loading ? 'Ajout...' : `Ajouter ${isPro ? selectedUnions.length : selectedCandidates.length} élément(s)`}
                 </Button>
               </div>
             </form>
           ) : (
             <form onSubmit={handleAddUnionList} className="space-y-6">
-              {mode === 'select' ? (
-                <FloatingSelect
-                  label="Choisir un syndicat"
-                  icon={<Briefcase className="w-4 h-4" />}
-                  value={selectedUnionId}
-                  onChange={(val) => setSelectedUnionId(val)}
-                  options={unions.map(u => ({ value: u.id, label: `${u.name} (${u.acronym || 'N/A'})` }))}
+              <ModernFormGrid columns={2}>
+                <FloatingInput
+                  label="Nom du Syndicat"
+                  value={newUnion.name}
+                  onChange={(e) => setNewUnion({...newUnion, name: e.target.value})}
+                  required
                 />
-              ) : (
-                <ModernFormGrid columns={2}>
-                  <FloatingInput
-                    label="Nom du Syndicat"
-                    value={newUnion.name}
-                    onChange={(e) => setNewUnion({...newUnion, name: e.target.value})}
-                    required
-                  />
-                  <FloatingInput
-                    label="Acronyme (ex: CGT, FO...)"
-                    value={newUnion.acronym}
-                    onChange={(e) => setNewUnion({...newUnion, acronym: e.target.value})}
-                  />
-                </ModernFormGrid>
-              )}
+                <FloatingInput
+                  label="Acronyme (ex: CGT, FO...)"
+                  value={newUnion.acronym}
+                  onChange={(e) => setNewUnion({...newUnion, acronym: e.target.value})}
+                />
+              </ModernFormGrid>
 
               <FloatingSelect
                 label="Collège électoral"

@@ -78,7 +78,7 @@ const ElectionManagement = () => {
           centers: election.voting_centers_count || 0,
           bureaux: election.voting_bureaux_count || 0,
           location: `${election.communes?.name || ''}, ${election.departments?.name || ''}`,
-          type: election.election_type || "Générale",
+          type: election.type || "Générale",
           seatsAvailable: election.seats_available || 1,
           budget: election.budget || 0,
           voteGoal: election.vote_goal || 0,

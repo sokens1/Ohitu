@@ -147,6 +147,7 @@ export interface Election {
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;
+  cover_image?: string;
   // Champs spécifiques Élection Professionnelle
   professionalConfig?: ProfessionalElectionConfig;
 }
@@ -220,6 +221,7 @@ export interface CreateElectionData {
   // Liens optionnels à créer lors de la création
   candidates?: Array<{ id: string; isOurCandidate?: boolean }>;
   centers?: Array<{ id: string }>;
+  cover_image?: string;
 }
 
 export interface UpdateElectionData extends Partial<CreateElectionData> {
