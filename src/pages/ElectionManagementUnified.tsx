@@ -30,11 +30,14 @@ import {
   Edit,
   Trash2,
   Copy,
-  FileDown
+  FileDown,
+  RefreshCcw
 } from 'lucide-react';
 import ElectionWizard from '@/components/elections/ElectionWizard';
+import ProfessionalElectionWizard from '@/components/elections/ProfessionalElectionWizard';
 import ElectionDetailView from '@/components/elections/ElectionDetailView';
 import EditElectionModal from '@/components/elections/EditElectionModal';
+import EditProfessionalElectionModal from '@/components/elections/EditProfessionalElectionModal';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -58,6 +61,7 @@ const ElectionManagementUnified = () => {
   const { logCreate, logUpdate, logDelete, logExport } = useAudit();
 
   const [showWizard, setShowWizard] = useState(false);
+  const [showProWizard, setShowProWizard] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingElection, setEditingElection] = useState<Election | null>(null);
   const [searchQuery, setSearchQueryLocal] = useState('');
@@ -68,33 +72,53 @@ const ElectionManagementUnified = () => {
   // Fonction pour recalculer automatiquement le nombre d'électeurs d'une élection
   const recalculateElectionVoters = useCallback(async (electionId: string) => {
     try {
-      // Récupérer les centres liés à cette élection
       const { data: centersData } = await supabase
         .from('election_centers')
         .select(`
           voting_centers (
             id,
+            total_voters,
             voting_bureaux (
               registered_voters
             )
           )
         `)
         .eq('election_id', electionId);
-
       let totalElecteurs = 0;
+      let hasCenters = false;
       
-      if (centersData) {
+      if (centersData && centersData.length > 0) {
         centersData.forEach(center => {
           if (center.voting_centers) {
-            const votersCount = center.voting_centers.voting_bureaux?.reduce((sum: number, bureau: any) => 
-              sum + (bureau.registered_voters || 0), 0) || 0;
+            hasCenters = true;
+            const vc = center.voting_centers as any;
+            const bureaux = Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [];
+              
+            const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) => 
+              sum + (Number(bureau.registered_voters) || 0), 0);
+            
+            const votersCount = votersFromBureaux > 0 ? votersFromBureaux : (Number(vc.total_voters) || 0);
             totalElecteurs += votersCount;
           }
         });
       }
 
+      // Si pas de centres ou si on veut aussi les collèges (pro)
+      const { data: collegesData } = await supabase
+        .from('electoral_colleges')
+        .select('total_voters')
+        .eq('election_id', electionId);
+        
+      if (collegesData && collegesData.length > 0) {
+        const collegesTotal = collegesData.reduce((sum, college) => sum + (Number(college.total_voters) || 0), 0);
+        // Pour les pro, les collèges sont la source primaire
+        if (!hasCenters) {
+          totalElecteurs = collegesTotal;
+        }
+      }
+
       // Mettre à jour la colonne nb_electeurs
-      const { error: updateError } = await supabase
+      await supabase
         .from('elections')
         .update({ 
           nb_electeurs: totalElecteurs,
@@ -102,34 +126,34 @@ const ElectionManagementUnified = () => {
         })
         .eq('id', electionId);
 
-      if (updateError) {
-        console.error('Erreur lors de la mise à jour nb_electeurs:', updateError);
-        throw updateError;
-      }
-
-      console.log(`Recalcul automatique nb_electeurs pour élection ${electionId}: ${totalElecteurs}`);
       return totalElecteurs;
     } catch (error) {
-      console.error('Erreur lors du recalcul des électeurs:', error);
-      throw error;
+      console.error('Erreur recalculateElectionVoters:', error);
+      return 0;
     }
   }, []);
 
   // Fonction utilitaire pour rafraîchir les données des élections
   const refreshElectionsData = useCallback(async () => {
     try {
+      console.log('🔄 Rafraîchissement des données des élections...');
       setLoading(true);
+      
       const { data, error } = await supabase
         .from('elections')
-        .select('*')
+        .select(`
+          *,
+          enterprises (id, name, province_name, commune_name)
+        `)
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Erreur lors du chargement des élections:', error);
-        setError(error.message);
-        return;
+        console.error('❌ Erreur lors de la récupération des élections:', error);
+        throw error;
       }
 
+      console.log(`📊 ${data?.length || 0} élections récupérées de la base de données`);
+      
       // Récupérer les compteurs de candidats, centres et bureaux pour chaque élection
       const electionsWithCounts = await Promise.all(
         (data || []).map(async (election) => {
@@ -146,6 +170,8 @@ const ElectionManagementUnified = () => {
               id,
               voting_centers(
                 id,
+                total_voters,
+                total_bureaux,
                 voting_bureaux!center_id(id, registered_voters)
               )
             `)
@@ -155,30 +181,41 @@ const ElectionManagementUnified = () => {
           let totalBureaux = 0;
           let totalElecteurs = 0;
           
-          if (centersData) {
+          if (centersData && centersData.length > 0) {
             centersData.forEach(center => {
               if (center.voting_centers) {
-                // Compter les bureaux réels
-                const bureauxCount = center.voting_centers.voting_bureaux?.length || 0;
+                const vc = center.voting_centers as any;
+                // Compter les bureaux : soit depuis la liste, soit depuis la colonne total_bureaux
+                const bureaux = Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [];
+                const bureauxCount = bureaux.length > 0 ? bureaux.length : (Number(vc.total_bureaux) || 0);
                 totalBureaux += bureauxCount;
                 
-                // Calculer les électeurs réels à partir des bureaux
-                const votersCount = center.voting_centers.voting_bureaux?.reduce((sum: number, bureau: any) => 
-                  sum + (bureau.registered_voters || 0), 0) || 0;
+                // Calculer les électeurs : soit depuis les bureaux, soit depuis la colonne total_voters
+                const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) => 
+                  sum + (Number(bureau.registered_voters) || 0), 0);
+                
+                const votersCount = votersFromBureaux > 0 ? votersFromBureaux : (Number(vc.total_voters) || 0);
                 totalElecteurs += votersCount;
               }
             });
           }
 
-          console.log(`Élection ${election.title}:`, {
-            centers_count: centersData?.length || 0,
-            totalBureaux,
-            totalElecteurs,
-            centersData: centersData?.map(c => ({
-              id: c.id,
-              voting_centers: c.voting_centers
-            }))
-          });
+          // Pour les élections professionnelles, vérifier aussi les collèges électoraux
+          if (election.type === 'Élection Professionnelle') {
+            const { data: collegesData } = await supabase
+              .from('electoral_colleges')
+              .select('total_voters')
+              .eq('election_id', election.id);
+            
+            if (collegesData && collegesData.length > 0) {
+              const collegesTotal = collegesData.reduce((sum, college) => sum + (Number(college.total_voters) || 0), 0);
+              // Si on n'a pas de centres, on prend le total des collèges
+              if (totalElecteurs === 0) {
+                totalElecteurs = collegesTotal;
+              }
+            }
+          }
+
 
           // Mettre à jour automatiquement la colonne nb_electeurs dans la table elections
           if (totalElecteurs !== election.nb_electeurs) {
@@ -237,18 +274,29 @@ const ElectionManagementUnified = () => {
         return {
           id: String(election.id),
           title: election.title,
-          type: election.election_type || election.type || 'Législatives',
+          type: election.type || 'Législatives',
           status: election.status || 'À venir',
           date: new Date(election.election_date || election.created_at),
           description: election.description || '',
           location: {
-            province: election.province_name || election.province || 'Haut-Ogooué',
-            commune: election.commune_name || election.commune || 'Moanda',
-            arrondissement: election.arrondissement_name || election.arrondissement || '1er Arrondissement',
-            fullAddress: election.localisation || 
-              `${election.commune_name || election.commune || 'Moanda'}, ${election.province_name || election.province || 'Haut-Ogooué'}` ||
-              'Moanda, Haut-Ogooué',
+            province: (election.type === 'Élection Professionnelle')
+              ? (election.enterprises?.province_name || 'Non spécifiée')
+              : (election.province_name || election.province || 'Haut-Ogooué'),
+            commune: (election.type === 'Élection Professionnelle')
+              ? (election.enterprises?.commune_name || 'Non spécifiée')
+              : (election.commune_name || election.commune || 'Moanda'),
+            arrondissement: (election.type === 'Élection Professionnelle')
+              ? 'Multi-établissements'
+              : (election.arrondissement_name || election.arrondissement || '1er Arrondissement'),
+            fullAddress: (election.type === 'Élection Professionnelle')
+              ? (election.enterprises?.name || 'Entreprise')
+              : (election.localisation || 
+                `${election.commune_name || election.commune || 'Moanda'}, ${election.province_name || election.province || 'Haut-Ogooué'}` ||
+                'Moanda, Haut-Ogooué'),
           },
+          cover_image: election.cover_image_url,
+          enterpriseId: election.enterprise_id,
+
           configuration: {
             seatsAvailable: election.seats_available || 1,
             budget: election.budget || 0,
@@ -275,9 +323,11 @@ const ElectionManagementUnified = () => {
           createdAt: new Date(election.created_at),
           updatedAt: new Date(election.updated_at),
           createdBy: election.created_by || 'system',
+          enterpriseId: election.enterprise_id,
         };
       });
 
+      console.log('✅ Données transformées avec succès:', transformedElections.length);
       setElections(transformedElections);
     } catch (err) {
       console.error('Erreur lors du rafraîchissement:', err);
@@ -285,7 +335,7 @@ const ElectionManagementUnified = () => {
     } finally {
       setLoading(false);
     }
-  }, [setLoading, setError, setElections]);
+  }, [setLoading, setError, setElections, recalculateElectionVoters]);
 
   // Charger les élections depuis Supabase
   useEffect(() => {
@@ -384,7 +434,9 @@ const ElectionManagementUnified = () => {
         status: updatedData.status,
         description: updatedData.description || '',
         nb_electeurs: updatedData.statistics?.totalVoters,
+        cover_image_url: (updatedData as any).coverImage || (updatedData as any).cover_image_url || (updatedData as any).cover_image,
       };
+
 
       console.log('Données à envoyer à Supabase:', supabaseData);
       console.log('ID de l\'élection à modifier:', editingElection.id);
@@ -484,11 +536,94 @@ const ElectionManagementUnified = () => {
       );
       
       setShowEditModal(false);
-      setEditingElection(null);
-      toast.success('Élection modifiée avec succès');
+      await refreshElectionsData();
+      toast.success('Élection mise à jour avec succès');
+      handleCloseEditModal();
     } catch (error) {
-      console.error('Erreur lors de la modification de l\'élection:', error);
-      toast.error('Erreur lors de la modification de l\'élection');
+      console.error(error);
+      toast.error('Erreur lors de la mise à jour de l\'élection');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateProElection = async (formData: any) => {
+    if (!editingElection) return;
+
+    try {
+      setLoading(true);
+
+      // 1. Mettre à jour l'entreprise
+      if (formData.enterpriseId) {
+        const { error: entError } = await supabase
+          .from('enterprises')
+          .update({
+            name: formData.enterpriseName,
+            sector: formData.enterpriseSector,
+            total_employees: parseInt(formData.totalEmployees),
+            employees_by_category: {
+              cadres: parseInt(formData.employeesCadres),
+              employes: parseInt(formData.employeesEmployes),
+              ouvriers: parseInt(formData.employeesOuvriers)
+            },
+            administrative_unit: formData.administrativeUnit
+          })
+          .eq('id', formData.enterpriseId);
+        if (entError) throw entError;
+      }
+
+      // 2. Mettre à jour l'élection
+      const supabaseData = {
+        title: formData.name,
+        type: formData.type,
+        election_date: formData.date,
+        status: formData.status,
+        nb_electeurs: parseInt(formData.totalEmployees),
+        legal_framework: formData.legalFramework,
+        carence: formData.carence,
+        list_display_date: formData.listDisplayDate || null,
+        campaign_start: formData.campaignStart || null,
+        campaign_end: formData.campaignEnd || null,
+        has_second_round: formData.hasSecondRound,
+        second_round_date: formData.secondRoundDate || null,
+        recours_period_start: formData.recoursStart || null,
+        recours_period_end: formData.recoursEnd || null,
+        seats_available: formData.colleges.reduce((acc: number, c: any) => acc + (parseInt(c.seats) || 0), 0),
+        cover_image_url: formData.coverImage || null
+      };
+
+      const { error: electionError } = await supabase
+        .from('elections')
+        .update(supabaseData)
+        .eq('id', editingElection.id);
+
+      if (electionError) throw electionError;
+
+      // 3. Mettre à jour les collèges (on supprime et on réinsère pour faire simple)
+      const { error: delError } = await supabase
+        .from('electoral_colleges')
+        .delete()
+        .eq('election_id', editingElection.id);
+      
+      if (delError) throw delError;
+
+      if (formData.colleges && formData.colleges.length > 0) {
+        const collegesData = formData.colleges.map((c: any) => ({
+          election_id: editingElection.id,
+          name: c.name,
+          college_type: c.type,
+          total_voters: c.voters,
+          seats_to_fill: c.seats
+        }));
+        await supabase.from('electoral_colleges').insert(collegesData);
+      }
+
+      toast.success('Élection professionnelle mise à jour avec succès');
+      await refreshElectionsData();
+      handleCloseEditModal();
+    } catch (error) {
+      console.error(error);
+      toast.error('Erreur lors de la mise à jour de l\'élection professionnelle');
     } finally {
       setLoading(false);
     }
@@ -701,8 +836,11 @@ const ElectionManagementUnified = () => {
         budget: (electionData as any).budget || electionData.configuration?.budget || 0,
         vote_goal: (electionData as any).voteGoal || electionData.configuration?.voteGoal || 0,
         nb_electeurs: (electionData as any).totalVoters || electionData.statistics?.totalVoters || 0,
+        cover_image_url: (electionData as any).coverImage || (electionData as any).cover_image_url || (electionData as any).cover_image,
+        enterprise_id: (electionData as any).enterpriseId || (electionData as any).enterprise_id || null,
         ...(createdBy ? { created_by: createdBy } : {}),
       };
+
 
       const { data, error } = await supabase
         .from('elections')
@@ -843,6 +981,113 @@ const ElectionManagementUnified = () => {
     }
   };
 
+  const handleCreateProElection = async (electionData: any) => {
+    try {
+      setLoading(true);
+      // Récupérer l'utilisateur
+      let createdBy: string | null = null;
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        createdBy = auth?.user?.id ?? null;
+      } catch (e) {}
+
+      // Créer l'entreprise d'abord si elle n'existe pas ou l'insérer
+      const { data: enterprise, error: entError } = await supabase
+        .from('enterprises')
+        .insert({
+          name: electionData.enterpriseName,
+          sector: electionData.enterpriseSector,
+          total_employees: parseInt(electionData.totalEmployees),
+          employees_by_category: {
+            cadres: parseInt(electionData.employeesCadres),
+            employes: parseInt(electionData.employeesEmployes),
+            ouvriers: parseInt(electionData.employeesOuvriers)
+          },
+          administrative_unit: electionData.administrativeUnit
+        })
+        .select()
+        .single();
+        
+      if (entError) {
+        console.error('Erreur lors de la création de l\'entreprise:', entError);
+        throw entError;
+      }
+
+      // Créer l'élection
+      const supabaseData = {
+        title: electionData.name,
+        type: electionData.type,
+        election_date: electionData.date,
+        status: 'À venir',
+        enterprise_id: enterprise.id,
+        nb_electeurs: parseInt(electionData.totalEmployees),
+        legal_framework: electionData.legalFramework,
+        carence: electionData.carence,
+        list_display_date: electionData.listDisplayDate || null,
+        campaign_start: electionData.campaignStart || null,
+        campaign_end: electionData.campaignEnd || null,
+        has_second_round: electionData.hasSecondRound,
+        second_round_date: electionData.secondRoundDate || null,
+        recours_period_start: electionData.recoursStart || null,
+        recours_period_end: electionData.recoursEnd || null,
+        seats_available: electionData.colleges.reduce((acc: number, c: any) => acc + (parseInt(c.seats) || 0), 0),
+        cover_image_url: electionData.coverImage || null
+      };
+
+      
+      // Ajouter le created_by seulement s'il est défini (comme pour l'élection classique)
+      if (createdBy) {
+        (supabaseData as any).created_by = createdBy;
+      }
+
+      const { data, error } = await supabase
+        .from('elections')
+        .insert(supabaseData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Erreur lors de la création de l\'élection:', error);
+        throw error;
+      }
+      
+      const electionId = String(data.id);
+
+      // Insérer les collèges
+      if (electionData.colleges && electionData.colleges.length > 0) {
+        const collegesData = electionData.colleges.map((c: any) => ({
+          election_id: electionId,
+          name: c.name,
+          college_type: c.type,
+          total_voters: c.voters,
+          seats_to_fill: c.seats
+        }));
+        const { error: collError } = await supabase.from('electoral_colleges').insert(collegesData);
+        if (collError) {
+          console.error('Erreur lors de la création des collèges:', collError);
+          throw collError;
+        }
+      }
+
+      await refreshElectionsData();
+      
+      await logCreate(
+        'election',
+        electionId,
+        `Création de l'élection professionnelle "${electionData.name}"`,
+        { new_values: supabaseData }
+      );
+      
+      setShowProWizard(false);
+      toast.success('Élection professionnelle créée avec succès');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Erreur: ${error.message || 'Erreur lors de la création'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (selectedElection) {
     console.log('Élection sélectionnée pour la vue détaillée:', selectedElection);
     console.log('Données de localisation de l\'élection sélectionnée:', selectedElection.location);
@@ -923,14 +1168,41 @@ const ElectionManagementUnified = () => {
                 </p>
               </div>
               <div className="flex flex-col xs:flex-row gap-2 sm:gap-3 w-full">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full xs:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
+                      size="lg"
+                    >
+                      <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                      <span className="hidden xs:inline">Nouvelle Élection</span>
+                      <span className="xs:hidden">Nouvelle</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuItem onClick={() => setShowWizard(true)} className="py-3">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Classique</span>
+                        <span className="text-xs text-gray-500">Législatives, Locales</span>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setShowProWizard(true)} className="py-3">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-purple-700">Professionnelle</span>
+                        <span className="text-xs text-gray-500">Délégués du personnel (Entreprises)</span>
+                      </div>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                
                 <Button 
-                  onClick={() => setShowWizard(true)}
-                  className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full xs:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
-                  size="lg"
+                  variant="outline"
+                  onClick={refreshElectionsData}
+                  className="bg-white hover:bg-gray-50 border-gray-200 text-gray-700 shadow-sm px-4 py-2 sm:px-6 sm:py-3 h-auto"
                 >
-                  <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                  <span className="hidden xs:inline">Nouvelle Élection</span>
-                  <span className="xs:hidden">Nouvelle</span>
+                  <RefreshCcw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+                  Actualiser
                 </Button>
               </div>
             </div>
@@ -1060,6 +1332,7 @@ const ElectionManagementUnified = () => {
                     <SelectItem value="all">Tous les types</SelectItem>
                     <SelectItem value="Législatives">Législatives</SelectItem>
                     <SelectItem value="Locales">Locales</SelectItem>
+                    <SelectItem value="Élection Professionnelle">Professionnelle</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1112,15 +1385,33 @@ const ElectionManagementUnified = () => {
                   : 'Commencez par créer votre première élection pour gérer le processus électoral.'
                 }
               </p>
-              <Button 
-                onClick={() => setShowWizard(true)}
-                className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full sm:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
-                size="lg"
-              >
-                <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                <span className="hidden xs:inline">Créer une élection</span>
-                <span className="xs:hidden">Créer</span>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full sm:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
+                    size="lg"
+                  >
+                    <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    <span className="hidden xs:inline">Créer une élection</span>
+                    <span className="xs:hidden">Créer</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuItem onClick={() => setShowWizard(true)} className="py-3">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Classique</span>
+                      <span className="text-xs text-gray-500">Législatives, Locales</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setShowProWizard(true)} className="py-3">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-purple-700">Professionnelle</span>
+                      <span className="text-xs text-gray-500">Délégués du personnel</span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </CardContent>
           </Card>
         ) : (
@@ -1377,13 +1668,29 @@ const ElectionManagementUnified = () => {
           />
         )}
 
+        {/* Professional Election Wizard Modal */}
+        {showProWizard && (
+          <ProfessionalElectionWizard 
+            onClose={() => setShowProWizard(false)}
+            onSubmit={handleCreateProElection}
+          />
+        )}
+
         {/* Edit Election Modal */}
         {showEditModal && editingElection && (
-          <EditElectionModal
-            election={editingElection}
-            onClose={handleCloseEditModal}
-            onUpdate={handleUpdateElection}
-          />
+          editingElection.type === 'Élection Professionnelle' ? (
+            <EditProfessionalElectionModal
+              election={editingElection}
+              onClose={handleCloseEditModal}
+              onUpdate={handleUpdateProElection}
+            />
+          ) : (
+            <EditElectionModal
+              election={editingElection}
+              onClose={handleCloseEditModal}
+              onUpdate={handleUpdateElection}
+            />
+          )
         )}
       </div>
     </Layout>

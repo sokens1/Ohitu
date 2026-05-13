@@ -1,7 +1,98 @@
 // Types unifiés pour la gestion des élections
-export type ElectionType = 'Législatives' | 'Locales';
+export type ElectionType = 'Législatives' | 'Locales' | 'Élection Professionnelle';
 export type ElectionStatus = 'À venir' | 'En cours' | 'Terminée' | 'Annulée';
 export type UserRole = 'super-admin' | 'election-manager' | 'data-entry' | 'observer';
+
+// ============================================================================
+// Types spécifiques aux Élections Professionnelles (Délégués du Personnel)
+// ============================================================================
+
+export type EnterpriseSector = 'public' | 'parapublic' | 'prive';
+export type CnepStatus = 'pending' | 'accepted' | 'mise_en_demeure' | 'rejected' | 'ras';
+export type CollegeType = 'cadres' | 'employes' | 'ouvriers' | 'general';
+
+// Entreprise / Établissement
+export interface Enterprise {
+  id?: string;
+  name: string;
+  sector: EnterpriseSector;
+  administrativeUnit: string; // Ministère de rattachement
+  totalEmployees: number;
+  employeesByCategory: {
+    cadres: number;
+    employes: number;
+    ouvriers: number;
+  };
+  hrContact: {
+    name: string;
+    phone: string;
+    email: string;
+  };
+  province: string;
+  commune: string;
+  provinceId?: string;
+  communeId?: string;
+}
+
+// Syndicat
+export interface Union {
+  id?: string;
+  name: string;
+  acronym: string;
+  registrationNumber: string; // N° récépissé
+  registrationDate?: string;
+  federation?: string;
+  confederation?: string;
+}
+
+// Membre d'une liste syndicale (Titulaire ou Suppléant)
+export interface UnionListMember {
+  name: string;
+  position?: string; // Poste dans l'entreprise
+  order: number; // Ordre sur la liste
+}
+
+// Liste syndicale pour une élection
+export interface UnionList {
+  id?: string;
+  electionId?: string;
+  union: Union;
+  college: CollegeType;
+  isIndependent: boolean; // Liste libre (2nd tour si carence)
+  cnepStatus: CnepStatus;
+  cnepObservation?: string;
+  titulaires: UnionListMember[];
+  suppleants: UnionListMember[];
+}
+
+// Collège électoral
+export interface ElectoralCollege {
+  id?: string;
+  name: string;
+  type: CollegeType;
+  totalVoters: number;
+  seatsToFill: number; // Délégués à élire dans ce collège
+}
+
+// Configuration spécifique Élection Professionnelle
+export interface ProfessionalElectionConfig {
+  enterprise: Enterprise;
+  unionLists: UnionList[];
+  colleges: ElectoralCollege[];
+  chronogram: {
+    listDisplayDate: string; // Affichage listes (scrutin - 5 jours)
+    campaignStart: string;
+    campaignEnd: string;
+    firstRoundDate: string;
+    secondRoundDate?: string; // 1er tour + 7 jours
+    recoursStart?: string;
+    recoursEnd?: string;
+  };
+  hasSecondRound: boolean;
+  carence: boolean; // Aucune liste valide au 1er tour
+  participationRate?: number;
+  legalFramework: string; // Ex: 'LOI-022-2021 + Arrêté 000147'
+}
 
 // Interface géographique unifiée
 export interface GeographicLocation {
@@ -56,6 +147,9 @@ export interface Election {
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;
+  cover_image?: string;
+  // Champs spécifiques Élection Professionnelle
+  professionalConfig?: ProfessionalElectionConfig;
 }
 
 // Interface pour les candidats
@@ -127,6 +221,7 @@ export interface CreateElectionData {
   // Liens optionnels à créer lors de la création
   candidates?: Array<{ id: string; isOurCandidate?: boolean }>;
   centers?: Array<{ id: string }>;
+  cover_image?: string;
 }
 
 export interface UpdateElectionData extends Partial<CreateElectionData> {

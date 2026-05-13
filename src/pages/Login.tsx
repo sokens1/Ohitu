@@ -199,7 +199,7 @@ const Login = () => {
           {/* Copyright desktop aligné à la même colonne (conteneur max-w-md centré) */}
           <div className="hidden lg:block w-full mt-8">
             <div className="max-w-md mx-auto text-blue-100 text-[10px] lg:text-xs opacity-80 text-center">
-              © 2025 Équipe de Campagne LEBOMO Arnauld Clobert
+              © 2026 o'Hitu - Tous droits réservés
             </div>
           </div>
           {/* Copyright déplacé plus bas (voir footer absolu ci-dessous) */}
@@ -318,7 +318,7 @@ const Login = () => {
             </div>
               </div>
               <div className="mt-12 text-blue-100 text-[10px] opacity-80 text-center px-2 leading-snug whitespace-normal">
-                © 2025 Équipe de Campagne LEBOMO Arnauld Clobert
+                © 2026 o'Hitu - Tous droits réservés
               </div>
             </div>
         </div>
@@ -399,7 +399,7 @@ const Login = () => {
 
               <div className="mt-4 sm:mt-6 text-center">
                 <p className="text-xs text-gray-500">
-                  o'Hitu
+                  o'Hitu - une solution de CNX 4-0
                 </p>
             </div>
           </CardContent>

@@ -23,6 +23,7 @@ interface ElectionData {
   title: string;
   election_date: string;
   status: string;
+  cover_image_url?: string;
 }
 
 interface CandidateResult {
@@ -136,9 +137,15 @@ const PublicHomePage = () => {
         setAllElections(all as any);
         if (all && all.length > 0) {
           const now = new Date();
-          const withDates = all.map((e: any) => ({ ...e, _date: new Date(e.election_date) }));
+          const filtered = all.filter((e: any) => {
+            const s = String(e.status || '').toLowerCase();
+            return !(s === 'terminée' || s === 'terminee' || s === 'terminé' || s === 'termine' || s === 'terminer' || s === 'fini');
+          });
+          const withDates = filtered.map((e: any) => ({ ...e, _date: new Date(e.election_date) }));
           const next = withDates.find((e: any) => e._date.getTime() >= new Date(now.setHours(0, 0, 0, 0)).getTime()) || withDates[withDates.length - 1];
           setNextElection(next as any);
+          setAllElections(filtered as any);
+
         } else {
           setNextElection(null);
         }
@@ -184,7 +191,8 @@ const PublicHomePage = () => {
         .order('created_at', { ascending: false })
         .limit(10);
 
-      const ticker = (notificationsList.data || []).map((n: any) => n.title || n.message).filter(Boolean);
+      const ticker = (notificationsList || []).map((n: any) => n.title || n.message).filter(Boolean);
+
       setAnnouncements(ticker.length > 0 ? ticker : ['Aucune annonce disponible pour le moment']);
 
       const participation = totalCenters > 0 ? Math.min((totalPVs / totalCenters) * 100, 100) : 0;
@@ -382,13 +390,17 @@ const PublicHomePage = () => {
       <section
           className="relative min-h-[380px] md:min-h-[460px] pb-10"
         style={{
-          backgroundImage: heroOk
-            ? `url(${HERO_IMAGE})`
-            : `linear-gradient(135deg, hsl(var(--gov-blue)) 0%, hsl(var(--gov-blue-light)) 100%)`,
+          backgroundImage: results.election?.cover_image_url 
+            ? `url(${results.election.cover_image_url})`
+            : (nextElection?.cover_image_url 
+                ? `url(${nextElection.cover_image_url})`
+                : (heroOk ? `url(${HERO_IMAGE})` : `linear-gradient(135deg, hsl(var(--gov-blue)) 0%, hsl(var(--gov-blue-light)) 100%)`)),
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          backgroundAttachment: heroOk ? 'fixed' : 'scroll'
+          backgroundAttachment: (results.election?.cover_image_url || nextElection?.cover_image_url || heroOk) ? 'fixed' : 'scroll'
         }}
+
+
           aria-label="Section principale"
       >
           <div className="absolute inset-0 bg-[rgba(0,0,0,0.45)]" aria-hidden="true" />
@@ -533,7 +545,13 @@ const PublicHomePage = () => {
                   <div
                     key={e.id}
                     className="relative rounded-lg overflow-hidden border shadow-sm min-h-[140px] md:min-h-[160px] transform transition-transform duration-200 motion-safe:md:hover:scale-[1.03] cursor-pointer"
-                    style={getBgForIndex(idx)}
+                    style={{
+                      backgroundImage: (e as any).cover_image_url ? `url(${(e as any).cover_image_url})` : getBgForIndex(idx).backgroundImage,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center'
+                    }}
+
+
                     onClick={() => navigate(`/election/${e.id}/results`)}
                   >
                     <div className="absolute inset-0 bg-black/35 hover:bg-black/25 transition-colors" />
