@@ -323,7 +323,6 @@ const ElectionManagementUnified = () => {
           createdAt: new Date(election.created_at),
           updatedAt: new Date(election.updated_at),
           createdBy: election.created_by || 'system',
-          enterpriseId: election.enterprise_id,
         };
       });
 
