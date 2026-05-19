@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import auditService from '@/services/auditService';
 
-export type UserRole = 'super-admin' | 'agent-saisie' | 'validateur' | 'observateur';
+export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau';
 
 export interface User {
   id: string;
@@ -11,6 +11,8 @@ export interface User {
   email: string;
   role: UserRole;
   isActive: boolean;
+  assigned_election_id?: string | null;
+  created_by?: string | null;
 }
 
 interface AuthContextType {
@@ -51,7 +53,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               name: userData.name,
               email: userData.email,
               role: userData.role,
-              isActive: userData.is_active
+              isActive: userData.is_active,
+              assigned_election_id: userData.assigned_election_id,
+              created_by: userData.created_by
             };
             setUser(u);
             localStorage.setItem('ohitu-user', JSON.stringify(u));
@@ -109,7 +113,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           name: userData.name,
           email: userData.email,
           role: userData.role,
-          isActive: userData.is_active
+          isActive: userData.is_active,
+          assigned_election_id: userData.assigned_election_id,
+          created_by: userData.created_by
         };
 
         setUser(user);

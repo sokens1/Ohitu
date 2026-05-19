@@ -1493,7 +1493,7 @@ const ElectionResults: React.FC = () => {
                   <div className="w-full mt-2">
                     <p className="text-xs text-gray-500">
                       * {results.election?.type === 'Élection Professionnelle' 
-                        ? "Résultat provisoire avant communication officielle par le Ministère du Travail." 
+                        ? "Résultat provisoire avant validation par l'Inspecteur du Travail." 
                         : "Résultats provisoires (à confirmer par le Ministère de l'Intérieur)."}
                     </p>
                   </div>

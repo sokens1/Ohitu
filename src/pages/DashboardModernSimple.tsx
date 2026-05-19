@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,11 +14,13 @@ import {
   Zap,
   Star,
   Shield,
-  CheckCircle
+  CheckCircle,
+  ChevronDown
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '@/contexts/NotificationContext';
 import MetricCard from '@/components/dashboard/MetricCard';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface DashboardStats {
   elections: {
@@ -42,25 +44,85 @@ interface DashboardStats {
 }
 
 const DashboardModernSimple = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { addNotification } = useNotifications();
   const [loading, setLoading] = useState(true);
+  const [electionsList, setElectionsList] = useState<any[]>([]);
+  const [selectedElectionIds, setSelectedElectionIds] = useState<string[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  
   const [stats, setStats] = useState<DashboardStats>({
     elections: { total: 0, byStatus: {}, upcoming: 0, completed: 0 },
     voters: { total: 0, registered: 0, trend: 0 },
     infrastructure: { centers: 0, bureaux: 0, provinces: 0, communes: 0, candidates: 0 },
   });
 
-  // Charger les données du tableau de bord
+  // 1. Charger la liste des élections au montage
+  useEffect(() => {
+    const fetchElections = async () => {
+      try {
+        let query = supabase
+          .from('elections')
+          .select('id, title, status');
+
+        if (user && user.role !== 'super-admin' && user.role !== 'observateur' && user.role !== 'validateur') {
+          const conditions = [];
+          conditions.push(`created_by.eq.${user.id}`);
+          if (user.assigned_election_id) {
+            conditions.push(`id.eq.${user.assigned_election_id}`);
+          }
+          if ((user.role === 'agent-saisie' || user.role === 'president-bureau') && user.created_by) {
+            conditions.push(`created_by.eq.${user.created_by}`);
+          }
+          query = query.or(conditions.join(','));
+        }
+
+        const { data, error } = await query.order('election_date', { ascending: false });
+        if (error) throw error;
+        setElectionsList(data || []);
+        // Sélectionner toutes les élections par défaut
+        setSelectedElectionIds((data || []).map(e => e.id));
+      } catch (error) {
+        console.error('Erreur lors du chargement des élections:', error);
+      }
+    };
+    fetchElections();
+  }, [user]);
+
+  // 2. Click outside pour fermer le dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // 3. Charger les données du tableau de bord selon les élections sélectionnées
   useEffect(() => {
     const fetchDashboardData = async () => {
+      if (selectedElectionIds.length === 0) {
+        setStats({
+          elections: { total: 0, byStatus: {}, upcoming: 0, completed: 0 },
+          voters: { total: 0, registered: 0, trend: 0 },
+          infrastructure: { centers: 0, bureaux: 0, provinces: 0, communes: 0, candidates: 0 },
+        });
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
 
-        // 1. Statistiques des élections
+        // a. Charger les détails des élections sélectionnées
         const { data: electionsData, error: electionsError } = await supabase
           .from('elections')
-          .select('id, status, election_date, created_at');
+          .select('id, status, election_date, created_at')
+          .in('id', selectedElectionIds);
 
         if (electionsError) {
           console.error('Erreur lors du chargement des élections:', electionsError);
@@ -69,66 +131,55 @@ const DashboardModernSimple = () => {
 
         // Normaliser les statuts et compter par statut
         const electionsByStatus = (electionsData || []).reduce((acc, election) => {
-          // Normaliser le statut pour éviter les problèmes de casse
           const normalizedStatus = election.status?.trim() || 'À venir';
           acc[normalizedStatus] = (acc[normalizedStatus] || 0) + 1;
           return acc;
         }, {} as { [key: string]: number });
 
-        // Compter les élections "À venir" (basé sur le statut, pas la date)
-        const upcomingElections = (electionsData || []).filter(e => {
-          const status = e.status?.trim() || '';
-          return status === 'À venir';
-        }).length;
+        const upcomingElections = (electionsData || []).filter(e => e.status?.trim() === 'À venir').length;
+        const completedElections = (electionsData || []).filter(e => e.status?.trim() === 'Terminée').length;
 
-        // Compter les élections "Terminées" (normaliser le statut)
-        const completedElections = (electionsData || []).filter(e => {
-          const status = e.status?.trim() || '';
-          return status === 'Terminée';
-        }).length;
+        // b. Charger les centres liés aux élections sélectionnées via election_centers
+        const { data: ecData, error: ecError } = await supabase
+          .from('election_centers')
+          .select('center_id')
+          .in('election_id', selectedElectionIds);
 
-        // 2. Statistiques des électeurs - Valeur d'une élection spécifique (la plus récente)
-        const { data: latestElection, error: latestElectionError } = await supabase
-          .from('elections')
-          .select('nb_electeurs')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle(); // Utiliser maybeSingle() au lieu de single() pour éviter les erreurs si aucune élection n'existe
+        if (ecError) throw ecError;
+        const centerIds = Array.from(new Set((ecData || []).map((r: any) => r.center_id).filter(Boolean)));
 
-        if (latestElectionError) {
-          console.error('Erreur lors du chargement de la dernière élection:', latestElectionError);
+        let centersCount = centerIds.length;
+        let bureauxCount = 0;
+        let totalVoters = 0;
+
+        if (centerIds.length > 0) {
+          // c. Charger les bureaux associés à ces centres
+          const { data: bureauxData, error: bError } = await supabase
+            .from('voting_bureaux')
+            .select('registered_voters')
+            .in('center_id', centerIds);
+
+          if (bError) throw bError;
+          bureauxCount = bureauxData?.length || 0;
+          totalVoters = (bureauxData || []).reduce((sum, bureau) => sum + (Number(bureau.registered_voters) || 0), 0);
         }
 
-        // Calculer le total d'électeurs depuis les bureaux de vote
-        const { data: bureauxData } = await supabase
-          .from('voting_bureaux')
-          .select('registered_voters');
-
-        const totalVoters = (bureauxData || []).reduce((sum, bureau) => {
-          return sum + (Number(bureau.registered_voters) || 0);
-        }, 0);
-
-        // 3. Infrastructure
-        const { count: centersCount } = await supabase
-          .from('voting_centers')
-          .select('*', { count: 'exact', head: true });
-
-        const { count: bureauxCount } = await supabase
-          .from('voting_bureaux')
-          .select('*', { count: 'exact', head: true });
-
-        const { count: provincesCount } = await supabase
-          .from('provinces')
-          .select('*', { count: 'exact', head: true });
-
-        const { count: communesCount } = await supabase
-          .from('communes')
-          .select('*', { count: 'exact', head: true });
-
-        // Compter uniquement les candidats qui sont dans la table election_candidates
+        // d. Compter uniquement les candidats qui sont dans la table election_candidates
         const { count: candidatesCount } = await supabase
           .from('election_candidates')
-          .select('candidate_id', { count: 'exact', head: true });
+          .select('candidate_id', { count: 'exact', head: true })
+          .in('election_id', selectedElectionIds);
+
+        // Compter les provinces actives pour les centres sélectionnés
+        let provincesCount = 0;
+        if (centerIds.length > 0) {
+          const { data: centersData } = await supabase
+            .from('voting_centers')
+            .select('province_id')
+            .in('id', centerIds);
+          const activeProvinceIds = Array.from(new Set((centersData || []).map((c: any) => c.province_id).filter(Boolean)));
+          provincesCount = activeProvinceIds.length;
+        }
 
         setStats({
           elections: {
@@ -146,7 +197,7 @@ const DashboardModernSimple = () => {
             centers: centersCount || 0,
             bureaux: bureauxCount || 0,
             provinces: provincesCount || 0,
-            communes: communesCount || 0,
+            communes: 0,
             candidates: candidatesCount || 0
           }
         });
@@ -160,7 +211,7 @@ const DashboardModernSimple = () => {
     };
 
     fetchDashboardData();
-  }, [addNotification]);
+  }, [selectedElectionIds, addNotification]);
 
   if (loading) {
     return (
@@ -191,25 +242,67 @@ const DashboardModernSimple = () => {
                   Vue d'ensemble du système électoral o'Hitu
                 </p>
                 <div className="flex items-center gap-4 mt-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-                    <span className="text-sm text-blue-100">Système opérationnel</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-blue-200" />
-                    <span className="text-sm text-blue-100">Performance optimale</span>
+                  <div className="relative" ref={dropdownRef}>
+                    <button 
+                      onClick={() => setIsOpen(!isOpen)}
+                      className="flex items-center justify-between w-[320px] px-4 py-2 bg-white/20 hover:bg-white/30 text-white border border-white/20 rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
+                    >
+                      <span className="truncate">
+                        {selectedElectionIds.length === 0 
+                          ? "Aucune élection sélectionnée" 
+                          : selectedElectionIds.length === electionsList.length 
+                            ? "Toutes les élections" 
+                            : `${selectedElectionIds.length} élection(s) sélectionnée(s)`}
+                      </span>
+                      <ChevronDown className="w-4 h-4 ml-2 opacity-70" />
+                    </button>
+
+                    {isOpen && (
+                      <div className="absolute left-0 mt-2 w-[320px] rounded-md shadow-lg bg-white text-gray-900 ring-1 ring-black ring-opacity-5 z-50 max-h-60 overflow-y-auto">
+                        <div className="p-2 space-y-1">
+                          <label className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
+                              checked={selectedElectionIds.length === electionsList.length && electionsList.length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedElectionIds(electionsList.map(el => el.id));
+                                } else {
+                                  setSelectedElectionIds([]);
+                                }
+                              }}
+                            />
+                            <span className="text-sm font-semibold">Toutes les élections</span>
+                          </label>
+                          <div className="border-t border-gray-100 my-1"></div>
+                          {electionsList.map((election) => (
+                            <label key={election.id} className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
+                                checked={selectedElectionIds.includes(election.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedElectionIds([...selectedElectionIds, election.id]);
+                                  } else {
+                                    setSelectedElectionIds(selectedElectionIds.filter(id => id !== election.id));
+                                  }
+                                }}
+                              />
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-sm font-medium truncate max-w-[240px]">{election.title}</span>
+                                <span className="text-[10px] text-gray-500">{election.status}</span>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
               <div className="flex flex-col xs:flex-row gap-2 sm:gap-3">
-                <Button 
-                  onClick={() => navigate('/elections')}
-                  className="bg-white hover:bg-gray-50 text-[#1e40af] shadow-lg hover:shadow-xl transition-all duration-300 text-sm sm:text-base font-semibold px-4 sm:px-6 py-2 sm:py-3"
-                >
-                  <Vote className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                  <span className="hidden xs:inline">Gérer les Élections</span>
-                  <span className="xs:hidden">Élections</span>
-                </Button>
               </div>
             </div>
           </div>
@@ -266,7 +359,7 @@ const DashboardModernSimple = () => {
                     <p className="text-xs sm:text-sm font-medium text-gray-600">À venir</p>
                     <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900">{stats.elections.upcoming}</p>
                   </div>
-                  <div className="p-2 sm:p-3 bg-blue-100 rounded-full">
+                  <div className="p-2 sm:p-3 bg-blue-100 rounded-full animate-pulse">
                     <Calendar className="h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 text-blue-600" />
                   </div>
                 </div>
@@ -280,7 +373,7 @@ const DashboardModernSimple = () => {
                     <p className="text-xs sm:text-sm font-medium text-gray-600">En cours</p>
                     <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-orange-600">{stats.elections.byStatus['En cours'] || 0}</p>
                   </div>
-                  <div className="p-2 sm:p-3 bg-orange-100 rounded-full">
+                  <div className="p-2 sm:p-3 bg-orange-100 rounded-full animate-pulse">
                     <Activity className="h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 text-orange-600" />
                   </div>
                 </div>
@@ -303,43 +396,7 @@ const DashboardModernSimple = () => {
           </div>
         </div>
 
-        {/* Actions rapides - Mobile First */}
-        <div className="space-y-3 sm:space-y-4 lg:space-y-6">
-          <h2 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">Actions Rapides</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 lg:gap-4">
-            <Button 
-              onClick={() => navigate('/elections')}
-              className="h-16 sm:h-20 flex flex-col items-center justify-center gap-2 bg-[#1e40af] hover:bg-[#1e3a8a] text-white"
-            >
-              <Vote className="h-5 w-5 sm:h-6 sm:w-6" />
-              <span className="text-xs sm:text-sm font-medium">Élections</span>
-            </Button>
-            
-            <Button 
-              onClick={() => navigate('/voters')}
-              className="h-16 sm:h-20 flex flex-col items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white"
-            >
-              <Users className="h-5 w-5 sm:h-6 sm:w-6" />
-              <span className="text-xs sm:text-sm font-medium">Inscrits</span>
-            </Button>
-            
-            <Button 
-              onClick={() => navigate('/results')}
-              className="h-16 sm:h-20 flex flex-col items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white"
-            >
-              <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6" />
-              <span className="text-xs sm:text-sm font-medium">Résultats</span>
-            </Button>
-            
-            <Button 
-              onClick={() => navigate('/users')}
-              className="h-16 sm:h-20 flex flex-col items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white"
-            >
-              <Shield className="h-5 w-5 sm:h-6 sm:w-6" />
-              <span className="text-xs sm:text-sm font-medium">Utilisateurs</span>
-            </Button>
-          </div>
-        </div>
+
       </div>
     </Layout>
   );

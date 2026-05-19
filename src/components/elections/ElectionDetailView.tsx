@@ -19,7 +19,11 @@ import {
   Trash2,
   LayoutGrid,
   List,
-  RefreshCcw
+  RefreshCcw,
+  BarChart3,
+  Globe,
+  Lock,
+  Globe2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -52,6 +56,8 @@ interface Election {
   commune: string;
   arrondissement: string;
   enterpriseId?: string;
+  has_second_round?: boolean;
+  second_round_date?: string | null;
 }
 
 interface Center {
@@ -106,6 +112,28 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   });
   const [centersViewMode, setCentersViewMode] = useState<'grid' | 'list'>('grid');
   const [candidatesViewMode, setCandidatesViewMode] = useState<'grid' | 'list'>('grid');
+  const [isPublished, setIsPublished] = useState(election.is_published || false);
+
+  const togglePublication = async () => {
+    try {
+      const { error } = await supabase
+        .from('elections')
+        .update({ is_published: !isPublished })
+        .eq('id', election.id);
+        
+      if (error) throw error;
+      
+      setIsPublished(!isPublished);
+      toast.success(isPublished ? 'Les résultats ont été masqués du grand public.' : 'Les résultats sont désormais publics !');
+      
+      if (onDataChange) {
+        onDataChange();
+      }
+    } catch (err) {
+      console.error('Erreur lors de la mise à jour de la publication:', err);
+      toast.error('Erreur lors de la modification du statut de publication');
+    }
+  };
 
   // Fonction pour charger les centres de vote liés à cette élection
   const fetchCenters = useCallback(async () => {
@@ -654,7 +682,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         {/* Main Content avec onglets modernisés - Mobile First */}
         <div className="bg-white rounded-xl sm:rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <Tabs defaultValue="info" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 bg-gray-50 p-1 rounded-none">
+            <TabsList className="grid w-full grid-cols-4 bg-gray-50 p-1 rounded-none overflow-x-auto overflow-y-hidden">
               <TabsTrigger 
                 value="info" 
                 className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
@@ -704,6 +732,21 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   <div className="font-medium text-xs">
                     {election.type === 'Élection Professionnelle' ? 'Listes' : 'Candidats'}
                   </div>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger 
+                value="results" 
+                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-orange-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-orange-500"
+              >
+                <div className="p-1 sm:p-1.5 bg-orange-100 rounded-md data-[state=active]:bg-orange-500 transition-colors duration-300">
+                  <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 text-orange-600 data-[state=active]:text-white" />
+                </div>
+                <div className="text-left hidden xs:block">
+                  <div className="font-medium text-xs sm:text-sm">Résultats</div>
+                  <div className="text-xs text-gray-500">Publication</div>
+                </div>
+                <div className="text-left xs:hidden">
+                  <div className="font-medium text-xs">Résultats</div>
                 </div>
               </TabsTrigger>
             </TabsList>
@@ -756,6 +799,33 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Description</label>
                     <p className="text-sm text-gray-700 leading-relaxed">{election.description || 'Aucune description'}</p>
                   </div>
+
+                  {election.type === 'Élection Professionnelle' && election.has_second_round && (
+                    <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-100 space-y-3">
+                      <h4 className="text-xs font-bold text-purple-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                        Calendrier des Scrutins liés (1er & 2nd Tour)
+                      </h4>
+                      <div className="relative flex items-center justify-between">
+                        <div className="flex-1 text-center p-2 bg-white rounded-lg border border-purple-100 shadow-sm z-10">
+                          <span className="text-[10px] text-gray-500 font-semibold block uppercase">1er Tour</span>
+                          <span className="text-sm font-bold text-gray-800">
+                            {new Date(election.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                          </span>
+                        </div>
+                        <div className="flex-1 flex flex-col items-center justify-center relative px-2">
+                          <span className="text-[9px] text-purple-600 font-bold mb-1 bg-purple-100 px-1.5 py-0.5 rounded-full">+7 jours</span>
+                          <div className="w-full h-0.5 bg-dashed bg-purple-300"></div>
+                        </div>
+                        <div className="flex-1 text-center p-2 bg-white rounded-lg border border-purple-100 shadow-sm z-10">
+                          <span className="text-[10px] text-gray-500 font-semibold block uppercase">2nd Tour</span>
+                          <span className="text-sm font-bold text-gray-800">
+                            {election.second_round_date ? new Date(election.second_round_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Non défini'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sièges à pourvoir</label>
@@ -1140,6 +1210,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             ? `${candidate.name} (${candidate.party})` 
                             : candidate.party}
                         </p>
+                        {election.type === 'Élection Professionnelle' && candidate.college && (
+                          <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-bold px-2 py-0.5 mt-1 mx-auto block w-fit">
+                            {candidate.college === 'general' ? 'Collège Général' : 
+                             candidate.college === 'cadres' ? 'Collège Cadres' :
+                             candidate.college === 'employes' ? 'Collège Employés' :
+                             candidate.college === 'ouvriers' ? 'Collège Ouvriers' : candidate.college}
+                          </Badge>
+                        )}
                       </div>
 
                       {election.type === 'Élection Professionnelle' && candidate.suppleants?.[0] && (
@@ -1197,19 +1275,46 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3 flex-1 min-w-0">
                           <div className="relative flex-shrink-0">
-                            <InitialsAvatar 
-                              name={candidate.name}
-                              size="lg"
-                              className="shadow-lg border-2 border-white"
-                              backgroundColor="#1e40af"
-                            />
+                            {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] ? (
+                              <div className="w-12 h-12 rounded-full overflow-hidden shadow-sm border-2 border-white bg-purple-50">
+                                {candidate.titulaires[0].photo ? (
+                                  <img src={candidate.titulaires[0].photo} alt="Head" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-lg font-bold text-purple-600 bg-purple-100 uppercase">
+                                    {candidate.titulaires[0].name?.charAt(0) || 'T'}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <InitialsAvatar 
+                                name={candidate.name}
+                                size="lg"
+                                className="shadow-lg border-2 border-white"
+                                backgroundColor="#1e40af"
+                              />
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-bold text-lg text-gray-900 group-hover:text-purple-600 transition-colors duration-300 line-clamp-1">
-                              {candidate.name}
+                              {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] 
+                                ? candidate.titulaires[0].name 
+                                : candidate.name}
                             </h3>
-                            <p className="text-sm text-gray-600 line-clamp-1">{candidate.party}</p>
-
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm text-gray-600 line-clamp-1">
+                                {election.type === 'Élection Professionnelle' 
+                                  ? `${candidate.name} (${candidate.party})` 
+                                  : candidate.party}
+                              </p>
+                              {election.type === 'Élection Professionnelle' && candidate.college && (
+                                <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-bold px-2 py-0.5">
+                                  {candidate.college === 'general' ? 'Collège Général' : 
+                                   candidate.college === 'cadres' ? 'Collège Cadres' :
+                                   candidate.college === 'employes' ? 'Collège Employés' :
+                                   candidate.college === 'ouvriers' ? 'Collège Ouvriers' : candidate.college}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1237,6 +1342,57 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                 ))}
               </div>
             )}
+          </TabsContent>
+          <TabsContent value="results" className="p-6">
+            <Card className="border-0 shadow-sm overflow-hidden bg-gradient-to-br from-white to-orange-50">
+              <CardHeader className="border-b border-orange-100 bg-white/50">
+                <CardTitle className="flex items-center gap-2 text-lg text-orange-900">
+                  <div className="p-2 bg-orange-100 rounded-lg">
+                    <Globe2 className="w-5 h-5 text-orange-600" />
+                  </div>
+                  Publication des résultats
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="flex flex-col sm:flex-row items-center justify-between p-6 bg-white rounded-xl shadow-sm border border-orange-100">
+                  <div className="flex items-center gap-4 mb-4 sm:mb-0">
+                    <div className={`p-4 rounded-full ${isPublished ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                      {isPublished ? <Globe className="w-8 h-8" /> : <Lock className="w-8 h-8" />}
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">
+                        {isPublished ? 'Résultats publics' : 'Résultats masqués'}
+                      </h3>
+                      <p className="text-sm text-gray-500 max-w-md">
+                        {isPublished 
+                          ? 'Les résultats de cette élection sont actuellement visibles par tous les utilisateurs sur la plateforme.'
+                          : 'Les résultats sont masqués. Seuls les administrateurs et membres des bureaux peuvent les consulter pour le moment.'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <Button 
+                      size="lg"
+                      onClick={togglePublication}
+                      className={isPublished 
+                        ? "bg-red-600 hover:bg-red-700 text-white w-full sm:w-auto"
+                        : "bg-green-600 hover:bg-green-700 text-white w-full sm:w-auto"
+                      }
+                    >
+                      {isPublished ? (
+                        <>
+                          <Lock className="w-4 h-4 mr-2" /> Suspendre la publication
+                        </>
+                      ) : (
+                        <>
+                          <Globe className="w-4 h-4 mr-2" /> Publier les résultats
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
           </Tabs>
         </div>
@@ -1284,6 +1440,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         {showEditCandidate && selectedCandidate && (
           <EditCandidateModal
             candidate={selectedCandidate}
+            electionType={election.type}
             onClose={() => {
               setShowEditCandidate(false);
               setSelectedCandidate(null);

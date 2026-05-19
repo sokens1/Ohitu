@@ -109,12 +109,17 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
   //   }
   // };
 
-  // Charger les communes
-  const loadCommunes = async () => {
+  // Charger les communes en fonction de la province
+  const loadCommunes = async (provinceId: string) => {
     try {
+      if (!provinceId) {
+        setCommunes([]);
+        return;
+      }
       const { data, error } = await supabase
         .from('communes')
         .select('id, name')
+        .eq('province_id', provinceId)
         .order('name');
       
       if (error) throw error;
@@ -124,12 +129,17 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
     }
   };
 
-  // Charger les arrondissements
-  const loadArrondissements = async () => {
+  // Charger les arrondissements en fonction de la commune
+  const loadArrondissements = async (communeId: string) => {
     try {
+      if (!communeId) {
+        setArrondissements([]);
+        return;
+      }
       const { data, error } = await supabase
         .from('arrondissements')
         .select('id, name')
+        .eq('commune_id', communeId)
         .order('name');
       
       if (error) throw error;
@@ -220,12 +230,21 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
   // Charger toutes les données
   useEffect(() => {
     loadProvinces();
-    // loadDepartments();
-    loadCommunes();
-    loadArrondissements();
     loadCandidates();
     loadCenters();
   }, []);
+
+  useEffect(() => {
+    loadCommunes(selectedProvinceId);
+    setSelectedCommuneId('');
+    setFormData(prev => ({ ...prev, commune: '', arrondissement: '' }));
+  }, [selectedProvinceId]);
+
+  useEffect(() => {
+    loadArrondissements(selectedCommuneId);
+    setSelectedArrondissementId('');
+    setFormData(prev => ({ ...prev, arrondissement: '' }));
+  }, [selectedCommuneId]);
 
   const steps = [
     'Informations Générales',

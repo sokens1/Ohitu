@@ -31,7 +31,8 @@ import {
   Trash2,
   Copy,
   FileDown,
-  RefreshCcw
+  RefreshCcw,
+  TrendingUp
 } from 'lucide-react';
 import ElectionWizard from '@/components/elections/ElectionWizard';
 import ProfessionalElectionWizard from '@/components/elections/ProfessionalElectionWizard';
@@ -40,8 +41,10 @@ import EditElectionModal from '@/components/elections/EditElectionModal';
 import EditProfessionalElectionModal from '@/components/elections/EditProfessionalElectionModal';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 const ElectionManagementUnified = () => {
+  const { user } = useAuth();
   const {
     elections,
     selectedElection,
@@ -67,6 +70,8 @@ const ElectionManagementUnified = () => {
   const [searchQuery, setSearchQueryLocal] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [yearFilter, setYearFilter] = useState<string>('all');
+  const [monthFilter, setMonthFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // Fonction pour recalculer automatiquement le nombre d'électeurs d'une élection
@@ -139,13 +144,26 @@ const ElectionManagementUnified = () => {
       console.log('🔄 Rafraîchissement des données des élections...');
       setLoading(true);
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('elections')
         .select(`
           *,
           enterprises (id, name, province_name, commune_name)
-        `)
-        .order('created_at', { ascending: false });
+        `);
+
+      if (user && user.role !== 'super-admin' && user.role !== 'observateur' && user.role !== 'validateur') {
+        const conditions = [];
+        conditions.push(`created_by.eq.${user.id}`);
+        if (user.assigned_election_id) {
+          conditions.push(`id.eq.${user.assigned_election_id}`);
+        }
+        if ((user.role === 'agent-saisie' || user.role === 'president-bureau') && user.created_by) {
+          conditions.push(`created_by.eq.${user.created_by}`);
+        }
+        query = query.or(conditions.join(','));
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         console.error('❌ Erreur lors de la récupération des élections:', error);
@@ -296,7 +314,8 @@ const ElectionManagementUnified = () => {
           },
           cover_image: election.cover_image_url,
           enterpriseId: election.enterprise_id,
-
+          has_second_round: election.has_second_round,
+          second_round_date: election.second_round_date,
           configuration: {
             seatsAvailable: election.seats_available || 1,
             budget: election.budget || 0,
@@ -322,8 +341,7 @@ const ElectionManagementUnified = () => {
           },
           createdAt: new Date(election.created_at),
           updatedAt: new Date(election.updated_at),
-          createdBy: election.created_by || 'system',
-          enterpriseId: election.enterprise_id,
+          createdBy: election.created_by || 'system'
         };
       });
 
@@ -335,7 +353,7 @@ const ElectionManagementUnified = () => {
     } finally {
       setLoading(false);
     }
-  }, [setLoading, setError, setElections, recalculateElectionVoters]);
+  }, [setLoading, setError, setElections, recalculateElectionVoters, user]);
 
   // Charger les élections depuis Supabase
   useEffect(() => {
@@ -362,8 +380,12 @@ const ElectionManagementUnified = () => {
 
     const matchesStatus = statusFilter === 'all' || election.status === statusFilter;
     const matchesType = typeFilter === 'all' || election.type === typeFilter;
+    const electionYear = new Date(election.date).getFullYear().toString();
+    const electionMonth = (new Date(election.date).getMonth() + 1).toString();
+    const matchesYear = yearFilter === 'all' || electionYear === yearFilter;
+    const matchesMonth = monthFilter === 'all' || electionMonth === monthFilter;
 
-    return matchesSearch && matchesStatus && matchesType;
+    return matchesSearch && matchesStatus && matchesType && matchesYear && matchesMonth;
   });
 
   // Fonction pour déterminer la couleur du statut
@@ -640,7 +662,68 @@ const ElectionManagementUnified = () => {
           .select('*')
           .eq('id', electionId)
           .single();
+
+        // 1. Supprimer les votes/candidatures dans candidate_results liés aux PVs de cette élection
+        try {
+          const { data: pvs } = await supabase
+            .from('procès_verbaux')
+            .select('id')
+            .eq('election_id', electionId);
+            
+          if (pvs && pvs.length > 0) {
+            const pvIds = pvs.map(p => p.id);
+            await supabase.from('candidate_results').delete().in('pv_id', pvIds);
+          }
+        } catch (e) {
+          console.warn("Échec de la suppression dans candidate_results:", e);
+        }
+
+        // 2. Supprimer les procès_verbaux liés à l'élection
+        try {
+          await supabase.from('procès_verbaux').delete().eq('election_id', electionId);
+        } catch (e) {
+          console.warn("Échec de la suppression dans procès_verbaux:", e);
+        }
+
+        // 3. Supprimer les candidats liés à l'élection
+        try {
+          await supabase.from('election_candidates').delete().eq('election_id', electionId);
+        } catch (e) {
+          console.warn("Échec de la suppression dans election_candidates:", e);
+        }
+
+        // 4. Supprimer les centres liés à l'élection
+        try {
+          await supabase.from('election_centers').delete().eq('election_id', electionId);
+        } catch (e) {
+          console.warn("Échec de la suppression dans election_centers:", e);
+        }
+
+        // 5. Supprimer les collèges électoraux (élections pro)
+        try {
+          await supabase.from('electoral_colleges').delete().eq('election_id', electionId);
+        } catch (e) {
+          console.warn("Échec de la suppression dans electoral_colleges:", e);
+        }
+
+        // 6. Supprimer les étapes de l'élection si applicable
+        try {
+          await supabase.from('election_steps').delete().eq('election_id', electionId);
+        } catch (e) {
+          console.warn("Échec de la suppression dans election_steps:", e);
+        }
+
+        // 7. Supprimer l'élection de la base de données
+        const { error: dbDeleteErr } = await supabase
+          .from('elections')
+          .delete()
+          .eq('id', electionId);
+
+        if (dbDeleteErr) {
+          throw dbDeleteErr;
+        }
         
+        // 8. Mettre à jour l'état local
         await deleteElection(electionId);
         
         // Enregistrer dans l'audit
@@ -654,9 +737,9 @@ const ElectionManagementUnified = () => {
         }
         
         toast.success('Élection supprimée avec succès');
-      } catch (error) {
+      } catch (error: any) {
         console.error('Erreur lors de la suppression:', error);
-        toast.error('Erreur lors de la suppression de l\'élection');
+        toast.error(`Erreur lors de la suppression: ${error?.message || error}`);
       } finally {
         setLoading(false);
       }
@@ -1110,6 +1193,8 @@ const ElectionManagementUnified = () => {
       province: selectedElection.location.province,
       commune: selectedElection.location.commune,
       arrondissement: selectedElection.location.arrondissement,
+      has_second_round: selectedElection.has_second_round,
+      second_round_date: selectedElection.second_round_date,
     };
     
     console.log('Élection adaptée pour ElectionDetailView:', adaptedElection);
@@ -1335,6 +1420,43 @@ const ElectionManagementUnified = () => {
                     <SelectItem value="Élection Professionnelle">Professionnelle</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select value={yearFilter} onValueChange={setYearFilter}>
+                  <SelectTrigger className="w-full xs:w-auto py-3 sm:py-4 border-0 focus:border-0 focus:ring-0 rounded-lg sm:rounded-xl bg-gray-50 focus:bg-white transition-all duration-200 text-sm sm:text-base">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <SelectValue placeholder="Année" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes les années</SelectItem>
+                    <SelectItem value="2026">2026</SelectItem>
+                    <SelectItem value="2025">2025</SelectItem>
+                    <SelectItem value="2024">2024</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={monthFilter} onValueChange={setMonthFilter}>
+                  <SelectTrigger className="w-full xs:w-auto py-3 sm:py-4 border-0 focus:border-0 focus:ring-0 rounded-lg sm:rounded-xl bg-gray-50 focus:bg-white transition-all duration-200 text-sm sm:text-base">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <SelectValue placeholder="Mois" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les mois</SelectItem>
+                    <SelectItem value="1">Janvier</SelectItem>
+                    <SelectItem value="2">Février</SelectItem>
+                    <SelectItem value="3">Mars</SelectItem>
+                    <SelectItem value="4">Avril</SelectItem>
+                    <SelectItem value="5">Mai</SelectItem>
+                    <SelectItem value="6">Juin</SelectItem>
+                    <SelectItem value="7">Juillet</SelectItem>
+                    <SelectItem value="8">Août</SelectItem>
+                    <SelectItem value="9">Septembre</SelectItem>
+                    <SelectItem value="10">Octobre</SelectItem>
+                    <SelectItem value="11">Novembre</SelectItem>
+                    <SelectItem value="12">Décembre</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               
               {/* Boutons de vue */}
@@ -1420,7 +1542,7 @@ const ElectionManagementUnified = () => {
               {filteredElections.map((election) => (
                 <Card 
                   key={election.id} 
-                  className="election-card group hover:shadow-lg transition-all duration-300"
+                  className={`election-card group transition-all duration-300 ${election.status === 'Annulée' ? 'opacity-60 bg-gray-50 border-dashed border-gray-300 grayscale-[0.5]' : 'hover:shadow-lg'}`}
                 >
                   <CardHeader className="p-3 sm:p-4">
                     <div className="flex items-start justify-between gap-2">
@@ -1463,6 +1585,15 @@ const ElectionManagementUnified = () => {
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Supprimer
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
+                            <span className="mr-2 opacity-70">⏸</span>
+                            Désactiver
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
+                            <span className="mr-2 opacity-70">📦</span>
+                            Archiver
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1512,7 +1643,7 @@ const ElectionManagementUnified = () => {
                             {election.statistics.totalBureaux}
                           </p>
                         </div>
-                        <div className="text-center p-2 bg-purple-50 rounded col-span-2">
+                        <div className="text-center p-2 bg-purple-50 rounded">
                           <div className="flex items-center justify-center gap-1 text-purple-600 mb-0.5">
                             <Users className="h-3 w-3" />
                             <span className="text-[11px] font-semibold">Électeurs</span>
@@ -1521,7 +1652,45 @@ const ElectionManagementUnified = () => {
                             {election.statistics.totalVoters.toLocaleString()}
                           </p>
                         </div>
+                        <div className="text-center p-2 bg-amber-50 rounded">
+                          <div className="flex items-center justify-center gap-1 text-amber-600 mb-0.5">
+                            <TrendingUp className="h-3 w-3" />
+                            <span className="text-[11px] font-semibold">Particip.</span>
+                          </div>
+                          <p className="text-xs font-bold text-amber-700">
+                            {(election.statistics as any).participationRate ? `${(election.statistics as any).participationRate.toFixed(1)}%` : '-'}
+                          </p>
+                        </div>
                       </div>
+
+                      {election.type === 'Élection Professionnelle' && election.has_second_round && (
+                        <div className="p-2.5 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-100/50 space-y-1.5 my-1">
+                          <div className="text-[10px] font-semibold text-purple-700 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+                              Scrutin à 2 Tours liés
+                            </span>
+                            <span className="text-[9px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded">
+                              Pro
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-5 items-center text-[10px] text-gray-500 font-medium">
+                            <div className="col-span-2 text-left truncate">
+                              <span className="text-[9px] text-gray-400 block">1er Tour</span>
+                              {election.date ? election.date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                            </div>
+                            <div className="col-span-1 flex justify-center">
+                              <div className="h-0.5 w-full bg-purple-300 relative">
+                                <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-purple-600 text-[8px]">➜</span>
+                              </div>
+                            </div>
+                            <div className="col-span-2 text-right truncate">
+                              <span className="text-[9px] text-gray-400 block">2nd Tour</span>
+                              {election.second_round_date ? new Date(election.second_round_date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       <Button
                         variant="outline"
@@ -1545,7 +1714,7 @@ const ElectionManagementUnified = () => {
               {filteredElections.map((election) => (
                 <Card
                   key={election.id}
-                  className="election-card group hover:shadow-lg transition-all duration-300"
+                  className={`election-card group transition-all duration-300 ${election.status === 'Annulée' ? 'opacity-60 bg-gray-50 border-dashed border-gray-300 grayscale-[0.5]' : 'hover:shadow-lg'}`}
                 >
                   <div className="p-3 sm:p-4">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
@@ -1583,6 +1752,15 @@ const ElectionManagementUnified = () => {
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Supprimer
                               </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
+                                <span className="mr-2 opacity-70">⏸</span>
+                                Désactiver
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
+                                <span className="mr-2 opacity-70">📦</span>
+                                Archiver
+                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -1612,6 +1790,32 @@ const ElectionManagementUnified = () => {
                           <MapPin className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 text-gray-500 flex-shrink-0" />
                           <span className="line-clamp-1">{election.location.fullAddress}</span>
                         </div>
+
+                        {election.type === 'Élection Professionnelle' && election.has_second_round && (
+                          <div className="p-2.5 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-100/50 space-y-1.5 mb-3 max-w-md">
+                            <div className="text-[10px] font-semibold text-purple-700 flex items-center justify-between">
+                              <span className="flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+                                Scrutin à 2 Tours liés (Professionnel)
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-5 items-center text-[10px] text-gray-500 font-medium">
+                              <div className="col-span-2 text-left truncate">
+                                <span className="text-[9px] text-gray-400 block">1er Tour</span>
+                                {election.date ? election.date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                              </div>
+                              <div className="col-span-1 flex justify-center">
+                                <div className="h-0.5 w-full bg-purple-300 relative">
+                                  <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-purple-600 text-[8px]">➜</span>
+                                </div>
+                              </div>
+                              <div className="col-span-2 text-right truncate">
+                                <span className="text-[9px] text-gray-400 block">2nd Tour</span>
+                                {election.second_round_date ? new Date(election.second_round_date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Statistiques */}
                         <div className="flex items-center gap-3 sm:gap-4 text-gray-700 text-xs sm:text-sm mb-2">

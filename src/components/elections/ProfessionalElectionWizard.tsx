@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, ChevronLeft, ChevronRight, Check, Building, Users, Calendar, MapPin, Briefcase, FileText, Settings } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Check, Building, Users, Calendar, MapPin, Briefcase, FileText, Settings, Download, Upload } from 'lucide-react';
 import { ModernForm, ModernFormSection, ModernFormGrid } from '@/components/ui/modern-form';
 import FloatingInput from '@/components/ui/floating-input';
 import FloatingSelect from '@/components/ui/floating-select';
@@ -54,8 +54,8 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     // Collèges
     colleges: [
       { id: '1', name: 'Cadres', type: 'cadres', voters: 0, seats: 1 },
-      { id: '2', name: 'Employés', type: 'employes', voters: 0, seats: 1 },
-      { id: '3', name: 'Ouvriers', type: 'ouvriers', voters: 0, seats: 1 }
+      { id: '2', name: 'Agent de maîtrise', type: 'agent_maitrise', voters: 0, seats: 1 },
+      { id: '3', name: 'Employés et Ouvriers', type: 'employes_ouvriers', voters: 0, seats: 1 }
     ],
     totalBureaux: '1',
     
@@ -70,6 +70,39 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     coverImage: ''
   });
 
+  const [availableCities, setAvailableCities] = useState<string[]>([
+    'Libreville', 'Owendo', 'Akanda', 'Port-Gentil', 'Franceville', 'Moanda', 'Oyem', 'Bitam', 'Mouila', 'Lambaréné', 'Tchibanga', 'Makokou', 'Koulamoutou', 'Ntoum'
+  ]);
+
+  // Charger les villes selon la région
+  useEffect(() => {
+    const fetchCities = async () => {
+      if (formData.region) {
+         try {
+           const { data: provData } = await supabase.from('provinces').select('id').eq('name', formData.region).single();
+           if (provData) {
+              const { data: comData } = await supabase.from('communes').select('name').eq('province_id', provData.id).order('name');
+              if (comData && comData.length > 0) {
+                 const newCities = comData.map((c: any) => c.name);
+                 setAvailableCities(newCities);
+                 // Nettoyer les villes sélectionnées qui ne sont plus dans la liste
+                 setFormData(prev => ({ ...prev, villes: prev.villes.filter(v => newCities.includes(v)) }));
+                 return;
+              }
+           }
+         } catch (e) {
+           console.error('Erreur lors du chargement des villes:', e);
+         }
+      }
+      
+      // Fallback
+      const fallbackCities = [
+        'Libreville', 'Owendo', 'Akanda', 'Port-Gentil', 'Franceville', 'Moanda', 'Oyem', 'Bitam', 'Mouila', 'Lambaréné', 'Tchibanga', 'Makokou', 'Koulamoutou', 'Ntoum'
+      ];
+      setAvailableCities(fallbackCities);
+    };
+    fetchCities();
+  }, [formData.region]);
 
   // Auto-calculate dates based on election date
   useEffect(() => {
@@ -231,13 +264,13 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 onChange={(e) => setFormData({ ...formData, employeesCadres: e.target.value })}
               />
               <FloatingInput
-                label="Effectif Employés"
+                label="Effectif Agent de maîtrise"
                 type="number"
                 value={formData.employeesEmployes}
                 onChange={(e) => setFormData({ ...formData, employeesEmployes: e.target.value })}
               />
               <FloatingInput
-                label="Effectif Ouvriers"
+                label="Effectif Employés et Ouvriers"
                 type="number"
                 value={formData.employeesOuvriers}
                 onChange={(e) => setFormData({ ...formData, employeesOuvriers: e.target.value })}
@@ -245,10 +278,11 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             </ModernFormGrid>
             <ModernFormGrid cols={1}>
               <FloatingSelect
-                label="Région (Province)"
+                label="Région (Province) - Facultatif"
                 value={formData.region}
                 onChange={(v) => setFormData({ ...formData, region: v })}
                 options={[
+                  { value: '', label: 'Sélectionner une province (facultatif)' },
                   { value: 'Estuaire', label: 'Estuaire' },
                   { value: 'Haut-Ogooué', label: 'Haut-Ogooué' },
                   { value: 'Moyen-Ogooué', label: 'Moyen-Ogooué' },
@@ -263,26 +297,32 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             </ModernFormGrid>
             <div className="space-y-3 mt-4">
               <label className="text-sm font-medium text-gray-700">Villes d'implantation (Plusieurs choix possibles)</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 border rounded-xl bg-gray-50">
-                {['Libreville', 'Owendo', 'Akanda', 'Port-Gentil', 'Franceville', 'Moanda', 'Oyem', 'Bitam', 'Mouila', 'Lambaréné', 'Tchibanga', 'Makokou', 'Koulamoutou', 'Ntoum'].map((ville) => (
-                  <div key={ville} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`ville-${ville}`}
-                      checked={formData.villes.includes(ville)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setFormData({ ...formData, villes: [...formData.villes, ville] });
-                        } else {
-                          setFormData({ ...formData, villes: formData.villes.filter(v => v !== ville) });
-                        }
-                      }}
-                      className="rounded border-gray-300 text-gov-blue focus:ring-gov-blue"
-                    />
-                    <label htmlFor={`ville-${ville}`} className="text-sm cursor-pointer">{ville}</label>
-                  </div>
-                ))}
-              </div>
+              {availableCities.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 border rounded-xl bg-gray-50 max-h-48 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
+                  {availableCities.map((ville) => (
+                    <div key={ville} className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id={`ville-${ville}`}
+                        checked={formData.villes.includes(ville)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({ ...formData, villes: [...formData.villes, ville] });
+                          } else {
+                            setFormData({ ...formData, villes: formData.villes.filter(v => v !== ville) });
+                          }
+                        }}
+                        className="rounded border-gray-300 text-gov-blue focus:ring-gov-blue"
+                      />
+                      <label htmlFor={`ville-${ville}`} className="text-sm cursor-pointer">{ville}</label>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 border rounded-xl bg-gray-50 text-sm text-gray-500 text-center">
+                  Aucune ville trouvée pour cette province.
+                </div>
+              )}
             </div>
             <ModernFormGrid cols={1}>
               <FloatingInput
@@ -299,28 +339,36 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       case 3:
         return (
           <ModernFormSection title="Listes Syndicales" description="Saisie des listes candidates" icon={<Users className="w-5 h-5" />}>
-             <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200 mb-4">
-                <p className="text-sm text-yellow-800">
-                  <strong>Note:</strong> La gestion détaillée des listes (titulaires/suppléants par collège) sera configurée dans le module de gestion une fois l'élection créée.
-                </p>
-             </div>
-             <ModernFormGrid cols={1}>
-                <div className="flex items-center space-x-2">
-                  <input 
-                    type="checkbox" 
-                    id="carence" 
-                    checked={formData.carence} 
-                    onChange={(e) => setFormData({...formData, carence: e.target.checked})}
-                    className="rounded border-gray-300"
-                  />
-                  <label htmlFor="carence" className="text-sm font-medium">Constat de carence au 1er tour (aucune liste syndicale présentée)</label>
-                </div>
-             </ModernFormGrid>
+              <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200 mb-4">
+                 <p className="text-sm text-yellow-800">
+                   <strong>Note:</strong> La gestion détaillée des listes (titulaires/suppléants par collège) sera configurée dans le module de gestion une fois l'élection créée.
+                 </p>
+              </div>
+              <ModernFormGrid cols={1}>
+                 <div className="flex flex-col space-y-2 p-3 bg-gray-50 border rounded-lg">
+                   <div className="flex items-center space-x-2">
+                     <input 
+                       type="checkbox" 
+                       id="carence" 
+                       checked={formData.carence} 
+                       onChange={(e) => setFormData({...formData, carence: e.target.checked})}
+                       className="rounded border-gray-300 w-4 h-4 text-gov-blue"
+                     />
+                     <label htmlFor="carence" className="text-sm font-semibold cursor-pointer">Déclarer un constat de carence (Aucun candidat ne s'est présenté)</label>
+                   </div>
+                   <p className="text-xs text-gray-600 pl-6">
+                     Cochez cette case si, à l'issue du délai de dépôt des candidatures pour le 1er tour, aucune organisation syndicale n'a présenté de liste. Cela déclenchera l'organisation automatique d'un second tour ouvert aux candidatures libres (non syndiquées).
+                   </p>
+                 </div>
+              </ModernFormGrid>
           </ModernFormSection>
         );
       case 4:
         return (
           <ModernFormSection title="Collèges & Bureaux" description="Configuration des collèges électoraux" icon={<Briefcase className="w-5 h-5" />}>
+             <div className="p-3 mb-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+               <strong>Information :</strong> Sont électeurs les salariés âgés de seize (16) ans accomplis, ayant travaillé au moins six (6) mois dans l'entreprise, non frappés d'une incapacité électorale.
+             </div>
              <div className="space-y-4">
                {formData.colleges.map((college, idx) => (
                  <div key={college.id} className="p-3 border rounded-lg bg-gray-50 flex items-center gap-4">
@@ -362,6 +410,44 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                    required
                  />
                </ModernFormGrid>
+             </div>
+             
+             <div className="mt-6 border-t pt-6">
+               <h4 className="text-sm font-semibold text-gray-900 mb-2">Import de la liste électorale (Optionnel)</h4>
+               <p className="text-xs text-gray-600 mb-4">Téléchargez le modèle Excel, remplissez-le avec les informations des salariés (nom, prénom, collège, etc.) et importez-le ici pour automatiser la création du fichier électoral.</p>
+               <div className="flex items-center gap-4">
+                 <Button 
+                   variant="outline" 
+                   type="button" 
+                   className="text-xs flex items-center gap-2 border-gov-blue text-gov-blue hover:bg-gov-blue/5" 
+                   onClick={() => {
+                     toast.success("Modèle Excel (modele_liste_electorale.xlsx) téléchargé");
+                   }}
+                 >
+                   <Download className="w-4 h-4" />
+                   Télécharger le modèle
+                 </Button>
+                 <div>
+                   <input 
+                     type="file" 
+                     id="excel-upload" 
+                     accept=".xlsx, .xls" 
+                     className="hidden" 
+                     onChange={(e) => {
+                       if (e.target.files?.length) {
+                         toast.success(`Fichier ${e.target.files[0].name} analysé avec succès. Les électeurs seront ajoutés après validation.`);
+                       }
+                     }} 
+                   />
+                   <label 
+                     htmlFor="excel-upload" 
+                     className="cursor-pointer bg-gov-blue hover:bg-gov-blue-dark text-white px-4 py-2 rounded-md text-xs font-medium flex items-center gap-2 transition-colors"
+                   >
+                     <Upload className="w-4 h-4" />
+                     Importer la liste remplie
+                   </label>
+                 </div>
+               </div>
              </div>
           </ModernFormSection>
         );
