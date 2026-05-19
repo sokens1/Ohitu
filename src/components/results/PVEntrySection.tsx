@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { useNetworkQuality } from '@/hooks/useNetworkQuality';
 
 interface PVEntrySectionProps {
   onClose: () => void;
@@ -53,6 +54,70 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     uploadedFile: null as File | null
   });
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const network = useNetworkQuality();
+  const [hasDraft, setHasDraft] = useState(false);
+
+  // Sauvegarde automatique du brouillon (hors fichier binaire)
+  useEffect(() => {
+    if (!selectedElection) return;
+    const { uploadedFile, ...serializableData } = formData;
+    
+    const hasData = serializableData.centre || 
+                    serializableData.bureau || 
+                    serializableData.votants || 
+                    serializableData.bulletinsNuls || 
+                    Object.keys(serializableData.candidateVotes).length > 0;
+                    
+    if (hasData) {
+      localStorage.setItem(`ohitu_pv_draft_${selectedElection}`, JSON.stringify(serializableData));
+    }
+  }, [formData, selectedElection]);
+
+  // Détecter la présence d'un brouillon au montage
+  useEffect(() => {
+    if (!selectedElection) return;
+    const saved = localStorage.getItem(`ohitu_pv_draft_${selectedElection}`);
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        // Ne considérer comme brouillon que s'il y a des données réelles
+        if (draft && (draft.centre || draft.bureau || draft.votants || Object.keys(draft.candidateVotes || {}).length > 0)) {
+          setHasDraft(true);
+        }
+      } catch (e) {
+        console.error('Erreur lecture brouillon:', e);
+      }
+    }
+  }, [selectedElection]);
+
+  const restoreDraft = () => {
+    if (!selectedElection) return;
+    const saved = localStorage.getItem(`ohitu_pv_draft_${selectedElection}`);
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        setFormData(prev => ({
+          ...prev,
+          ...draft,
+          uploadedFile: null
+        }));
+        if (draft.bureau) {
+          setCurrentStep(2);
+        }
+        setHasDraft(false);
+        toast.success('Brouillon de saisie restauré avec succès.');
+      } catch (e) {
+        toast.error('Échec de la restauration du brouillon.');
+      }
+    }
+  };
+
+  const discardDraft = () => {
+    if (!selectedElection) return;
+    localStorage.removeItem(`ohitu_pv_draft_${selectedElection}`);
+    setHasDraft(false);
+    toast.info('Brouillon supprimé.');
+  };
 
   // Charger les centres et bureaux de vote depuis Supabase
   useEffect(() => {
@@ -240,10 +305,79 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const compressImageFile = (file: File): Promise<File> => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith('image/')) {
+        resolve(file);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          const MAX_WIDTH = 1600;
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(file);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const compressedFile = new File([blob], file.name.substring(0, file.name.lastIndexOf('.')) + '.jpg', {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                });
+                resolve(compressedFile);
+              } else {
+                resolve(file);
+              }
+            },
+            'image/jpeg',
+            0.7
+          );
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      setFormData({ ...formData, uploadedFile: file });
+      const isSlowConnection = network.quality === 'poor' || network.quality === 'fair' || !network.isOnline;
+      
+      if (isSlowConnection && file.type.startsWith('image/')) {
+        const loadingToast = toast.loading('Qualité réseau limitée détectée. Compression du PV en cours...');
+        try {
+          const compressed = await compressImageFile(file);
+          setFormData({ ...formData, uploadedFile: compressed });
+          toast.dismiss(loadingToast);
+          toast.success(`Compression terminée : ${(file.size / 1024 / 1024).toFixed(1)} Mo ➔ ${(compressed.size / 1024).toFixed(0)} Ko.`);
+        } catch (e) {
+          toast.dismiss(loadingToast);
+          setFormData({ ...formData, uploadedFile: file });
+        }
+      } else {
+        setFormData({ ...formData, uploadedFile: file });
+      }
     }
   };
 
@@ -435,6 +569,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
 
       // Recalculer le total des inscrits pour cette élection
       await recalculateElectionVoters(selectedElection);
+
+      // Supprimer le brouillon local après soumission réussie
+      localStorage.removeItem(`ohitu_pv_draft_${selectedElection}`);
 
       toast.success(existingPv?.id ? 'PV mis à jour avec succès.' : 'PV enregistré avec succès.');
       onClose();
@@ -826,6 +963,27 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
 
   return (
     <div className="space-y-6">
+      {/* Alerte de restauration de brouillon */}
+      {hasDraft && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-fade-in">
+          <div className="flex items-start space-x-3 text-yellow-800 text-sm">
+            <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold block">Brouillon de saisie détecté</span>
+              Vous avez un enregistrement en cours pour cette élection. Souhaitez-vous restaurer votre travail précédent ?
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 flex-shrink-0 self-end sm:self-auto">
+            <Button size="sm" variant="ghost" onClick={discardDraft} className="text-yellow-700 hover:text-red-700">
+              Supprimer
+            </Button>
+            <Button size="sm" onClick={restoreDraft} className="bg-yellow-600 hover:bg-yellow-700 text-white font-medium">
+              Restaurer le travail
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* En-tête avec bouton retour */}
       <div className="flex items-center justify-between">
         <Button 

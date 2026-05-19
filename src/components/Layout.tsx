@@ -28,6 +28,7 @@ import { useNotifications } from '@/contexts/NotificationContext';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import NetworkIndicator from '@/components/NetworkIndicator';
 
 
 interface LayoutProps {
@@ -174,6 +175,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </Button>
             
             <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
+              {/* Indicateur de qualité réseau */}
+              <NetworkIndicator />
+              
               {/* Icône de notifications */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
