@@ -19,6 +19,8 @@ import {
   CheckCircle,
   Shield,
   UserCog,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -97,6 +99,7 @@ const UserManagement = () => {
   const [fRole, setFRole] = useState<UserRole>('observateur');
   const [fActive, setFActive] = useState(true);
   const [fElectionId, setFElectionId] = useState<string>('');
+  const [showPassword, setShowPassword] = useState(false);
   const [searchElectionQuery, setSearchElectionQuery] = useState('');
 
   // États d'opération
@@ -187,6 +190,7 @@ const UserManagement = () => {
     setFName(''); setFEmail(''); setFPassword('');
     setFRole('observateur'); setFActive(true);
     setFElectionId(''); setSearchElectionQuery('');
+    setShowPassword(false);
   };
 
   const openEdit = (u: AppUser) => {
@@ -564,7 +568,23 @@ const UserManagement = () => {
             {formFields}
             <div>
               <Label className="text-sm">Mot de passe</Label>
-              <Input type="password" placeholder="••••••••" value={fPassword} onChange={e => setFPassword(e.target.value)} />
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={fPassword}
+                  onChange={e => setFPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowAddModal(false)}>Annuler</Button>
@@ -587,7 +607,23 @@ const UserManagement = () => {
             {formFields}
             <div>
               <Label className="text-sm">Nouveau mot de passe (optionnel)</Label>
-              <Input type="password" placeholder="Laisser vide pour ne pas changer" value={fPassword} onChange={e => setFPassword(e.target.value)} />
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Laisser vide pour ne pas changer"
+                  value={fPassword}
+                  onChange={e => setFPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => { setShowEditModal(false); setEditingUser(null); }}>Annuler</Button>

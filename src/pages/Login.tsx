@@ -79,12 +79,20 @@ const Login = () => {
           variant: "destructive",
         });
       }
-    } catch (error) {
-      toast({
-        title: "Erreur",
-        description: "Une erreur s'est produite lors de la connexion",
-        variant: "destructive",
-      });
+    } catch (error: any) {
+      if (error?.message === 'EMAIL_NOT_CONFIRMED') {
+        toast({
+          title: "Email non confirmé",
+          description: "Ce compte n'a pas encore été confirmé. Contactez votre administrateur pour qu'il confirme votre compte depuis le tableau de bord Supabase.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Erreur",
+          description: "Une erreur s'est produite lors de la connexion",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoading(false);
     }

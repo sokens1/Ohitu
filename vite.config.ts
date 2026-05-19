@@ -128,10 +128,11 @@ function adminApiPlugin(): Plugin {
                 return;
               }
               authUserId = existing.id;
-              // Mettre à jour le mot de passe si demandé
-              if (password) {
-                await adminClient.auth.admin.updateUserById(authUserId, { password: String(password) });
-              }
+              // Confirmer l'email + mettre à jour le mot de passe
+              await adminClient.auth.admin.updateUserById(authUserId, {
+                email_confirm: true,
+                ...(password ? { password: String(password) } : {}),
+              });
             } else {
               res.statusCode = 400;
               res.end(JSON.stringify({ error: `Erreur Auth : ${authErr.message}` }));

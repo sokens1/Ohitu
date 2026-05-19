@@ -77,7 +77,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const existing = listData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
       if (!existing) return res.status(400).json({ error: 'Compte Auth introuvable.' });
       authUserId = existing.id;
-      if (password) await supabaseAdmin.auth.admin.updateUserById(authUserId, { password });
+      await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+        email_confirm: true,
+        ...(password ? { password } : {}),
+      });
     } else {
       return res.status(400).json({ error: `Erreur Auth : ${authErr.message}` });
     }

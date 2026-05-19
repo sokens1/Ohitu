@@ -81,6 +81,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (authError) {
         console.error('Erreur d\'authentification:', authError);
+        if (authError.message?.includes('Email not confirmed')) {
+          throw new Error('EMAIL_NOT_CONFIRMED');
+        }
         return false;
       }
 
