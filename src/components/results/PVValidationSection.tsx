@@ -22,9 +22,9 @@ import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 
-interface PVValidationSectionProps { selectedElection: string }
+interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; }
 
-const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection }) => {
+const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false }) => {
   const [selectedPV, setSelectedPV] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'entered' | 'validated' | 'anomaly' | 'published'>('all');
@@ -634,7 +634,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
               <div className="flex space-x-4 justify-end">
                 {!editMode && (
-                  <Button onClick={() => {
+                  <Button disabled={readOnly} onClick={() => {
                     setEditValues({
                       total_registered: (editValues.total_registered || 0),
                       total_voters: (selectedPVData.total_voters || 0),
@@ -718,14 +718,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
       <Button
         onClick={() => setShowResetConfirm(true)}
-        disabled={resetting}
+        disabled={resetting || readOnly}
         variant="outline"
         className="border-orange-300 text-orange-700 hover:bg-orange-50"
       >
         <RotateCcw className="w-4 h-4 mr-2" />
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
       </Button>
-                <Button onClick={async () => {
+                <Button disabled={readOnly} onClick={async () => {
                   if (!selectedPV) return;
                   if (!confirm('Supprimer ce PV ? Cette action est irréversible.')) return;
                   // Supprimer d'abord les résultats liés
@@ -746,7 +746,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 }} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
                   Supprimer
                   </Button>
-                <Button onClick={async () => {
+                <Button disabled={readOnly} onClick={async () => {
                   if (!selectedPV) return;
                   const { data: { user } } = await supabase.auth.getUser();
                   const { error } = await supabase
