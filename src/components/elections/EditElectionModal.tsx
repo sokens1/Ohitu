@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect } from 'react';
 import { Election } from '@/types/elections';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import Select2, { Select2Option } from '@/components/ui/select2';
 import { X, Save, Calendar, MapPin, Users, Building, Vote, Target, Star } from 'lucide-react';
@@ -432,36 +432,32 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
   };
 
   return (
-    <Sheet open={true} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="h-[90vh] sm:h-[85vh] p-0 overflow-hidden border-t-2 border-gov-blue/20 rounded-t-3xl">
-        <div className="flex flex-col h-full">
-          <SheetHeader className="p-4 sm:p-6 bg-gradient-to-r from-gov-blue to-gov-blue-light text-white shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-white/20 rounded-lg">
-                  <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-                </div>
-                <div>
-                  <SheetTitle className="text-xl sm:text-2xl font-bold text-white">
-                    Modification de l'élection
-                  </SheetTitle>
-                  <SheetDescription className="text-gov-blue-light/90 text-xs sm:text-sm mt-0.5">
-                    Modifiez les informations de l'élection sélectionnée
-                  </SheetDescription>
-                </div>
-              </div>
-              <Button 
-                variant="ghost" 
-                onClick={onClose}
-                className="text-white hover:bg-white/20 -mr-2"
-              >
-                <X className="h-5 w-5" />
-              </Button>
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl xl:max-w-5xl max-h-[90vh] lg:max-h-[85vh] overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <DialogHeader className="pb-4 sm:pb-6 lg:pb-8 flex flex-row items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gov-blue/10 rounded-lg">
+              <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-gov-blue" />
             </div>
-          </SheetHeader>
+            <div>
+              <DialogTitle className="text-xl sm:text-2xl font-bold text-gray-900">
+                Modification de l'élection
+              </DialogTitle>
+              <DialogDescription className="text-gray-500 text-xs sm:text-sm mt-0.5">
+                Modifiez les informations de l'élection sélectionnée. Les champs marqués d'un astérisque (*) sont obligatoires.
+              </DialogDescription>
+            </div>
+          </div>
+          <Button 
+            variant="ghost" 
+            onClick={onClose}
+            className="text-gray-500 hover:bg-gray-100 -mr-2"
+          >
+            <X className="h-5 w-5" />
+          </Button>
+        </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-            <ModernForm onSubmit={handleSubmit}>
+        <ModernForm onSubmit={handleSubmit}>
           {/* Informations générales */}
           <ModernFormSection
             title="Informations Générales"
@@ -838,12 +834,10 @@ const EditElectionModal: React.FC<EditElectionModalProps> = ({
               <span className="hidden sm:inline">{isSubmitting ? 'Enregistrement...' : 'Enregistrer les modifications'}</span>
               <span className="sm:hidden">{isSubmitting ? 'Sauvegarde...' : 'Sauvegarder'}</span>
             </Button>
-</ModernFormActions>
-</ModernForm>
-</div>
-</div>
-</SheetContent>
-</Sheet>
+          </ModernFormActions>
+        </ModernForm>
+      </DialogContent>
+    </Dialog>
 );
 };
 

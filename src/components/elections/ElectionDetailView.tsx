@@ -90,6 +90,7 @@ interface ElectionDetailViewProps {
 }
 
 const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBack, onDataChange }) => {
+  const isProfessional = election.type?.trim() === 'Élection Professionnelle' || !!(election.enterpriseId || (election as any).enterprise_id);
   const [showAddCenter, setShowAddCenter] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [showEditCenter, setShowEditCenter] = useState(false);
@@ -263,15 +264,16 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     fetchCandidates();
   }, [fetchCandidates]);
 
-  // Charger les informations de l'entreprise si c'est une élection pro
+  // Charger les informations de l'entreprise si c'est une élection pro ou liée à une entreprise
   useEffect(() => {
     const fetchEnterprise = async () => {
-      if (election.type === 'Élection Professionnelle' && election.enterpriseId) {
+      const entId = election.enterpriseId || (election as any).enterprise_id;
+      if (entId) {
         try {
           const { data, error } = await supabase
             .from('enterprises')
             .select('*')
-            .eq('id', election.enterpriseId)
+            .eq('id', entId)
             .single();
             
           if (error) throw error;
@@ -282,7 +284,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
       }
     };
     fetchEnterprise();
-  }, [election.type, election.enterpriseId]);
+  }, [election.enterpriseId, (election as any).enterprise_id]);
 
 
   // Mettre à jour les statistiques quand les données changent
@@ -682,10 +684,10 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         {/* Main Content avec onglets modernisés - Mobile First */}
         <div className="bg-white rounded-xl sm:rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <Tabs defaultValue="info" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 bg-gray-50 p-1 rounded-none overflow-x-auto overflow-y-hidden">
+            <TabsList className="flex w-full bg-gray-50 p-1 rounded-none overflow-x-auto whitespace-nowrap scrollbar-none justify-start md:justify-around gap-1">
               <TabsTrigger 
                 value="info" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
               >
                 <div className="p-1 sm:p-1.5 bg-gov-blue/10 rounded-md data-[state=active]:bg-blue-500 transition-colors duration-300">
                   <Building className="w-3 h-3 sm:w-4 sm:h-4 text-gov-blue data-[state=active]:text-white" />
@@ -700,7 +702,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="centers" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-green-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-green-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-green-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-green-500"
               >
                 <div className="p-1 sm:p-1.5 bg-green-100 rounded-md data-[state=active]:bg-green-500 transition-colors duration-300">
                   <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-green-600 data-[state=active]:text-white" />
@@ -715,7 +717,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="candidates" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-purple-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-purple-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-purple-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-purple-500"
               >
                 <div className="p-1 sm:p-1.5 bg-purple-100 rounded-md data-[state=active]:bg-purple-500 transition-colors duration-300">
                   <Users className="w-3 h-3 sm:w-4 sm:h-4 text-purple-600 data-[state=active]:text-white" />
@@ -736,7 +738,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="results" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-orange-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-orange-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-orange-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-orange-500"
               >
                 <div className="p-1 sm:p-1.5 bg-orange-100 rounded-md data-[state=active]:bg-orange-500 transition-colors duration-300">
                   <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 text-orange-600 data-[state=active]:text-white" />
@@ -839,18 +841,18 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <div className="p-2 bg-green-100 rounded-lg">
-                      {election.type === 'Élection Professionnelle' ? (
+                      {isProfessional ? (
                         <Building className="w-5 h-5 text-green-600" />
                       ) : (
                         <MapPin className="w-5 h-5 text-green-600" />
                       )}
                     </div>
-                    {election.type === 'Élection Professionnelle' ? 'Informations Entreprise' : 'Circonscription Électorale'}
+                    {isProfessional ? 'Informations Entreprise' : 'Circonscription Électorale'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="space-y-3">
-                    {election.type === 'Élection Professionnelle' ? (
+                    {isProfessional ? (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>

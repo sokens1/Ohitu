@@ -28,31 +28,32 @@ interface ElectionWizardProps {
   onClose: () => void;
   onSubmit?: (election: any) => void;
   onSuccess?: () => void;
+  prefilledData?: any;
 }
 
-const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSuccess }) => {
+const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSuccess, prefilledData }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState({
     // Étape 1
-    name: '',
-    type: '',
-    date: '',
-    seatsAvailable: '',
-    budget: '',
-    voteGoal: '',
+    name: prefilledData?.name || '',
+    type: prefilledData?.type || '',
+    date: prefilledData?.date || '',
+    seatsAvailable: prefilledData?.seatsAvailable !== undefined ? prefilledData.seatsAvailable.toString() : '',
+    budget: prefilledData?.budget !== undefined ? prefilledData.budget.toString() : '',
+    voteGoal: prefilledData?.voteGoal !== undefined ? prefilledData.voteGoal.toString() : '',
     
     // Étape 2
-    province: '',
-    commune: '',
-    arrondissement: '',
+    province: prefilledData?.province || '',
+    commune: prefilledData?.commune || '',
+    arrondissement: prefilledData?.arrondissement || '',
     
     // Étape 3 - Candidats sélectionnés
-    selectedCandidates: [] as string[],
+    selectedCandidates: prefilledData?.selectedCandidates || [] as string[],
     
     // Étape 4 - Centres sélectionnés
-    selectedCenters: [] as string[],
-    totalVoters: '',
-    coverImage: ''
+    selectedCenters: prefilledData?.selectedCenters || [] as string[],
+    totalVoters: prefilledData?.totalVoters !== undefined ? prefilledData.totalVoters.toString() : '',
+    coverImage: prefilledData?.coverImage || ''
   });
 
 
@@ -118,8 +119,8 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
       }
       const { data, error } = await supabase
         .from('communes')
-        .select('id, name')
-        .eq('province_id', provinceId)
+        .select('id, name, departments!inner(province_id)')
+        .eq('departments.province_id', provinceId)
         .order('name');
       
       if (error) throw error;

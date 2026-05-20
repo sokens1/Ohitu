@@ -48,7 +48,7 @@ const FloatingInput = React.forwardRef<HTMLInputElement, FloatingInputProps>(
       onChange?.(e);
     };
 
-    const isLabelFloating = isFocused || hasValue || (props.type === 'date' && value);
+    const isLabelFloating = isFocused || hasValue || props.type === 'date' || props.type === 'time' || props.type === 'datetime-local';
 
     const baseClasses = "relative w-full transition-all duration-200 ease-in-out";
     const sizeClasses = {
@@ -101,7 +101,7 @@ const FloatingInput = React.forwardRef<HTMLInputElement, FloatingInputProps>(
               "absolute left-3 transition-all duration-200 ease-in-out pointer-events-none",
               icon && "left-10",
               isLabelFloating 
-                ? "top-1 text-xs text-gov-blue font-medium" 
+                ? cn("top-1 text-xs font-medium", isFocused ? "text-gov-blue" : "text-gray-500") 
                 : "top-1/2 transform -translate-y-1/2 text-gray-500",
               error && isLabelFloating && "text-red-500"
             )}
