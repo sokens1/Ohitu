@@ -254,11 +254,7 @@ const ElectionDetailModal: React.FC<ElectionDetailModalProps> = ({ election, onC
                 <Users className="w-4 h-4" />
                 <span>Candidats</span>
               </TabsTrigger>
-              <TabsTrigger value="resultats" className="flex items-center space-x-2">
-                <BarChart3 className="w-4 h-4" />
-                <span>Résultats</span>
-              </TabsTrigger>
-            </TabsList>
+             </TabsList>
 
             {/* Onglet Infrastructure */}
             <TabsContent value="infrastructure" className="space-y-6">
@@ -375,35 +371,6 @@ const ElectionDetailModal: React.FC<ElectionDetailModalProps> = ({ election, onC
                         </CardContent>
                       </Card>
                     ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Onglet Résultats */}
-            <TabsContent value="resultats" className="space-y-6">
-              <Card className="gov-card">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center space-x-2">
-                    <BarChart3 className="w-5 h-5" />
-                    <span>Accès aux Résultats</span>
-                  </CardTitle>
-                  <p className="text-sm text-gray-600">
-                    Lien direct vers le module de centralisation des résultats
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-center p-8">
-                    <BarChart3 className="w-16 h-16 text-gov-blue mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold mb-2">Centralisation des Résultats</h3>
-                    <p className="text-gray-600 mb-6">
-                      Accédez au module complet de centralisation et publication des résultats
-                      pour cette élection
-                    </p>
-                    <Button className="gov-bg-primary hover:bg-gov-blue-dark">
-                      <ChevronRight className="w-4 h-4 mr-2" />
-                      Accéder aux Résultats
-                    </Button>
                   </div>
                 </CardContent>
               </Card>

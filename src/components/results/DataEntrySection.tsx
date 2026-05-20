@@ -30,9 +30,10 @@ interface DataEntrySectionProps {
     anomaliesDetectees: number;
   };
   selectedElection: string;
+  readOnly?: boolean;
 }
 
-const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection }) => {
+const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false }) => {
   const [expandedCenters, setExpandedCenters] = useState<string[]>([]);
   const [showAnomaliesOnly, setShowAnomaliesOnly] = useState(false);
   const [showPVEntry, setShowPVEntry] = useState(false);
@@ -210,22 +211,24 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     : votingCenters;
 
   if (showPVEntry) {
-    return <PVEntrySection onClose={() => setShowPVEntry(false)} selectedElection={selectedElection} />;
+    return <PVEntrySection onClose={() => setShowPVEntry(false)} selectedElection={selectedElection} readOnly={readOnly} />;
   }
 
   return (
     <div className="space-y-6">
       {/* Bouton d'action principal */}
-      <div className="flex justify-end">
-        <Button 
-          onClick={() => setShowPVEntry(true)}
-          size="lg"
-          className="bg-gov-blue hover:bg-gov-blue-dark text-white px-8 py-3"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Saisir un PV
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end">
+          <Button
+            onClick={() => setShowPVEntry(true)}
+            size="lg"
+            className="bg-gov-blue hover:bg-gov-blue-dark text-white px-8 py-3"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Saisir un PV
+          </Button>
+        </div>
+      )}
 
       {/* KPIs retirés sur demande */}
 

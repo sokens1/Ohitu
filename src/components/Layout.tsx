@@ -25,6 +25,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { useRBAC } from '@/hooks/useRBAC';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -48,8 +49,17 @@ const getNotificationIcon = (type: 'info' | 'success' | 'warning' | 'error') => 
   }
 };
 
+const ALL_MENU_ITEMS = [
+  { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard', permission: 'view:dashboard'  as const },
+  { icon: Calendar, label: 'Élections',             path: '/elections', permission: 'view:elections'  as const },
+  { icon: BarChart3,label: 'Résultats',             path: '/results',   permission: 'view:results'    as const },
+  { icon: Users,    label: 'Gestion Utilisateurs',  path: '/users',     permission: 'view:users'      as const },
+  { icon: FileText, label: 'Piste d\'Audit',        path: '/audit',     permission: 'view:audit'      as const },
+];
+
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { user, logout } = useAuth();
+  const { can } = useRBAC();
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -62,16 +72,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     removeNotification,
   } = useNotifications();
 
-  const menuItems = [
-    { icon: Home, label: 'Tableau de Bord', path: '/dashboard' },
-    { icon: Calendar, label: 'Élections', path: '/elections' },
-    // { icon: IdCard, label: 'Inscrits', path: '/voters' },
-    { icon: BarChart3, label: 'Résultats', path: '/results' },
-    { icon: Users, label: 'Gestion Utilisateurs', path: '/users' },
-    { icon: FileText, label: 'Piste d\'Audit', path: '/audit' },
-    // { icon: Megaphone, label: 'Gestion Campagne', path: '/campaign' }, // Désactivé
-    // { icon: MessageSquare, label: 'Conversations', path: '/conversations' }, // Désactivé
-  ];
+  const menuItems = ALL_MENU_ITEMS.filter(item => can(item.permission));
 
   const handleLogout = () => {
     logout();
@@ -135,8 +136,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {(sidebarOpen || isMobile) && (
             <div className="mb-3">
               <p className="text-blue-100 text-sm font-medium truncate">{user?.name}</p>
-              <p className="text-blue-200 text-xs truncate capitalize">
-                {user?.role?.replace('-', ' ')}
+              <p className="text-blue-200 text-xs truncate">
+                {user?.role === 'super-admin' ? 'Super Administrateur'
+                  : user?.role === 'admin' ? 'Administrateur'
+                  : user?.role === 'validateur' ? 'Validateur'
+                  : user?.role === 'agent-saisie' ? 'Agent de Saisie'
+                  : user?.role === 'observateur' ? 'Observateur'
+                  : user?.role === 'president-bureau' ? 'Président de Bureau'
+                  : user?.role}
               </p>
             </div>
           )}
@@ -177,6 +184,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
               {/* Indicateur de qualité réseau */}
               <NetworkIndicator />
+              
               {/* Icône de notifications */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

@@ -35,6 +35,7 @@ import EditCandidateModal from './EditCandidateModal';
 import EditBureauModal from './EditBureauModal';
 import CandidateProfileModal from './CandidateProfileModal';
 import InitialsAvatar from '@/components/ui/initials-avatar';
+import { useRBAC } from '@/hooks/useRBAC';
 
 interface Election {
   id: string; // UUID
@@ -90,7 +91,10 @@ interface ElectionDetailViewProps {
 }
 
 const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBack, onDataChange }) => {
+  const { can } = useRBAC();
+  const canManage = can('elections:manage');
   const isProfessional = election.type?.trim() === 'Élection Professionnelle' || !!(election.enterpriseId || (election as any).enterprise_id);
+
   const [showAddCenter, setShowAddCenter] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [showEditCenter, setShowEditCenter] = useState(false);
@@ -743,21 +747,6 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   </div>
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="results" 
-                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-orange-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-orange-500"
-              >
-                <div className="p-1 sm:p-1.5 bg-orange-100 rounded-md data-[state=active]:bg-orange-500 transition-colors duration-300">
-                  <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 text-orange-600 data-[state=active]:text-white" />
-                </div>
-                <div className="text-left hidden xs:block">
-                  <div className="font-medium text-xs sm:text-sm">Résultats</div>
-                  <div className="text-xs text-gray-500">Publication</div>
-                </div>
-                <div className="text-left xs:hidden">
-                  <div className="font-medium text-xs">Résultats</div>
-                </div>
-              </TabsTrigger>
             </TabsList>
 
           {/* Section Informations modernisée */}
@@ -978,7 +967,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <List className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button 
+                {canManage && (
+                <Button
                   onClick={() => setShowAddCenter(true)}
                   className="bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
                 >
@@ -986,6 +976,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   <span className="hidden xs:inline">Ajouter un centre</span>
                   <span className="xs:hidden">Ajouter</span>
                 </Button>
+                )}
               </div>
             </div>
 
@@ -1041,28 +1032,26 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         <span className="hidden xs:inline">Détails</span>
                         <span className="xs:hidden">Voir</span>
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditCenter(center);
-                        }}
+                      {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); handleEditCenter(center); }}
                         className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-all duration-300"
                       >
                         <Edit className="w-3 h-3" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemoveCenter(center.id);
-                        }}
+                      )}
+                      {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); handleRemoveCenter(center.id); }}
                         className="text-red-500 hover:text-red-700 hover:bg-red-50 transition-all duration-300"
                       >
                         <Trash2 className="w-3 h-3" />
                       </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -1112,17 +1101,16 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             <Eye className="w-4 h-4 mr-1" />
                             Détails
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditCenter(center);
-                            }}
+                          {canManage && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); handleEditCenter(center); }}
                             className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-all duration-300"
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
+                          )}
                         </div>
                       </div>
                     </CardContent>
@@ -1171,7 +1159,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <List className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button 
+                {canManage && (
+                <Button
                   onClick={() => setShowAddCandidate(true)}
                   className="bg-purple-600 hover:bg-purple-700 text-white px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
                 >
@@ -1181,6 +1170,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   </span>
                   <span className="xs:hidden">Ajouter</span>
                 </Button>
+                )}
               </div>
             </div>
 
@@ -1255,9 +1245,10 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         </div>
                       )}
 
+                      {canManage && (
                       <div className="flex w-full gap-2 pt-2">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
                           onClick={() => handleEditCandidate(candidate)}
                           className="flex-1 bg-gray-50 hover:bg-blue-50 text-blue-600 rounded-xl h-10 font-bold transition-all"
@@ -1265,8 +1256,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           <Edit className="w-4 h-4 mr-1.5" />
                           Gérer
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="icon"
                           onClick={() => handleRemoveCandidate(candidate.id)}
                           className="w-10 h-10 bg-gray-50 hover:bg-red-50 text-red-500 rounded-xl transition-all"
@@ -1274,6 +1265,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -1336,18 +1328,19 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             </div>
                           </div>
                         </div>
+                        {canManage && (
                         <div className="flex items-center gap-2">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => handleEditCandidate(candidate)}
                             className="text-blue-600 hover:bg-blue-50 transition-all duration-300"
                           >
                             <Edit className="w-4 h-4 mr-1.5" />
                             Gérer
                           </Button>
-                          <Button 
-                            variant="ghost" 
+                          <Button
+                            variant="ghost"
                             size="icon"
                             onClick={() => handleRemoveCandidate(candidate.id)}
                             className="text-red-500 hover:bg-red-50 transition-all duration-300"
@@ -1355,63 +1348,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
                 ))}
               </div>
             )}
-          </TabsContent>
-          <TabsContent value="results" className="p-6">
-            <Card className="border-0 shadow-sm overflow-hidden bg-gradient-to-br from-white to-orange-50">
-              <CardHeader className="border-b border-orange-100 bg-white/50">
-                <CardTitle className="flex items-center gap-2 text-lg text-orange-900">
-                  <div className="p-2 bg-orange-100 rounded-lg">
-                    <Globe2 className="w-5 h-5 text-orange-600" />
-                  </div>
-                  Publication des résultats
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="flex flex-col sm:flex-row items-center justify-between p-6 bg-white rounded-xl shadow-sm border border-orange-100">
-                  <div className="flex items-center gap-4 mb-4 sm:mb-0">
-                    <div className={`p-4 rounded-full ${isPublished ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                      {isPublished ? <Globe className="w-8 h-8" /> : <Lock className="w-8 h-8" />}
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-gray-900">
-                        {isPublished ? 'Résultats publics' : 'Résultats masqués'}
-                      </h3>
-                      <p className="text-sm text-gray-500 max-w-md">
-                        {isPublished 
-                          ? 'Les résultats de cette élection sont actuellement visibles par tous les utilisateurs sur la plateforme.'
-                          : 'Les résultats sont masqués. Seuls les administrateurs et membres des bureaux peuvent les consulter pour le moment.'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex-shrink-0">
-                    <Button 
-                      size="lg"
-                      onClick={togglePublication}
-                      className={isPublished 
-                        ? "bg-red-600 hover:bg-red-700 text-white w-full sm:w-auto"
-                        : "bg-green-600 hover:bg-green-700 text-white w-full sm:w-auto"
-                      }
-                    >
-                      {isPublished ? (
-                        <>
-                          <Lock className="w-4 h-4 mr-2" /> Suspendre la publication
-                        </>
-                      ) : (
-                        <>
-                          <Globe className="w-4 h-4 mr-2" /> Publier les résultats
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
           </Tabs>
         </div>

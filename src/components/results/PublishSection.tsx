@@ -28,12 +28,14 @@ import {
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
 import SimulationResultsSection from './SimulationResultsSection';
+import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 
 interface PublishSectionProps {
   selectedElection: string;
+  readOnly?: boolean;
 }
 
-const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => {
+const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readOnly = false }) => {
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [showDetailedView, setShowDetailedView] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -50,12 +52,21 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
       if (!selectedElection) return;
       try {
         setLoading(true);
+
+        // 0) Charger le type de l'élection (pour différencier pro / standard)
+        const { data: electionData } = await supabase
+          .from('elections')
+          .select('type')
+          .eq('id', selectedElection)
+          .single();
+
         // 1) Récupérer PV par statut (validés ET publiés ensemble)
         const { data: pvsValidated, error: pvValErr } = await supabase
           .from('procès_verbaux')
           .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at')
           .eq('election_id', selectedElection)
           .in('status', ['validated', 'published']); // Inclure les publiés
+
         
         const { data: pvsEntered, error: pvEntErr } = await supabase
           .from('procès_verbaux')
@@ -115,17 +126,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
 
         // On n'utilise pas la vue agrégée ici pour respecter le filtre election_centers
 
-        // 3) Récupérer la liste des candidats de l'élection (référence stricte)
-        const { data: electionCands, error: ecErr } = await supabase
-          .from('election_candidates')
-          .select('candidates!inner(id, name, party)')
-          .eq('election_id', selectedElection);
-        if (ecErr) throw ecErr;
-        const electionCandidates = (electionCands || []).map((row: any) => ({
-          id: row.candidates.id,
-          name: row.candidates.name,
-          party: row.candidates.party || 'Indépendant'
-        }));
+        // 3) Charger la liste des candidats de l'élection (supporte pro + standard)
+        const electionCandidates = await resolveCandidatesForElection(selectedElection, electionData?.type);
 
         // 4) Récupérer libellés bureaux/centres
         const bureauIds = Array.from(new Set((filteredPvsAll || []).map(p => p.bureau_id).filter(Boolean)));
@@ -757,8 +759,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
                     onClick={() => setShowPublishConfirm(true)}
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                     size="lg"
-                    disabled={!finalResults || finalResults.validatedBureaux === 0}
-                    title={!finalResults || finalResults.validatedBureaux === 0 ? 'La publication nécessite au moins un PV validé' : undefined}
+                    disabled={readOnly || !finalResults || finalResults.validatedBureaux === 0}
+                    title={readOnly ? 'Accès en lecture seule' : (!finalResults || finalResults.validatedBureaux === 0 ? 'La publication nécessite au moins un PV validé' : undefined)}
                   >
                      Publier les résultats
                   </Button>
@@ -799,6 +801,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
             <div className="flex space-x-4">
               <Button
                 onClick={handlePublish}
+                disabled={readOnly}
                 className="bg-blue-600 hover:bg-blue-700 text-white flex-1"
               >
                 Confirmer la publication

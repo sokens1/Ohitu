@@ -44,9 +44,11 @@ import EditProfessionalElectionModal from '@/components/elections/EditProfession
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRBAC } from '@/hooks/useRBAC';
 
 const ElectionManagementUnified = () => {
   const { user } = useAuth();
+  const { can, isGlobalAdmin, assignedElectionId } = useRBAC();
   const {
     elections,
     selectedElection,
@@ -94,6 +96,16 @@ const ElectionManagementUnified = () => {
       if (category === 'professional') {
         const configData = [
           { Key: "Nom de l'élection", Value: "Élection Professionnelle SEEG 2026" },
+          { Key: "Raison Sociale", Value: "Société d'Énergie et d'Eau du Gabon" },
+          { Key: "Numéro Enregistrement", Value: "RG-4920492" },
+          { Key: "Secteur", Value: "Privé" },
+          { Key: "Unité Administrative (Ministère de rattachement)", Value: "" },
+          { Key: "Effectif Cadres", Value: 0 },
+          { Key: "Effectif Employés", Value: 0 },
+          { Key: "Effectif Ouvriers", Value: 4 },
+          { Key: "Nom RH", Value: "Jean Dupont" },
+          { Key: "Téléphone RH", Value: "+24166123456" },
+          { Key: "Email RH", Value: "j.dupont@seeg.ga" },
           { Key: "Date du scrutin (AAAA-MM-JJ)", Value: "2026-06-20" },
           { Key: "Affichage listes (AAAA-MM-JJ)", Value: "2026-06-01" },
           { Key: "Début campagne (AAAA-MM-JJ)", Value: "2026-06-05" },
@@ -513,16 +525,15 @@ const ElectionManagementUnified = () => {
           enterprises (id, name, province_name, commune_name)
         `);
 
-      if (user && user.role !== 'super-admin' && user.role !== 'observateur' && user.role !== 'validateur') {
-        const conditions = [];
-        conditions.push(`created_by.eq.${user.id}`);
-        if (user.assigned_election_id) {
-          conditions.push(`id.eq.${user.assigned_election_id}`);
+      // Super-admin : voit toutes les élections
+      // Tous les autres rôles : uniquement leur élection assignée
+      if (!isGlobalAdmin) {
+        if (assignedElectionId) {
+          query = query.eq('id', assignedElectionId);
+        } else if (user) {
+          // Admin sans election assignée : voit celles qu'il a créées
+          query = query.eq('created_by', user.id);
         }
-        if ((user.role === 'agent-saisie' || user.role === 'president-bureau') && user.created_by) {
-          conditions.push(`created_by.eq.${user.created_by}`);
-        }
-        query = query.or(conditions.join(','));
       }
 
       const { data, error } = await query.order('created_at', { ascending: false });
@@ -715,7 +726,7 @@ const ElectionManagementUnified = () => {
     } finally {
       setLoading(false);
     }
-  }, [setLoading, setError, setElections, recalculateElectionVoters, user]);
+  }, [setLoading, setError, setElections, recalculateElectionVoters, user, isGlobalAdmin, assignedElectionId]);
 
   // Charger les élections depuis Supabase
   useEffect(() => {
@@ -1400,7 +1411,8 @@ const ElectionManagementUnified = () => {
         },
         createdAt: new Date(),
         updatedAt: new Date(),
-        createdBy: 'current-user', // À remplacer par l'ID de l'utilisateur connecté
+        createdBy: 'current-user',
+        enterpriseId: undefined
       };
 
       // Recalculer automatiquement le nombre d'électeurs après création
@@ -1727,9 +1739,10 @@ const ElectionManagementUnified = () => {
                 </p>
               </div>
               <div className="flex flex-col xs:flex-row gap-2 sm:gap-3 w-full">
+                {can('elections:manage') && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button 
+                    <Button
                       className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full xs:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
                       size="lg"
                     >
@@ -1754,8 +1767,9 @@ const ElectionManagementUnified = () => {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                
-                <Button 
+                )} {/* fin can('elections:manage') */}
+
+                <Button
                   variant="outline"
                   onClick={refreshElectionsData}
                   className="bg-white hover:bg-gray-50 border-gray-200 text-gray-700 shadow-sm px-4 py-2 sm:px-6 sm:py-3 h-auto"
@@ -1981,9 +1995,10 @@ const ElectionManagementUnified = () => {
                   : 'Commencez par créer votre première élection pour gérer le processus électoral.'
                 }
               </p>
+              {can('elections:manage') && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
+                  <Button
                     className="btn-primary shadow-lg hover:shadow-xl transition-all duration-300 w-full sm:w-auto text-sm sm:text-base px-4 py-2 sm:px-6 sm:py-3"
                     size="lg"
                   >
@@ -2008,6 +2023,7 @@ const ElectionManagementUnified = () => {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -2048,18 +2064,22 @@ const ElectionManagementUnified = () => {
                             <Eye className="mr-2 h-4 w-4" />
                             Voir les détails
                           </DropdownMenuItem>
+                          {can('elections:manage') && (
                           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleEditElection(election); }}>
                             <Edit className="mr-2 h-4 w-4" />
                             Modifier
                           </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem 
-                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }} 
+                          )}
+                          {can('elections:manage') && <DropdownMenuSeparator />}
+                          {can('elections:manage') && (
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }}
                             className="text-red-600 focus:text-red-600"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Supprimer
                           </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
                             <span className="mr-2 opacity-70">⏸</span>
@@ -2214,18 +2234,22 @@ const ElectionManagementUnified = () => {
                                 <Eye className="mr-2 h-4 w-4" />
                                 Voir les détails
                               </DropdownMenuItem>
+                              {can('elections:manage') && (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleEditElection(election); }}>
                                 <Edit className="mr-2 h-4 w-4" />
                                 Modifier
                               </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem 
-                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }} 
+                              )}
+                              {can('elections:manage') && <DropdownMenuSeparator />}
+                              {can('elections:manage') && (
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }}
                                 className="text-red-600 focus:text-red-600"
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Supprimer
                               </DropdownMenuItem>
+                              )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
                                 <span className="mr-2 opacity-70">⏸</span>

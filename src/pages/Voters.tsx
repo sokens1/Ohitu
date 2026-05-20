@@ -379,12 +379,12 @@ const Voters = () => {
     <Layout>
       <div className="space-y-6">
         {/* En-tête */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Centres et Bureaux de Vote</h1>
             <p className="text-gray-600 mt-2">Gestion des centres de vote et de leurs bureaux</p>
           </div>
-          <div className="flex space-x-3">
+          <div className="flex flex-wrap gap-2">
             <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
             <Button onClick={handleImportClick} variant="outline" className="flex items-center space-x-2">
               <Upload className="w-4 h-4" />
