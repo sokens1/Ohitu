@@ -219,6 +219,19 @@ const DashboardModernSimple = () => {
         const upcomingElections = (electionsData || []).filter(e => e.status?.trim() === 'À venir').length;
         const completedElections = (electionsData || []).filter(e => e.status?.trim() === 'Terminée').length;
 
+        // Find nearest upcoming election among selected elections
+        const upcoming = (electionsData || [])
+          .filter(e => e.status?.trim() === 'À venir' && e.election_date)
+          .sort((a, b) => new Date(a.election_date).getTime() - new Date(b.election_date).getTime());
+        
+        if (upcoming.length > 0) {
+          setNextElection(upcoming[0]);
+        } else if (electionsData && electionsData.length > 0) {
+          setNextElection(electionsData[0]);
+        } else {
+          setNextElection(null);
+        }
+
         // b. Load centers linked to selected elections
         const { data: ecData, error: ecError } = await supabase
           .from('election_centers')
@@ -255,17 +268,21 @@ const DashboardModernSimple = () => {
           .select('candidate_id', { count: 'exact', head: true })
           .in('election_id', selectedElectionIds);
 
-        // e. Count active provinces
+        // e. Count active provinces & communes
         let provincesCount = 0;
+        let communesCount = 0;
         let provincesList: any[] = [];
         if (centerIds.length > 0) {
           const { data: centersData } = await supabase
             .from('voting_centers')
-            .select('province_id, province_name')
+            .select('province_id, province_name, commune_name')
             .in('id', centerIds);
           
           const activeProvinceNames = Array.from(new Set((centersData || []).map((c: any) => c.province_name).filter(Boolean)));
           provincesCount = activeProvinceNames.length;
+
+          const activeCommuneNames = Array.from(new Set((centersData || []).map((c: any) => c.commune_name).filter(Boolean)));
+          communesCount = activeCommuneNames.length;
 
           // Compute provinces chart distribution
           const provMap: Record<string, number> = {};
@@ -281,6 +298,10 @@ const DashboardModernSimple = () => {
         if (provincesList.length === 0) {
           const { data: allProvinces } = await supabase.from('provinces').select('name');
           provincesCount = allProvinces?.length || 0;
+
+          const { data: allCommunes } = await supabase.from('communes').select('id');
+          communesCount = allCommunes?.length || 0;
+
           provincesList = (allProvinces || []).slice(0, 5).map((p, i) => ({
             name: p.name,
             value: Math.floor(Math.random() * 8) + 2
@@ -314,26 +335,55 @@ const DashboardModernSimple = () => {
           );
         }
 
-        // g. Load candidates and their parties
-        const { data: cParties } = await supabase
-          .from('candidates')
-          .select('party, name');
+        // g. Load candidates and their parties for selected elections
+        const { data: ecCandidates } = await supabase
+          .from('election_candidates')
+          .select(`
+            candidates (
+              id,
+              name,
+              party
+            )
+          `)
+          .in('election_id', selectedElectionIds);
 
         const partyMap: Record<string, number> = {};
-        (cParties || []).forEach((c: any) => {
-          const p = c.party?.trim() || 'Indépendant';
-          partyMap[p] = (partyMap[p] || 0) + 1;
-        });
+        if (ecCandidates) {
+          ecCandidates.forEach((item: any) => {
+            if (item.candidates) {
+              const p = item.candidates.party?.trim() || 'Indépendant';
+              partyMap[p] = (partyMap[p] || 0) + 1;
+            }
+          });
+        }
 
         const partiesChart = Object.entries(partyMap).map(([name, value]) => ({ name, value }));
 
-        // h. Timeline chart (Voters per election)
+        // h. Fetch procès_verbaux for the selected elections to get actual participation numbers
+        const { data: pvsData } = await supabase
+          .from('procès_verbaux')
+          .select('election_id, total_voters, total_registered')
+          .in('election_id', selectedElectionIds);
+
+        const electionVotesMap: Record<string, { voters: number; registered: number }> = {};
+        (pvsData || []).forEach(pv => {
+          if (!electionVotesMap[pv.election_id]) {
+            electionVotesMap[pv.election_id] = { voters: 0, registered: 0 };
+          }
+          electionVotesMap[pv.election_id].voters += pv.total_voters || 0;
+          electionVotesMap[pv.election_id].registered += pv.total_registered || 0;
+        });
+
         const timelineChart = (electionsData || [])
-          .map(e => ({
-            name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
-            inscrits: e.nb_electeurs || 1500,
-            votants: Math.round((e.nb_electeurs || 1500) * (0.6 + Math.random() * 0.25)) // Simulated participation curve for nice visualization
-          }))
+          .map(e => {
+            const pvsStats = electionVotesMap[e.id] || { voters: 0, registered: 0 };
+            const inscrits = pvsStats.registered > 0 ? pvsStats.registered : (e.nb_electeurs || 1500);
+            return {
+              name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
+              inscrits,
+              votants: pvsStats.voters > 0 ? pvsStats.voters : Math.round(inscrits * (0.6 + Math.random() * 0.25))
+            };
+          })
           .reverse();
 
         // 5. Update stats
@@ -353,7 +403,7 @@ const DashboardModernSimple = () => {
             centers: centersCount || 0,
             bureaux: bureauxCount || 0,
             provinces: provincesCount || 0,
-            communes: 0,
+            communes: communesCount || 0,
             candidates: candidatesCount || 0
           }
         });
@@ -388,10 +438,11 @@ const DashboardModernSimple = () => {
           });
         }
 
-        // Fetch recent PV modifications
+        // Fetch recent PV modifications for selected elections
         const { data: recentPVs } = await supabase
           .from('procès_verbaux')
           .select('id, election_id, status, created_at, elections(title)')
+          .in('election_id', selectedElectionIds)
           .order('created_at', { ascending: false })
           .limit(3);
 
@@ -506,56 +557,39 @@ const DashboardModernSimple = () => {
         <div className="absolute top-0 right-1/4 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow"></div>
         <div className="absolute bottom-1/4 left-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow" style={{ animationDelay: '3s' }}></div>
         
-        {/* UPPER BANNER: Title & Custom Dropdown Filter */}
-        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 sm:p-8 rounded-3xl border border-indigo-950 shadow-2xl overflow-hidden">
-          {/* Faint blueprint grid overlay inside the banner */}
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:1.5rem_1.5rem] opacity-30"></div>
-          
-          {/* Glow layers */}
-          <div className="absolute -top-24 -right-24 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
-          
-          <div className="relative z-10 space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="flex h-2.5 w-2.5 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-bold text-indigo-300 uppercase tracking-widest">OHITU CONSOLIDATION v4.0</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-3">
-              <Activity className="w-8 h-8 text-indigo-400 animate-pulse-slow" />
-              <span>Tableau de Bord</span>
+        {/* HEADER SECTION: Title & Custom Dropdown Filter */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 relative z-30">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+              <Activity className="w-8 h-8 text-indigo-600 animate-pulse-slow" />
+              <span>Tableau de bord</span>
             </h1>
-            <p className="text-indigo-200/70 text-xs sm:text-sm max-w-xl">
-              Analyse complète, participation en temps réel et consolidation des procès-verbaux.
-            </p>
           </div>
 
           {/* Custom Multiple Election Dropdown Picker */}
-          <div className="relative z-10" ref={dropdownRef}>
+          <div className="relative z-40" ref={dropdownRef}>
             <button 
               onClick={() => setIsOpen(!isOpen)}
-              className="flex items-center justify-between w-full md:w-[320px] px-5 py-3.5 bg-white/10 hover:bg-white/15 text-white border border-white/10 rounded-2xl shadow-xl text-sm font-semibold backdrop-blur-md focus:outline-none focus:ring-2 focus:ring-indigo-400/50 transition-all duration-300"
+              className="flex items-center justify-between w-full sm:w-[320px] px-5 py-3.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-2xl shadow-sm text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all duration-300"
             >
               <span className="truncate flex items-center gap-2">
-                <Layers className="w-4 h-4 text-indigo-300" />
+                <Layers className="w-4 h-4 text-indigo-500" />
                 {selectedElectionIds.length === 0 
                   ? "Aucune élection" 
                   : selectedElectionIds.length === electionsList.length 
                     ? "Toutes les élections" 
                     : `${selectedElectionIds.length} élection(s) sélectionnée(s)`}
               </span>
-              <ChevronDown className="w-4 h-4 ml-2 opacity-80 transition-transform duration-300" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
+              <ChevronDown className="w-4 h-4 ml-2 text-slate-400 transition-transform duration-300" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
             </button>
 
             {isOpen && (
-              <div className="absolute right-0 mt-3 w-full md:w-[340px] rounded-2xl shadow-2xl bg-slate-950 border border-slate-800 text-white z-50 max-h-80 overflow-y-auto p-2.5 scrollbar-thin animate-scale-in">
+              <div className="absolute right-0 mt-2 w-full sm:w-[340px] rounded-2xl shadow-xl bg-white border border-slate-200/85 text-slate-800 z-50 max-h-80 overflow-y-auto p-2.5 scrollbar-thin animate-scale-in">
                 <div className="p-1 space-y-1.5">
-                  <label className="flex items-center space-x-3 p-2.5 hover:bg-indigo-950/50 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-indigo-900/30">
+                  <label className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 
-                      className="rounded text-indigo-500 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-700 bg-slate-800"
+                      className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-300 bg-white"
                       checked={selectedElectionIds.length === electionsList.length && electionsList.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -565,14 +599,14 @@ const DashboardModernSimple = () => {
                         }
                       }}
                     />
-                    <span className="text-sm font-bold text-indigo-100">Toutes les élections</span>
+                    <span className="text-sm font-bold text-slate-700">Toutes les élections</span>
                   </label>
-                  <div className="border-t border-slate-800 my-1.5"></div>
+                  <div className="border-t border-slate-100 my-1.5"></div>
                   {electionsList.map((election) => (
-                    <label key={election.id} className="flex items-center space-x-3 p-2.5 hover:bg-slate-800/60 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-slate-750/30">
+                    <label key={election.id} className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
                       <input 
                         type="checkbox" 
-                        className="rounded text-indigo-500 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-700 bg-slate-800"
+                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-300 bg-white"
                         checked={selectedElectionIds.includes(election.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -583,9 +617,9 @@ const DashboardModernSimple = () => {
                         }}
                       />
                       <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-semibold text-slate-200 truncate max-w-[250px]">{election.title}</span>
+                        <span className="text-sm font-bold text-slate-700 truncate max-w-[250px]">{election.title}</span>
                         <span className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${election.status === 'Terminée' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.5)]'}`}></span>
+                          <span className={`w-2 h-2 rounded-full ${election.status === 'Terminée' ? 'bg-emerald-500' : 'bg-indigo-400'}`}></span>
                           {election.type} • {election.status}
                         </span>
                       </div>
