@@ -33,7 +33,7 @@ const TAB_DEFS = [
 
 // ─── Composant ────────────────────────────────────────────────────────────────
 const Results = () => {
-  const { can, assignedElectionId, role } = useRBAC();
+  const { can, assignedElectionId, role, isGlobalAdmin } = useRBAC();
 
   // Onglets autorisés pour ce rôle
   const allowedTabs = TAB_DEFS.filter(t => can(t.permission));
@@ -45,6 +45,7 @@ const Results = () => {
   });
 
   const [selectedElection, setSelectedElection] = useState<string>(
+    // Non super-admin : toujours démarrer sur l'élection assignée (jamais le localStorage)
     () => assignedElectionId ?? localStorage.getItem('results_selected_election') ?? ''
   );
   const [availableElections, setAvailableElections] = useState<ElectionOption[]>([]);
@@ -54,15 +55,25 @@ const Results = () => {
   });
   const [loading, setLoading] = useState(true);
 
-  // ── Chargement des élections (scopé si rôle opérationnel) ──────────────────
+  // ── Chargement des élections ───────────────────────────────────────────────
+  // Règle : seul le super-admin voit toutes les élections.
+  // Tous les autres rôles ne voient QUE l'élection qui leur est assignée.
   useEffect(() => {
     const fetchElections = async () => {
       try {
         setLoading(true);
+
+        // Non super-admin sans élection assignée → aucune élection accessible
+        if (!isGlobalAdmin && !assignedElectionId) {
+          setAvailableElections([]);
+          setSelectedElection('');
+          return;
+        }
+
         let query = supabase.from('elections').select('id, title').order('election_date', { ascending: false });
 
-        // Utilisateurs opérationnels : ils ne voient que leur élection assignée
-        if (assignedElectionId) {
+        // Tout rôle non super-admin : restreindre à l'élection assignée uniquement
+        if (!isGlobalAdmin && assignedElectionId) {
           query = query.eq('id', assignedElectionId);
         }
 
@@ -86,12 +97,12 @@ const Results = () => {
     fetchElections();
   }, [assignedElectionId]);
 
-  // ── Persistence localStorage ───────────────────────────────────────────────
+  // ── Persistence localStorage (super-admin uniquement) ─────────────────────
   useEffect(() => {
-    if (selectedElection && !assignedElectionId) {
+    if (isGlobalAdmin && selectedElection) {
       localStorage.setItem('results_selected_election', selectedElection);
     }
-  }, [selectedElection, assignedElectionId]);
+  }, [selectedElection, isGlobalAdmin]);
 
   useEffect(() => {
     localStorage.setItem('results_active_tab', activeTab);
@@ -145,8 +156,13 @@ const Results = () => {
     fetchGlobalStats();
   }, [selectedElection]);
 
-  // ── Observateur : lecture seule sur la section validation ──────────────────
-  const isReadOnly = role === 'observateur';
+  // ── Permissions par section ────────────────────────────────────────────────
+  // readOnly sur la validation : observateur peut voir mais pas agir
+  const validationReadOnly = role === 'observateur';
+  // readOnly sur la saisie : aucun rôle opérationnel autre qu'agent-saisie ne peut soumettre
+  const entryReadOnly = !can('results:entry');
+  // readOnly sur la publication : seuls admin et super-admin peuvent publier
+  const publishReadOnly = !can('results:publish');
 
   if (loading) {
     return (
@@ -155,6 +171,23 @@ const Results = () => {
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#006400] mx-auto mb-4" />
             <p className="text-gray-600">Chargement des résultats...</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  // Cas : non super-admin sans élection assignée
+  if (!isGlobalAdmin && !assignedElectionId) {
+    return (
+      <Layout>
+        <div className="flex flex-col items-center justify-center h-64 gap-4">
+          <Lock className="h-12 w-12 text-gray-300" />
+          <div className="text-center">
+            <p className="font-semibold text-gray-700">Aucune élection assignée</p>
+            <p className="text-sm text-gray-500 mt-1">
+              Votre compte n'est rattaché à aucune élection. Contactez votre administrateur.
+            </p>
           </div>
         </div>
       </Layout>
@@ -176,8 +209,8 @@ const Results = () => {
                   Élection active :
                 </label>
 
-                {/* Rôles opérationnels : élection verrouillée */}
-                {assignedElectionId ? (
+                {/* Non super-admin : élection verrouillée sur leur assignation */}
+                {!isGlobalAdmin ? (
                   <div className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-md text-sm text-gray-800 w-full sm:w-80">
                     <Lock className="h-4 w-4 text-gray-400 flex-shrink-0" />
                     <span className="truncate">
@@ -231,15 +264,15 @@ const Results = () => {
 
               <div className="p-3 sm:p-4 lg:p-6">
                 <TabsContent value="entry" className="space-y-6 mt-0">
-                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} />
+                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} />
                 </TabsContent>
 
                 <TabsContent value="validation" className="space-y-6 mt-0">
-                  <PVValidationSection selectedElection={selectedElection} readOnly={isReadOnly} />
+                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} />
                 </TabsContent>
 
                 <TabsContent value="publish" className="space-y-6 mt-0">
-                  <PublishSection selectedElection={selectedElection} />
+                  <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} />
                 </TabsContent>
               </div>
             </Tabs>

@@ -31,9 +31,10 @@ import SimulationResultsSection from './SimulationResultsSection';
 
 interface PublishSectionProps {
   selectedElection: string;
+  readOnly?: boolean;
 }
 
-const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => {
+const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readOnly = false }) => {
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [showDetailedView, setShowDetailedView] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -757,8 +758,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
                     onClick={() => setShowPublishConfirm(true)}
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                     size="lg"
-                    disabled={!finalResults || finalResults.validatedBureaux === 0}
-                    title={!finalResults || finalResults.validatedBureaux === 0 ? 'La publication nécessite au moins un PV validé' : undefined}
+                    disabled={readOnly || !finalResults || finalResults.validatedBureaux === 0}
+                    title={readOnly ? 'Accès en lecture seule' : (!finalResults || finalResults.validatedBureaux === 0 ? 'La publication nécessite au moins un PV validé' : undefined)}
                   >
                      Publier les résultats
                   </Button>
@@ -799,6 +800,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
             <div className="flex space-x-4">
               <Button
                 onClick={handlePublish}
+                disabled={readOnly}
                 className="bg-blue-600 hover:bg-blue-700 text-white flex-1"
               >
                 Confirmer la publication

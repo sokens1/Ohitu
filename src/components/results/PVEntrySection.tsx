@@ -29,9 +29,10 @@ import { toast } from 'sonner';
 interface PVEntrySectionProps {
   onClose: () => void;
   selectedElection: string;
+  readOnly?: boolean;
 }
 
-const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElection }) => {
+const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElection, readOnly = false }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [electionInfo, setElectionInfo] = useState<any>(null);
   const [candidatesData, setCandidatesData] = useState<any[]>([]);
@@ -939,10 +940,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                 <ChevronRight className="w-4 h-4 ml-2" />
               </Button>
             ) : (
-              <Button 
+              <Button
                 onClick={handleSubmitPV}
-                disabled={!canSubmit() || submitting}
+                disabled={!canSubmit() || submitting || readOnly}
                 className="bg-green-600 hover:bg-green-700"
+                title={readOnly ? 'Accès en lecture seule' : undefined}
               >
                 <CheckCircle className="w-4 h-4 mr-2" />
                 {submitting ? 'Soumission...' : 'Soumettre le PV'}
