@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { X, Save, Users, Star, Building } from 'lucide-react';
+import { X, Save, Users, Star, Building, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import FloatingInput from '@/components/ui/floating-input';
@@ -49,6 +49,20 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
     suppleantPhoto: candidate.suppleants?.[0]?.photo || '',
   });
 
+  const [files, setFiles] = useState<{
+    political: { file: File | null; preview: string };
+    tete: { file: File | null; preview: string };
+    suppleant: { file: File | null; preview: string };
+  }>({
+    political: { file: null, preview: candidate.photo || '' },
+    tete: { file: null, preview: candidate.titulaires?.[0]?.photo || '' },
+    suppleant: { file: null, preview: candidate.suppleants?.[0]?.photo || '' }
+  });
+
+  const politicalFileInputRef = useRef<HTMLInputElement>(null);
+  const teteFileInputRef = useRef<HTMLInputElement>(null);
+  const suppleantFileInputRef = useRef<HTMLInputElement>(null);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleInputChange = (field: string, value: string | boolean) => {
@@ -56,6 +70,42 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'political' | 'tete' | 'suppleant') => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFiles(prev => ({
+          ...prev,
+          [type]: { file, preview: reader.result as string }
+        }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const uploadFile = async (file: File, path: string) => {
+    const bucket = 'avatars';
+    const { data: uploadData, error: uploadErr } = await supabase.storage
+      .from(bucket)
+      .upload(path, file, { cacheControl: '3600', upsert: true });
+
+    if (uploadErr) {
+      if (uploadErr.message.includes('bucket not found')) {
+        await supabase.storage.createBucket(bucket, { public: true });
+        const { data: retryData, error: retryErr } = await supabase.storage
+          .from(bucket)
+          .upload(path, file, { cacheControl: '3600', upsert: true });
+        if (retryErr) throw retryErr;
+        const { data } = supabase.storage.from(bucket).getPublicUrl(retryData.path);
+        return data.publicUrl;
+      }
+      throw uploadErr;
+    }
+    const { data } = supabase.storage.from(bucket).getPublicUrl(uploadData.path);
+    return data.publicUrl;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -85,13 +135,25 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
 
     try {
       if (isPro) {
+        let tetePhotoUrl = formData.teteDeListePhoto;
+        let suppleantPhotoUrl = formData.suppleantPhoto;
+
+        if (files.tete.file) {
+          const path = `tete_${Date.now()}_${files.tete.file.name}`;
+          tetePhotoUrl = await uploadFile(files.tete.file, path);
+        }
+        if (files.suppleant.file) {
+          const path = `suppleant_${Date.now()}_${files.suppleant.file.name}`;
+          suppleantPhotoUrl = await uploadFile(files.suppleant.file, path);
+        }
+
         // Mettre à jour union_lists
         const { error } = await supabase
           .from('union_lists')
           .update({
             college: formData.college,
-            titulaires: [{ name: formData.teteDeListeName.trim(), photo: formData.teteDeListePhoto.trim() || null, role: 'Tête de liste' }],
-            suppleants: [{ name: formData.suppleantName.trim(), photo: formData.suppleantPhoto.trim() || null, role: 'Suppléant' }]
+            titulaires: [{ name: formData.teteDeListeName.trim(), photo: tetePhotoUrl || null, role: 'Tête de liste' }],
+            suppleants: [{ name: formData.suppleantName.trim(), photo: suppleantPhotoUrl || null, role: 'Suppléant' }]
           })
           .eq('id', candidate.id);
 
@@ -104,13 +166,19 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
         const updatedCandidate: Candidate = {
           ...candidate,
           college: formData.college,
-          titulaires: [{ name: formData.teteDeListeName.trim(), photo: formData.teteDeListePhoto.trim(), role: 'Tête de liste' }],
-          suppleants: [{ name: formData.suppleantName.trim(), photo: formData.suppleantPhoto.trim(), role: 'Suppléant' }]
+          titulaires: [{ name: formData.teteDeListeName.trim(), photo: tetePhotoUrl, role: 'Tête de liste' }],
+          suppleants: [{ name: formData.suppleantName.trim(), photo: suppleantPhotoUrl, role: 'Suppléant' }]
         };
 
         onUpdate(updatedCandidate);
         toast.success('Liste syndicale modifiée avec succès');
       } else {
+        let photoUrl = formData.photo;
+        if (files.political.file) {
+          const path = `political_${Date.now()}_${files.political.file.name}`;
+          photoUrl = await uploadFile(files.political.file, path);
+        }
+
         // Mettre à jour le candidat politique dans la base de données
         const { error } = await supabase
           .from('candidates')
@@ -118,7 +186,7 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
             name: formData.name.trim(),
             party: formData.party.trim(),
             is_our_candidate: formData.isOurCandidate,
-            photo_url: formData.photo.trim(),
+            photo_url: photoUrl,
             updated_at: new Date().toISOString(),
           })
           .eq('id', candidate.id);
@@ -135,7 +203,7 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
           name: formData.name.trim(),
           party: formData.party.trim(),
           isOurCandidate: formData.isOurCandidate,
-          photo: formData.photo.trim(),
+          photo: photoUrl,
         };
 
         onUpdate(updatedCandidate);
@@ -203,11 +271,30 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                           onChange={(e) => handleInputChange('teteDeListeName', e.target.value)}
                           required
                         />
-                        <FloatingInput
-                          label="URL de la photo (Optionnelle)"
-                          value={formData.teteDeListePhoto}
-                          onChange={(e) => handleInputChange('teteDeListePhoto', e.target.value)}
-                        />
+                        <div className="space-y-2">
+                          <Label className="text-xs text-gray-600 font-semibold">Photo du représentant</Label>
+                          <div className="flex flex-col gap-2">
+                            {files.tete.preview && (
+                              <img src={files.tete.preview} alt="Aperçu tête de liste" className="w-16 h-16 rounded-lg object-cover border" />
+                            )}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              ref={teteFileInputRef}
+                              onChange={(e) => handleFileChange(e, 'tete')}
+                              className="hidden"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => teteFileInputRef.current?.click()}
+                              className="flex items-center gap-2 w-full sm:w-auto justify-center"
+                            >
+                              <Upload className="w-4 h-4" /> Téléverser la photo
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                       
                       <div className="space-y-3">
@@ -218,11 +305,30 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                           onChange={(e) => handleInputChange('suppleantName', e.target.value)}
                           required
                         />
-                        <FloatingInput
-                          label="URL de la photo (Optionnelle)"
-                          value={formData.suppleantPhoto}
-                          onChange={(e) => handleInputChange('suppleantPhoto', e.target.value)}
-                        />
+                        <div className="space-y-2">
+                          <Label className="text-xs text-gray-600 font-semibold">Photo du suppléant</Label>
+                          <div className="flex flex-col gap-2">
+                            {files.suppleant.preview && (
+                              <img src={files.suppleant.preview} alt="Aperçu suppléant" className="w-16 h-16 rounded-lg object-cover border" />
+                            )}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              ref={suppleantFileInputRef}
+                              onChange={(e) => handleFileChange(e, 'suppleant')}
+                              className="hidden"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => suppleantFileInputRef.current?.click()}
+                              className="flex items-center gap-2 w-full sm:w-auto justify-center"
+                            >
+                              <Upload className="w-4 h-4" /> Téléverser la photo
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -249,6 +355,31 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                     required
                   />
                 </ModernFormGrid>
+
+                <div className="space-y-2 mt-4">
+                  <Label className="text-xs text-gray-600 font-semibold">Photo de profil</Label>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    {files.political.preview && (
+                      <img src={files.political.preview} alt="Aperçu candidat" className="w-20 h-20 rounded-xl object-cover border shadow-sm" />
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      ref={politicalFileInputRef}
+                      onChange={(e) => handleFileChange(e, 'political')}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => politicalFileInputRef.current?.click()}
+                      className="flex items-center gap-2 w-full sm:w-auto justify-center"
+                    >
+                      <Upload className="w-4 h-4" /> Sélectionner une photo
+                    </Button>
+                  </div>
+                </div>
 
                 <div className="flex items-center space-x-2 p-4 bg-purple-50 rounded-lg border border-purple-200 mt-4">
                   <Checkbox

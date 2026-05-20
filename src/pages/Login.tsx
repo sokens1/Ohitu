@@ -10,6 +10,7 @@ import type { UserRole } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { Loader2, Eye, EyeOff, Vote, Building, ArrowRight, Shield, CheckCircle, Users, BarChart3 } from 'lucide-react';
 import { fetchAllElections } from '../api/elections';
+import NetworkIndicator from '@/components/NetworkIndicator';
 
 interface Election {
   id: string;
@@ -99,7 +100,12 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row">
+    <div className="min-h-screen flex flex-col lg:flex-row relative">
+      {/* Indicateur de réseau flottant en haut à droite */}
+      <div className="absolute top-4 right-4 z-50">
+        <NetworkIndicator />
+      </div>
+      
       {/* Section gauche - Fond bleu avec sélection d'élection */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-gov-blue via-blue-700 to-gov-blue-dark flex-col items-center justify-center p-8 relative overflow-hidden">
         {/* Logo */}

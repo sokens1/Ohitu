@@ -1,108 +1,70 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { X, ChevronLeft, ChevronRight, Check, Building, Users, Calendar, MapPin, Briefcase, FileText, Settings, Download, Upload } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Check, Building, Calendar, Briefcase, FileText, Download, Upload } from 'lucide-react';
 import { ModernForm, ModernFormSection, ModernFormGrid } from '@/components/ui/modern-form';
 import FloatingInput from '@/components/ui/floating-input';
 import FloatingSelect from '@/components/ui/floating-select';
-import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import ImageUploader from '@/components/ui/ImageUploader';
-
 
 interface ProfessionalElectionWizardProps {
   onClose: () => void;
   onSubmit?: (election: any) => void;
   onSuccess?: () => void;
+  prefilledData?: any;
 }
 
-const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({ onClose, onSubmit, onSuccess }) => {
+const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({ onClose, onSubmit, onSuccess, prefilledData }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const steps = [
     'Informations',
     'Entreprise',
-    'Listes Syndicales',
     'Collèges & Bureaux',
     'Chronogramme',
     'Récapitulatif'
   ];
 
   const [formData, setFormData] = useState({
-    name: '',
-    type: 'Élection Professionnelle',
-    date: '',
-    legalFramework: 'LOI-022-2021 + Arrêté 000147',
+    name: prefilledData?.name || '',
+    type: prefilledData?.type || 'Élection Professionnelle',
+    date: prefilledData?.date || '',
+    legalFramework: prefilledData?.legalFramework || 'LOI-022-2021 + Arrêté 000147',
     
     // Entreprise
-    enterpriseName: '',
-    enterpriseSector: 'prive',
-    administrativeUnit: '',
-    totalEmployees: '',
-    employeesCadres: '0',
-    employeesEmployes: '0',
-    employeesOuvriers: '0',
-    hrName: '',
-    hrPhone: '',
-    hrEmail: '',
-    region: 'Estuaire',
-    villes: [] as string[],
-    
-    // Listes Syndicales
-    unionLists: [] as any[],
-    carence: false,
+    enterpriseName: prefilledData?.enterpriseName || '',
+    enterpriseSector: prefilledData?.enterpriseSector || 'prive',
+    administrativeUnit: prefilledData?.administrativeUnit || '',
+    totalEmployees: prefilledData?.totalEmployees || '',
+    employeesCadres: prefilledData?.employeesCadres || '0',
+    employeesEmployes: prefilledData?.employeesEmployes || '0',
+    employeesOuvriers: prefilledData?.employeesOuvriers || '0',
+    hrName: prefilledData?.hrName || '',
+    hrPhone: prefilledData?.hrPhone || '',
+    hrEmail: prefilledData?.hrEmail || '',
     
     // Collèges
-    colleges: [
+    colleges: prefilledData?.colleges || [
       { id: '1', name: 'Cadres', type: 'cadres', voters: 0, seats: 1 },
-      { id: '2', name: 'Agent de maîtrise', type: 'agent_maitrise', voters: 0, seats: 1 },
-      { id: '3', name: 'Employés et Ouvriers', type: 'employes_ouvriers', voters: 0, seats: 1 }
+      { id: '2', name: 'Agent de maîtrise', type: 'employes', voters: 0, seats: 1 },
+      { id: '3', name: 'Employés et Ouvriers', type: 'ouvriers', voters: 0, seats: 1 }
     ],
-    totalBureaux: '1',
+    totalBureaux: prefilledData?.totalBureaux || '1',
     
     // Chronogramme
-    listDisplayDate: '',
-    campaignStart: '',
-    campaignEnd: '',
-    hasSecondRound: true,
-    secondRoundDate: '',
-    recoursStart: '',
-    recoursEnd: '',
-    coverImage: ''
+    listDisplayDate: prefilledData?.listDisplayDate || '',
+    campaignStart: prefilledData?.campaignStart || '',
+    campaignEnd: prefilledData?.campaignEnd || '',
+    hasSecondRound: prefilledData?.hasSecondRound !== undefined ? prefilledData.hasSecondRound : true,
+    secondRoundDate: prefilledData?.secondRoundDate || '',
+    recoursStart: prefilledData?.recoursStart || '',
+    recoursEnd: prefilledData?.recoursEnd || '',
+    coverImage: prefilledData?.coverImage || '',
+    carence: prefilledData?.carence !== undefined ? prefilledData.carence : false,
+
+    // Données d'import supplémentaires
+    votingCenters: prefilledData?.votingCenters || [],
+    candidates: prefilledData?.candidates || []
   });
-
-  const [availableCities, setAvailableCities] = useState<string[]>([
-    'Libreville', 'Owendo', 'Akanda', 'Port-Gentil', 'Franceville', 'Moanda', 'Oyem', 'Bitam', 'Mouila', 'Lambaréné', 'Tchibanga', 'Makokou', 'Koulamoutou', 'Ntoum'
-  ]);
-
-  // Charger les villes selon la région
-  useEffect(() => {
-    const fetchCities = async () => {
-      if (formData.region) {
-         try {
-           const { data: provData } = await supabase.from('provinces').select('id').eq('name', formData.region).single();
-           if (provData) {
-              const { data: comData } = await supabase.from('communes').select('name').eq('province_id', provData.id).order('name');
-              if (comData && comData.length > 0) {
-                 const newCities = comData.map((c: any) => c.name);
-                 setAvailableCities(newCities);
-                 // Nettoyer les villes sélectionnées qui ne sont plus dans la liste
-                 setFormData(prev => ({ ...prev, villes: prev.villes.filter(v => newCities.includes(v)) }));
-                 return;
-              }
-           }
-         } catch (e) {
-           console.error('Erreur lors du chargement des villes:', e);
-         }
-      }
-      
-      // Fallback
-      const fallbackCities = [
-        'Libreville', 'Owendo', 'Akanda', 'Port-Gentil', 'Franceville', 'Moanda', 'Oyem', 'Bitam', 'Mouila', 'Lambaréné', 'Tchibanga', 'Makokou', 'Koulamoutou', 'Ntoum'
-      ];
-      setAvailableCities(fallbackCities);
-    };
-    fetchCities();
-  }, [formData.region]);
 
   // Auto-calculate dates based on election date
   useEffect(() => {
@@ -162,6 +124,111 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     }
   };
 
+  const downloadTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.utils.book_new();
+
+      const headers = ["Matricule", "Nom", "Prénom", "Genre", "Poste", "Collège"];
+      const examples = [
+        ["MAT001", "Mba", "Jean", "M", "Directeur Technique", "Cadres"],
+        ["MAT002", "Ndong", "Sylvie", "F", "Chef d'équipe", "Agent de maîtrise"],
+        ["MAT003", "Obame", "Pierre", "M", "Opérateur de saisie", "Employés et Ouvriers"],
+        ["MAT004", "Kassa", "Aline", "F", "Technicien de surface", "Employés et Ouvriers"]
+      ];
+
+      const wsData = [headers, ...examples];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      XLSX.utils.book_append_sheet(wb, ws, "Liste Électorale");
+
+      XLSX.writeFile(wb, "modele_liste_electorale.xlsx");
+      toast.success("Modèle de liste électorale téléchargé avec succès (format Excel .xlsx)");
+    } catch (e) {
+      console.error(e);
+      toast.error("Erreur lors de la création du modèle Excel.");
+    }
+  };
+
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const XLSX = await import('xlsx');
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const data = event.target?.result;
+          if (!data) return;
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
+
+          if (!jsonData || jsonData.length === 0) {
+            toast.error("Le fichier Excel semble vide ou mal formaté.");
+            return;
+          }
+
+          let cadresCount = 0;
+          let maitriseCount = 0;
+          let employesOuvriersCount = 0;
+          let employesCount = 0;
+          let ouvriersCount = 0;
+
+          jsonData.forEach((row: any) => {
+            const college = String(row["Collège"] || row["college"] || "").trim().toLowerCase();
+            const poste = String(row["Poste"] || row["poste"] || "").trim().toLowerCase();
+
+            if (college.includes("cadre")) {
+              cadresCount++;
+            } else if (college.includes("maîtrise") || college.includes("maitrise") || college.includes("agent")) {
+              maitriseCount++;
+              employesCount++;
+            } else if (college.includes("ouvrier") || poste.includes("ouvrier")) {
+              ouvriersCount++;
+              employesOuvriersCount++;
+            } else {
+              employesCount++;
+              employesOuvriersCount++;
+            }
+          });
+
+          const total = cadresCount + employesCount + ouvriersCount;
+          const totalCollegesVoters = cadresCount + maitriseCount + employesOuvriersCount;
+
+          // Mettre à jour les collèges
+          const updatedColleges = formData.colleges.map(c => {
+            if (c.type === 'cadres') return { ...c, voters: cadresCount };
+            if (c.type === 'employes') return { ...c, voters: maitriseCount };
+            if (c.type === 'ouvriers') return { ...c, voters: employesOuvriersCount };
+            return c;
+          });
+
+          setFormData(prev => ({
+            ...prev,
+            totalEmployees: total.toString(),
+            employeesCadres: cadresCount.toString(),
+            employeesEmployes: employesCount.toString(),
+            employeesOuvriers: ouvriersCount.toString(),
+            colleges: updatedColleges
+          }));
+
+          toast.success(`Fichier "${file.name}" analysé avec succès ! ${total} salariés et ${totalCollegesVoters} électeurs répartis par collèges.`);
+        } catch (err) {
+          console.error(err);
+          toast.error("Erreur lors de la lecture des données Excel.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur d'importation du parser Excel.");
+    } finally {
+      e.target.value = ''; // Reset input to allow re-upload
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       if (onSubmit) {
@@ -182,14 +249,12 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       case 1:
         return formData.name.trim() !== '' && formData.date.trim() !== '';
       case 2:
-        return formData.enterpriseName.trim() !== '' && parseInt(formData.totalEmployees) >= 10 && formData.villes.length > 0;
+        return formData.enterpriseName.trim() !== '' && parseInt(formData.totalEmployees) >= 10;
       case 3:
-        return true; // Optional for now, can proceed
-      case 4:
         return parseInt(formData.totalBureaux) > 0;
-      case 5:
+      case 4:
         return true;
-      case 6:
+      case 5:
         return true;
       default:
         return false;
@@ -210,19 +275,13 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 required
               />
             </ModernFormGrid>
-            <ModernFormGrid cols={2}>
+            <ModernFormGrid cols={1}>
               <FloatingInput
                 label="Date du scrutin (1er tour)"
                 type="date"
                 value={formData.date}
                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                 required
-              />
-              <FloatingInput
-                label="Cadre Légal"
-                value={formData.legalFramework}
-                onChange={(e) => setFormData({ ...formData, legalFramework: e.target.value })}
-                disabled
               />
             </ModernFormGrid>
 
@@ -232,8 +291,19 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 defaultValue={formData.coverImage}
               />
             </div>
-          </ModernFormSection>
 
+            <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-1.5 text-sm text-gray-500">
+              <span>Cadre légal de référence :</span>
+              <a 
+                href="https://www.droit-afrique.com/uploads/Gabon-Code-du-travail-2021.pdf" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-gov-blue hover:text-gov-blue-dark font-semibold inline-flex items-center gap-1 transition-colors hover:underline"
+              >
+                LOI-022-2021 + Arrêté 000147
+              </a>
+            </div>
+          </ModernFormSection>
         );
       case 2:
         return (
@@ -277,54 +347,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
               />
             </ModernFormGrid>
             <ModernFormGrid cols={1}>
-              <FloatingSelect
-                label="Région (Province) - Facultatif"
-                value={formData.region}
-                onChange={(v) => setFormData({ ...formData, region: v })}
-                options={[
-                  { value: '', label: 'Sélectionner une province (facultatif)' },
-                  { value: 'Estuaire', label: 'Estuaire' },
-                  { value: 'Haut-Ogooué', label: 'Haut-Ogooué' },
-                  { value: 'Moyen-Ogooué', label: 'Moyen-Ogooué' },
-                  { value: 'Ngounié', label: 'Ngounié' },
-                  { value: 'Nyanga', label: 'Nyanga' },
-                  { value: 'Ogooué-Ivindo', label: 'Ogooué-Ivindo' },
-                  { value: 'Ogooué-Lolo', label: 'Ogooué-Lolo' },
-                  { value: 'Ogooué-Maritime', label: 'Ogooué-Maritime' },
-                  { value: 'Woleu-Ntem', label: 'Woleu-Ntem' }
-                ]}
-              />
-            </ModernFormGrid>
-            <div className="space-y-3 mt-4">
-              <label className="text-sm font-medium text-gray-700">Villes d'implantation (Plusieurs choix possibles)</label>
-              {availableCities.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 border rounded-xl bg-gray-50 max-h-48 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
-                  {availableCities.map((ville) => (
-                    <div key={ville} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id={`ville-${ville}`}
-                        checked={formData.villes.includes(ville)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormData({ ...formData, villes: [...formData.villes, ville] });
-                          } else {
-                            setFormData({ ...formData, villes: formData.villes.filter(v => v !== ville) });
-                          }
-                        }}
-                        className="rounded border-gray-300 text-gov-blue focus:ring-gov-blue"
-                      />
-                      <label htmlFor={`ville-${ville}`} className="text-sm cursor-pointer">{ville}</label>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 border rounded-xl bg-gray-50 text-sm text-gray-500 text-center">
-                  Aucune ville trouvée pour cette province.
-                </div>
-              )}
-            </div>
-            <ModernFormGrid cols={1}>
               <FloatingInput
                 label="Effectif Total"
                 type="number"
@@ -337,33 +359,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
           </ModernFormSection>
         );
       case 3:
-        return (
-          <ModernFormSection title="Listes Syndicales" description="Saisie des listes candidates" icon={<Users className="w-5 h-5" />}>
-              <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200 mb-4">
-                 <p className="text-sm text-yellow-800">
-                   <strong>Note:</strong> La gestion détaillée des listes (titulaires/suppléants par collège) sera configurée dans le module de gestion une fois l'élection créée.
-                 </p>
-              </div>
-              <ModernFormGrid cols={1}>
-                 <div className="flex flex-col space-y-2 p-3 bg-gray-50 border rounded-lg">
-                   <div className="flex items-center space-x-2">
-                     <input 
-                       type="checkbox" 
-                       id="carence" 
-                       checked={formData.carence} 
-                       onChange={(e) => setFormData({...formData, carence: e.target.checked})}
-                       className="rounded border-gray-300 w-4 h-4 text-gov-blue"
-                     />
-                     <label htmlFor="carence" className="text-sm font-semibold cursor-pointer">Déclarer un constat de carence (Aucun candidat ne s'est présenté)</label>
-                   </div>
-                   <p className="text-xs text-gray-600 pl-6">
-                     Cochez cette case si, à l'issue du délai de dépôt des candidatures pour le 1er tour, aucune organisation syndicale n'a présenté de liste. Cela déclenchera l'organisation automatique d'un second tour ouvert aux candidatures libres (non syndiquées).
-                   </p>
-                 </div>
-              </ModernFormGrid>
-          </ModernFormSection>
-        );
-      case 4:
         return (
           <ModernFormSection title="Collèges & Bureaux" description="Configuration des collèges électoraux" icon={<Briefcase className="w-5 h-5" />}>
              <div className="p-3 mb-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
@@ -416,42 +411,36 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                <h4 className="text-sm font-semibold text-gray-900 mb-2">Import de la liste électorale (Optionnel)</h4>
                <p className="text-xs text-gray-600 mb-4">Téléchargez le modèle Excel, remplissez-le avec les informations des salariés (nom, prénom, collège, etc.) et importez-le ici pour automatiser la création du fichier électoral.</p>
                <div className="flex items-center gap-4">
-                 <Button 
-                   variant="outline" 
-                   type="button" 
-                   className="text-xs flex items-center gap-2 border-gov-blue text-gov-blue hover:bg-gov-blue/5" 
-                   onClick={() => {
-                     toast.success("Modèle Excel (modele_liste_electorale.xlsx) téléchargé");
-                   }}
-                 >
-                   <Download className="w-4 h-4" />
-                   Télécharger le modèle
-                 </Button>
-                 <div>
-                   <input 
-                     type="file" 
-                     id="excel-upload" 
-                     accept=".xlsx, .xls" 
-                     className="hidden" 
-                     onChange={(e) => {
-                       if (e.target.files?.length) {
-                         toast.success(`Fichier ${e.target.files[0].name} analysé avec succès. Les électeurs seront ajoutés après validation.`);
-                       }
-                     }} 
-                   />
-                   <label 
-                     htmlFor="excel-upload" 
-                     className="cursor-pointer bg-gov-blue hover:bg-gov-blue-dark text-white px-4 py-2 rounded-md text-xs font-medium flex items-center gap-2 transition-colors"
-                   >
-                     <Upload className="w-4 h-4" />
-                     Importer la liste remplie
-                   </label>
-                 </div>
+                  <Button 
+                    variant="outline" 
+                    type="button" 
+                    className="text-xs flex items-center gap-2 border-gov-blue text-gov-blue hover:bg-gov-blue/5" 
+                    onClick={downloadTemplate}
+                  >
+                    <Download className="w-4 h-4" />
+                    Télécharger le modèle
+                  </Button>
+                  <div>
+                    <input 
+                      type="file" 
+                      id="excel-upload" 
+                      accept=".xlsx, .xls" 
+                      className="hidden" 
+                      onChange={handleExcelUpload}
+                    />
+                    <label 
+                      htmlFor="excel-upload" 
+                      className="cursor-pointer bg-gov-blue hover:bg-gov-blue-dark text-white px-4 py-2 rounded-md text-xs font-medium flex items-center gap-2 transition-colors"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Importer la liste remplie
+                    </label>
+                  </div>
                </div>
              </div>
           </ModernFormSection>
         );
-      case 5:
+      case 4:
         return (
           <ModernFormSection title="Chronogramme Électoral" description="Calendrier des opérations" icon={<Calendar className="w-5 h-5" />}>
             <ModernFormGrid cols={2}>
@@ -464,16 +453,50 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             </ModernFormGrid>
           </ModernFormSection>
         );
-      case 6:
+      case 5:
         return (
           <ModernFormSection title="Récapitulatif" description="Vérifiez les informations" icon={<Check className="w-5 h-5" />}>
             <div className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <h4 className="font-semibold mb-2">Élection</h4>
+              <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
+                <h4 className="font-semibold text-gray-900 mb-2">Élection</h4>
                 <p><strong>Nom:</strong> {formData.name}</p>
                 <p><strong>Date 1er tour:</strong> {formData.date}</p>
                 <p><strong>Entreprise:</strong> {formData.enterpriseName} ({formData.totalEmployees} salariés)</p>
+                {formData.administrativeUnit && (
+                  <p><strong>Unité Administrative:</strong> {formData.administrativeUnit}</p>
+                )}
+                <p><strong>Secteur d'activité:</strong> {formData.enterpriseSector === 'prive' ? 'Privé' : formData.enterpriseSector === 'public' ? 'Public' : 'Parapublic'}</p>
               </div>
+
+              {formData.votingCenters && formData.votingCenters.length > 0 && (
+                <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
+                  <h4 className="font-semibold text-gray-900 mb-2">Établissements & Bureaux importés ({formData.votingCenters.length})</h4>
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {formData.votingCenters.map((vc: any, idx: number) => (
+                      <div key={idx} className="border-b pb-1 last:border-0 text-xs">
+                        <p><strong>{vc.name}</strong> ({vc.address}) - {vc.bureaux} bureau(x) / {vc.voters} électeurs</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {formData.candidates && formData.candidates.length > 0 && (
+                <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
+                  <h4 className="font-semibold text-gray-900 mb-2">Candidats & Syndicats importés ({formData.candidates.length})</h4>
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {formData.candidates.map((cand: any, idx: number) => (
+                      <div key={idx} className="border-b pb-1 last:border-0 text-xs">
+                        <p>
+                          <strong>{cand.unionAcronym ? `[${cand.unionAcronym}] ` : ''}{cand.unionName}</strong> 
+                          {cand.college ? ` (Collège ${cand.college})` : ''} : 
+                          Titulaire : <em>{cand.titulaireName || 'Aucun'}</em> / Suppléant : <em>{cand.suppleantName || 'Aucun'}</em>
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </ModernFormSection>
         );

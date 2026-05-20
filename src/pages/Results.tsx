@@ -35,17 +35,14 @@ const TAB_DEFS = [
 const Results = () => {
   const { can, assignedElectionId, role, isGlobalAdmin } = useRBAC();
 
-  // Onglets autorisés pour ce rôle
   const allowedTabs = TAB_DEFS.filter(t => can(t.permission));
 
-  // Tab initial : celui sauvegardé en localStorage s'il est autorisé, sinon le premier autorisé
   const [activeTab, setActiveTab] = useState<string>(() => {
     const saved = localStorage.getItem('results_active_tab') || '';
     return allowedTabs.some(t => t.value === saved) ? saved : (allowedTabs[0]?.value ?? 'entry');
   });
 
   const [selectedElection, setSelectedElection] = useState<string>(
-    // Non super-admin : toujours démarrer sur l'élection assignée (jamais le localStorage)
     () => assignedElectionId ?? localStorage.getItem('results_selected_election') ?? ''
   );
   const [availableElections, setAvailableElections] = useState<ElectionOption[]>([]);

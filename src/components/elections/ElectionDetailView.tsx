@@ -92,7 +92,8 @@ interface ElectionDetailViewProps {
 
 const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBack, onDataChange }) => {
   const { can } = useRBAC();
-  const canManage = can('elections:manage'); // false pour tous les rôles sauf super-admin et admin
+  const canManage = can('elections:manage');
+  const isProfessional = election.type?.trim() === 'Élection Professionnelle' || !!(election.enterpriseId || (election as any).enterprise_id);
 
   const [showAddCenter, setShowAddCenter] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
@@ -104,6 +105,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [selectedBureau, setSelectedBureau] = useState<any>(null);
   const [enterprise, setEnterprise] = useState<any>(null);
+  const [loadingEnterprise, setLoadingEnterprise] = useState(false);
   const [centers, setCenters] = useState<Center[]>([]);
 
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -267,26 +269,33 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     fetchCandidates();
   }, [fetchCandidates]);
 
-  // Charger les informations de l'entreprise si c'est une élection pro
+  // Charger les informations de l'entreprise si c'est une élection pro ou liée à une entreprise
   useEffect(() => {
     const fetchEnterprise = async () => {
-      if (election.type === 'Élection Professionnelle' && election.enterpriseId) {
+      const entId = election.enterpriseId || (election as any).enterprise_id;
+      if (entId) {
+        setLoadingEnterprise(true);
         try {
           const { data, error } = await supabase
             .from('enterprises')
             .select('*')
-            .eq('id', election.enterpriseId)
+            .eq('id', entId)
             .single();
             
           if (error) throw error;
           setEnterprise(data);
         } catch (error) {
           console.error('Erreur lors du chargement de l\'entreprise:', error);
+        } finally {
+          setLoadingEnterprise(false);
         }
+      } else {
+        setEnterprise(null);
+        setLoadingEnterprise(false);
       }
     };
     fetchEnterprise();
-  }, [election.type, election.enterpriseId]);
+  }, [election.enterpriseId, (election as any).enterprise_id]);
 
 
   // Mettre à jour les statistiques quand les données changent
@@ -686,10 +695,10 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         {/* Main Content avec onglets modernisés - Mobile First */}
         <div className="bg-white rounded-xl sm:rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <Tabs defaultValue="info" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 bg-gray-50 p-1 rounded-none overflow-x-auto overflow-y-hidden">
+            <TabsList className="flex h-auto w-full bg-gray-50 p-1 rounded-none overflow-x-auto whitespace-nowrap scrollbar-none justify-start md:justify-around gap-1">
               <TabsTrigger 
                 value="info" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
               >
                 <div className="p-1 sm:p-1.5 bg-gov-blue/10 rounded-md data-[state=active]:bg-blue-500 transition-colors duration-300">
                   <Building className="w-3 h-3 sm:w-4 sm:h-4 text-gov-blue data-[state=active]:text-white" />
@@ -704,7 +713,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="centers" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-green-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-green-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-green-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-green-500"
               >
                 <div className="p-1 sm:p-1.5 bg-green-100 rounded-md data-[state=active]:bg-green-500 transition-colors duration-300">
                   <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-green-600 data-[state=active]:text-white" />
@@ -719,7 +728,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="candidates" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-purple-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-purple-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-purple-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-purple-500"
               >
                 <div className="p-1 sm:p-1.5 bg-purple-100 rounded-md data-[state=active]:bg-purple-500 transition-colors duration-300">
                   <Users className="w-3 h-3 sm:w-4 sm:h-4 text-purple-600 data-[state=active]:text-white" />
@@ -740,7 +749,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="results" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-orange-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-orange-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-orange-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-orange-500"
               >
                 <div className="p-1 sm:p-1.5 bg-orange-100 rounded-md data-[state=active]:bg-orange-500 transition-colors duration-300">
                   <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 text-orange-600 data-[state=active]:text-white" />
@@ -843,46 +852,56 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <div className="p-2 bg-green-100 rounded-lg">
-                      {election.type === 'Élection Professionnelle' ? (
+                      {isProfessional ? (
                         <Building className="w-5 h-5 text-green-600" />
                       ) : (
                         <MapPin className="w-5 h-5 text-green-600" />
                       )}
                     </div>
-                    {election.type === 'Élection Professionnelle' ? 'Informations Entreprise' : 'Circonscription Électorale'}
+                    {isProfessional ? 'Informations Entreprise' : 'Circonscription Électorale'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="space-y-3">
-                    {election.type === 'Élection Professionnelle' ? (
+                    {isProfessional ? (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Raison Sociale</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.name || 'Chargement...'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.name || 'Non renseignée')}
+                            </p>
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="p-3 bg-gray-50 rounded-lg">
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Secteur</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1 capitalize">{enterprise?.sector || '-'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1 capitalize">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.sector || '-')}
+                            </p>
                           </div>
                           <div className="p-3 bg-gray-50 rounded-lg">
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Effectif Total</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.total_employees || '-'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.total_employees || '-')}
+                            </p>
                           </div>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg">
                           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Unité Administrative</label>
-                          <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.administrative_unit || '-'}</p>
+                          <p className="text-sm font-bold text-gray-900 mt-1">
+                            {loadingEnterprise ? 'Chargement...' : (enterprise?.administrative_unit || '-')}
+                          </p>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg">
                           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Localisation Siège</label>
                           <p className="text-sm font-bold text-gray-900 mt-1">
-                            {enterprise?.province_name ? `${enterprise.province_name}, ${enterprise.commune_name}` : 'Non renseignée'}
+                            {loadingEnterprise 
+                              ? 'Chargement...' 
+                              : (enterprise?.province_name ? `${enterprise.province_name}, ${enterprise.commune_name}` : 'Non renseignée')}
                           </p>
                         </div>
-                        {enterprise?.hr_contact && (
+                        {!loadingEnterprise && enterprise?.hr_contact && (
                           <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
                             <label className="text-xs font-medium text-blue-600 uppercase tracking-wide">Contact RH</label>
                             <p className="text-sm font-bold text-blue-900 mt-1">{enterprise.hr_contact.name}</p>

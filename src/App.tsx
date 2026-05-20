@@ -48,12 +48,15 @@ const App = () => {
                   <Route path="/election/:electionId/results" element={<ElectionResults />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/dashboard" element={<ProtectedRoute><DashboardModernSimple /></ProtectedRoute>} />
-                  <Route path="/elections" element={<ProtectedRoute><ElectionManagementUnified /></ProtectedRoute>} />
-                  <Route path="/centers" element={<ProtectedRoute allowedRoles={['super-admin', 'admin']}><VotingCenters /></ProtectedRoute>} />
-                  <Route path="/voters" element={<ProtectedRoute allowedRoles={['super-admin']}><Voters /></ProtectedRoute>} />
-                  <Route path="/users" element={<ProtectedRoute allowedRoles={['super-admin', 'admin']}><UserManagement /></ProtectedRoute>} />
+                  <Route path="/elections" element={<ProtectedRoute allowedRoles={['super-admin']}><ElectionManagementUnified /></ProtectedRoute>} />
+                  <Route path="/centers" element={<ProtectedRoute><VotingCenters /></ProtectedRoute>} />
+                  <Route path="/voters" element={<ProtectedRoute><Voters /></ProtectedRoute>} />
+                  <Route path="/users" element={<ProtectedRoute allowedRoles={['super-admin']}><UserManagement /></ProtectedRoute>} />
                   <Route path="/audit" element={<ProtectedRoute allowedRoles={['super-admin']}><AuditLogs /></ProtectedRoute>} />
                   <Route path="/results" element={<ProtectedRoute><Results /></ProtectedRoute>} />
+                  <Route path="/campaign" element={<CampaignManagement />} />
+                  <Route path="/campaign/operation/:id" element={<OperationDetail />} />
+                  <Route path="/conversations" element={<Conversations />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </BrowserRouter>
