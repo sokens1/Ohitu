@@ -275,20 +275,21 @@ const DashboardModernSimple = () => {
         if (centerIds.length > 0) {
           const { data: centersData } = await supabase
             .from('voting_centers')
-            .select('province_id, province_name, commune_name')
+            .select('province_id, commune_id')
             .in('id', centerIds);
-          
-          const activeProvinceNames = Array.from(new Set((centersData || []).map((c: any) => c.province_name).filter(Boolean)));
-          provincesCount = activeProvinceNames.length;
 
-          const activeCommuneNames = Array.from(new Set((centersData || []).map((c: any) => c.commune_name).filter(Boolean)));
-          communesCount = activeCommuneNames.length;
+          // Compter les provinces et communes distinctes par leur ID
+          const activeProvinceIds = Array.from(new Set((centersData || []).map((c: any) => c.province_id).filter(Boolean)));
+          provincesCount = activeProvinceIds.length;
 
-          // Compute provinces chart distribution
+          const activeCommuneIds = Array.from(new Set((centersData || []).map((c: any) => c.commune_id).filter(Boolean)));
+          communesCount = activeCommuneIds.length;
+
+          // Distribution par province_id (les noms lisibles sont chargés ci-dessous si besoin)
           const provMap: Record<string, number> = {};
-          (centersData || []).forEach(c => {
-            if (c.province_name) {
-              provMap[c.province_name] = (provMap[c.province_name] || 0) + 1;
+          (centersData || []).forEach((c: any) => {
+            if (c.province_id) {
+              provMap[c.province_id] = (provMap[c.province_id] || 0) + 1;
             }
           });
           provincesList = Object.entries(provMap).map(([name, value]) => ({ name, value }));
