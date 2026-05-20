@@ -159,8 +159,8 @@ const Results = () => {
   // ── Permissions par section ────────────────────────────────────────────────
   // readOnly sur la validation : observateur peut voir mais pas agir
   const validationReadOnly = role === 'observateur';
-  // readOnly sur la saisie : aucun rôle opérationnel autre qu'agent-saisie ne peut soumettre
-  const entryReadOnly = !can('results:entry');
+  // readOnly sur la saisie : seuls super-admin, admin et agent-saisie peuvent soumettre
+  const entryReadOnly = !can('results:submit');
   // readOnly sur la publication : seuls admin et super-admin peuvent publier
   const publishReadOnly = !can('results:publish');
 

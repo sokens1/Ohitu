@@ -23,6 +23,7 @@ import {
 import AddCenterModal from './AddCenterModal';
 import AddCandidateModal from './AddCandidateModal';
 import CenterDetailModal from './CenterDetailModal';
+import { useRBAC } from '@/hooks/useRBAC';
 
 interface Election {
   id: number;
@@ -71,6 +72,9 @@ interface ElectionDetailViewProps {
 }
 
 const ElectionDetailViewImproved: React.FC<ElectionDetailViewProps> = ({ election, onBack }) => {
+  const { can } = useRBAC();
+  const canManage = can('elections:manage');
+
   const [showAddCenter, setShowAddCenter] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [selectedCenter, setSelectedCenter] = useState<Center | null>(null);
@@ -361,10 +365,12 @@ const ElectionDetailViewImproved: React.FC<ElectionDetailViewProps> = ({ electio
           <TabsContent value="centers" className="space-y-6">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold">Centres de Vote Associés</h3>
+              {canManage && (
               <Button onClick={() => setShowAddCenter(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Ajouter un centre
               </Button>
+              )}
             </div>
 
             {centers.length === 0 ? (
@@ -372,10 +378,12 @@ const ElectionDetailViewImproved: React.FC<ElectionDetailViewProps> = ({ electio
                 <CardContent className="text-center py-8">
                   <MapPin className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-500 mb-4">Aucun centre de vote associé à cette élection</p>
+                  {canManage && (
                   <Button onClick={() => setShowAddCenter(true)}>
                     <Plus className="w-4 h-4 mr-2" />
                     Ajouter le premier centre
                   </Button>
+                  )}
                 </CardContent>
               </Card>
             ) : (
@@ -413,12 +421,14 @@ const ElectionDetailViewImproved: React.FC<ElectionDetailViewProps> = ({ electio
                             <Eye className="w-4 h-4 mr-1" />
                             Détails
                           </Button>
+                          {canManage && (
                           <Button variant="ghost" size="sm" onClick={(e) => {
                             e.stopPropagation();
                             handleRemoveCenter(center.id);
                           }}>
                             <Trash2 className="w-4 h-4" />
                           </Button>
+                          )}
                         </div>
                       </div>
                     </CardContent>

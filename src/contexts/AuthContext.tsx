@@ -59,10 +59,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
             setUser(u);
             localStorage.setItem('ohitu-user', JSON.stringify(u));
+          } else {
+            // Session valide mais aucun profil en base → déconnexion propre
+            localStorage.removeItem('ohitu-user');
+            await supabase.auth.signOut();
           }
         } else {
-          const savedUser = localStorage.getItem('ohitu-user');
-          if (savedUser) setUser(JSON.parse(savedUser));
+          // Pas de session Supabase active → ne jamais utiliser le localStorage
+          // (il peut contenir des données d'un ancien super-admin)
+          localStorage.removeItem('ohitu-user');
+          setUser(null);
         }
       } finally {
         setAuthLoading(false);
@@ -157,6 +163,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     setUser(null);
     localStorage.removeItem('ohitu-user');
+    localStorage.removeItem('results_selected_election');
+    localStorage.removeItem('results_active_tab');
     await supabase.auth.signOut();
   };
 
