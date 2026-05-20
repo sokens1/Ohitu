@@ -63,6 +63,10 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return;
         }
 
+        // Récupérer les utilisateurs pour afficher qui a saisi
+        const { data: usersData } = await supabase.from('users').select('id, name');
+        const usersMap = new Map(usersData?.map((u: any) => [u.id, u.name]) || []);
+
         const { data, error } = await supabase
           .from('voting_centers')
           .select(`
@@ -97,11 +101,12 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
               id: bureau.id.toString(),
               name: bureau.name,
               status: pv?.status || 'pending',
-              agent: pv?.entered_by || '',
+              agent: pv?.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : '',
               time: pv?.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', { 
                 hour: '2-digit', 
                 minute: '2-digit' 
               }) : '',
+              dateStr: pv?.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') : '',
               anomaly: pv?.anomalies || null
             };
           }) || [];
@@ -328,9 +333,9 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                             <div>
                               <span className="font-medium text-sm">{bureau.name}</span>
                               {bureau.agent && (
-                                <div className="flex items-center space-x-1 text-xs text-gray-500">
+                                <div className="flex items-center space-x-1 text-xs text-gray-500 mt-1">
                                   <User className="w-3 h-3" />
-                                  <span>{bureau.agent} - {bureau.time}</span>
+                                  <span>Saisi par <strong>{bureau.agent}</strong> le {bureau.dateStr} à {bureau.time}</span>
                                 </div>
                               )}
                               {bureau.anomaly && (

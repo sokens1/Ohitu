@@ -848,8 +848,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               <h4 className="text-lg font-medium text-gray-900 mb-2">Téléverser le PV physique</h4>
               <p className="text-sm text-gray-600 mb-4">Formats acceptés: PDF, JPG, PNG (max. 10MB)</p>
               {!formData.uploadedFile && (
-                <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-sm">
-                  ⚠️ Aucun fichier ajouté. Le PV peut être saisi et apparaître dans l'onglet Publier, mais ne pourra pas être validé sans PV physique.
+                <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
+                  ℹ️ L'ajout d'un document physique (PV scanné) est optionnel. Vous pouvez poursuivre et enregistrer les chiffres directement.
                 </div>
               )}
               

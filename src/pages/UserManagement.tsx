@@ -24,9 +24,10 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Type definitions
-type UserRole = 'super-admin' | 'agent-saisie' | 'validateur' | 'observateur';
+type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau';
 
 interface User {
   id: string;
@@ -36,9 +37,13 @@ interface User {
   assignedCenter?: string;
   isActive: boolean;
   createdAt: string;
+  lastLogin?: string;
+  assigned_election_id?: string | null;
+  created_by?: string | null;
 }
 
 const UserManagement = () => {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -58,6 +63,32 @@ const UserManagement = () => {
   const [newRole, setNewRole] = useState<UserRole>('observateur');
   const [newActive, setNewActive] = useState(true);
 
+  // États pour l'assignation d'élections à un Admin
+  const [allElections, setAllElections] = useState<any[]>([]);
+  const [isAssigned, setIsAssigned] = useState(false);
+  const [assignedElectionId, setAssignedElectionId] = useState<string>('');
+  const [searchElectionQuery, setSearchElectionQuery] = useState('');
+
+  // Charger les élections pour assignation
+  useEffect(() => {
+    const fetchElections = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('elections')
+          .select('id, title')
+          .order('title', { ascending: true });
+        if (error) {
+          console.error('Erreur lors du chargement des élections:', error);
+          return;
+        }
+        setAllElections(data || []);
+      } catch (error) {
+        console.error('Erreur lors du chargement des élections:', error);
+      }
+    };
+    fetchElections();
+  }, []);
+
   // Charger les utilisateurs depuis Supabase
   useEffect(() => {
     const fetchUsers = async () => {
@@ -76,6 +107,22 @@ const UserManagement = () => {
           return;
         }
 
+        // Récupérer les derniers logs de connexion
+        const { data: logsData } = await supabase
+          .from('activity_logs')
+          .select('user_id, created_at')
+          .eq('action', 'LOGIN')
+          .order('created_at', { ascending: false });
+
+        const lastLoginMap = new Map<string, string>();
+        if (logsData) {
+          logsData.forEach(log => {
+            if (log.user_id && !lastLoginMap.has(log.user_id)) {
+              lastLoginMap.set(log.user_id, log.created_at);
+            }
+          });
+        }
+
         // Transformer les données Supabase en format User
         const transformedUsers: User[] = data?.map(user => ({
           id: user.id,
@@ -84,7 +131,10 @@ const UserManagement = () => {
           role: user.role as UserRole,
           assignedCenter: user.voting_centers?.name || user.assigned_center_id,
           isActive: user.is_active,
-          createdAt: new Date(user.created_at).toISOString().split('T')[0]
+          createdAt: new Date(user.created_at).toISOString().split('T')[0],
+          lastLogin: lastLoginMap.get(user.id) || undefined,
+          assigned_election_id: user.assigned_election_id,
+          created_by: user.created_by
         })) || [];
 
         setUsers(transformedUsers);
@@ -113,6 +163,7 @@ const UserManagement = () => {
   const getRoleBadgeVariant = (role: UserRole) => {
     switch (role) {
       case 'super-admin':
+      case 'admin':
         return 'default';
       case 'agent-saisie':
         return 'secondary';
@@ -120,6 +171,8 @@ const UserManagement = () => {
         return 'outline';
       case 'observateur':
         return 'secondary';
+      case 'president-bureau':
+        return 'outline';
       default:
         return 'secondary';
     }
@@ -129,12 +182,16 @@ const UserManagement = () => {
     switch (role) {
       case 'super-admin':
         return 'Super Admin';
+      case 'admin':
+        return 'Administrateur';
       case 'agent-saisie':
         return 'Agent de Saisie';
       case 'validateur':
         return 'Validateur';
       case 'observateur':
         return 'Observateur';
+      case 'president-bureau':
+        return 'Président de Bureau';
       default:
         return role;
     }
@@ -160,13 +217,15 @@ const UserManagement = () => {
       console.error('Erreur lors de la mise à jour du statut:', error);
     }
   };
-
   const resetNewUserForm = () => {
     setNewName('');
     setNewEmail('');
     setNewPassword('');
     setNewRole('observateur');
     setNewActive(true);
+    setIsAssigned(false);
+    setAssignedElectionId('');
+    setSearchElectionQuery('');
   };
 
   const handleCreateUser = async () => {
@@ -207,7 +266,9 @@ const UserManagement = () => {
           name: newName.trim(),
           email: newEmail.trim(),
           role: newRole,
-          is_active: newActive
+          is_active: newActive,
+          assigned_election_id: (newRole === 'admin' && isAssigned) ? assignedElectionId : null,
+          created_by: currentUser?.id || null
         })
         .select()
         .single();
@@ -224,7 +285,9 @@ const UserManagement = () => {
         role: inserted.role,
         assignedCenter: inserted.assigned_center_id || undefined,
         isActive: inserted.is_active,
-        createdAt: new Date(inserted.created_at).toISOString().split('T')[0]
+        createdAt: new Date(inserted.created_at).toISOString().split('T')[0],
+        assigned_election_id: inserted.assigned_election_id,
+        created_by: inserted.created_by
       };
       setUsers(prev => [createdUser, ...prev]);
       toast.success("Utilisateur créé avec succès");
@@ -262,6 +325,14 @@ const UserManagement = () => {
     setNewRole(user.role);
     setNewActive(user.isActive);
     setNewPassword(''); // Le mot de passe reste vide, optionnel
+    if (user.role === 'admin' && user.assigned_election_id) {
+      setIsAssigned(true);
+      setAssignedElectionId(user.assigned_election_id);
+    } else {
+      setIsAssigned(false);
+      setAssignedElectionId('');
+    }
+    setSearchElectionQuery('');
     setShowEditModal(true);
   };
 
@@ -282,7 +353,8 @@ const UserManagement = () => {
           name: newName.trim(),
           email: newEmail.trim(),
           role: newRole,
-          is_active: newActive
+          is_active: newActive,
+          assigned_election_id: (newRole === 'admin' && isAssigned) ? assignedElectionId : null
         })
         .eq('id', editingUser.id);
 
@@ -312,7 +384,8 @@ const UserManagement = () => {
               name: newName.trim(), 
               email: newEmail.trim(), 
               role: newRole, 
-              isActive: newActive 
+              isActive: newActive,
+              assigned_election_id: (newRole === 'admin' && isAssigned) ? assignedElectionId : null
             } 
           : u
       ));
@@ -427,9 +500,11 @@ const UserManagement = () => {
                   <SelectContent>
                     <SelectItem value="all">Tous les rôles</SelectItem>
                     <SelectItem value="super-admin">Super Admin</SelectItem>
+                    <SelectItem value="admin">Administrateur</SelectItem>
                     <SelectItem value="agent-saisie">Agent de Saisie</SelectItem>
                     <SelectItem value="validateur">Validateur</SelectItem>
                     <SelectItem value="observateur">Observateur</SelectItem>
+                    <SelectItem value="president-bureau">Président de Bureau</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -496,6 +571,23 @@ const UserManagement = () => {
                             Centre: {user.assignedCenter}
                           </p>
                         )}
+                        {(() => {
+                          if (!user.lastLogin) {
+                            return <p className="text-xs text-gray-400 mt-1">Aucune connexion enregistrée</p>;
+                          }
+                          const lastLoginDate = new Date(user.lastLogin);
+                          const isOnline = new Date().getTime() - lastLoginDate.getTime() < 15 * 60 * 1000;
+                          return (
+                            <div className="flex items-center space-x-1.5 mt-1">
+                              <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></span>
+                              <span className="text-xs text-gray-500">
+                                {isOnline 
+                                  ? "Connecté" 
+                                  : `Dernière connexion: le ${lastLoginDate.toLocaleDateString('fr-FR')} à ${lastLoginDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -587,12 +679,71 @@ const UserManagement = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="super-admin">Super Admin</SelectItem>
+                      <SelectItem value="admin">Administrateur</SelectItem>
                       <SelectItem value="agent-saisie">Agent de Saisie</SelectItem>
                       <SelectItem value="validateur">Validateur</SelectItem>
                       <SelectItem value="observateur">Observateur</SelectItem>
+                      <SelectItem value="president-bureau">Président de Bureau</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {newRole === 'admin' && (
+                  <div className="space-y-2 border p-3 rounded-lg bg-gray-50">
+                    <Label className="text-xs font-semibold text-gray-700">Assignation d'une élection</Label>
+                    <div className="flex flex-col gap-2 mt-1">
+                      <label className="flex items-center space-x-2 text-xs sm:text-sm cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="addAssignElectionOpt" 
+                          checked={!isAssigned} 
+                          onChange={() => setIsAssigned(false)} 
+                          className="rounded-full text-blue-600 focus:ring-blue-500 h-4 w-4"
+                        />
+                        <span>Sans élection (Créera ses propres élections)</span>
+                      </label>
+                      <label className="flex items-center space-x-2 text-xs sm:text-sm cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="addAssignElectionOpt" 
+                          checked={isAssigned} 
+                          onChange={() => setIsAssigned(true)} 
+                          className="rounded-full text-blue-600 focus:ring-blue-500 h-4 w-4"
+                        />
+                        <span>Assigner une élection existante</span>
+                      </label>
+                    </div>
+                    
+                    {isAssigned && (
+                      <div className="mt-2 space-y-2">
+                        <Input 
+                          placeholder="Rechercher une élection..." 
+                          value={searchElectionQuery}
+                          onChange={(e) => setSearchElectionQuery(e.target.value)}
+                          className="text-xs sm:text-sm h-8"
+                        />
+                        <Select 
+                          value={assignedElectionId} 
+                          onValueChange={setAssignedElectionId}
+                        >
+                          <SelectTrigger className="text-xs sm:text-sm h-8">
+                            <SelectValue placeholder="Choisir une élection" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allElections
+                              .filter(el => el.title.toLowerCase().includes(searchElectionQuery.toLowerCase()))
+                              .map(el => (
+                                <SelectItem key={el.id} value={el.id}>{el.title}</SelectItem>
+                              ))
+                            }
+                            {allElections.filter(el => el.title.toLowerCase().includes(searchElectionQuery.toLowerCase())).length === 0 && (
+                              <div className="p-2 text-xs text-gray-500">Aucune élection trouvée</div>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Switch checked={newActive} onCheckedChange={(v)=>setNewActive(!!v)} />
                   <span className="text-xs sm:text-sm text-gray-600">Actif</span>
@@ -639,12 +790,71 @@ const UserManagement = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="super-admin">Super Admin</SelectItem>
+                      <SelectItem value="admin">Administrateur</SelectItem>
                       <SelectItem value="agent-saisie">Agent de Saisie</SelectItem>
                       <SelectItem value="validateur">Validateur</SelectItem>
                       <SelectItem value="observateur">Observateur</SelectItem>
+                      <SelectItem value="president-bureau">Président de Bureau</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {newRole === 'admin' && (
+                  <div className="space-y-2 border p-3 rounded-lg bg-gray-50">
+                    <Label className="text-xs font-semibold text-gray-700">Assignation d'une élection</Label>
+                    <div className="flex flex-col gap-2 mt-1">
+                      <label className="flex items-center space-x-2 text-xs sm:text-sm cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="editAssignElectionOpt" 
+                          checked={!isAssigned} 
+                          onChange={() => setIsAssigned(false)} 
+                          className="rounded-full text-blue-600 focus:ring-blue-500 h-4 w-4"
+                        />
+                        <span>Sans élection (Créera ses propres élections)</span>
+                      </label>
+                      <label className="flex items-center space-x-2 text-xs sm:text-sm cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="editAssignElectionOpt" 
+                          checked={isAssigned} 
+                          onChange={() => setIsAssigned(true)} 
+                          className="rounded-full text-blue-600 focus:ring-blue-500 h-4 w-4"
+                        />
+                        <span>Assigner une élection existante</span>
+                      </label>
+                    </div>
+                    
+                    {isAssigned && (
+                      <div className="mt-2 space-y-2">
+                        <Input 
+                          placeholder="Rechercher une élection..." 
+                          value={searchElectionQuery}
+                          onChange={(e) => setSearchElectionQuery(e.target.value)}
+                          className="text-xs sm:text-sm h-8"
+                        />
+                        <Select 
+                          value={assignedElectionId} 
+                          onValueChange={setAssignedElectionId}
+                        >
+                          <SelectTrigger className="text-xs sm:text-sm h-8">
+                            <SelectValue placeholder="Choisir une élection" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allElections
+                              .filter(el => el.title.toLowerCase().includes(searchElectionQuery.toLowerCase()))
+                              .map(el => (
+                                <SelectItem key={el.id} value={el.id}>{el.title}</SelectItem>
+                              ))
+                            }
+                            {allElections.filter(el => el.title.toLowerCase().includes(searchElectionQuery.toLowerCase())).length === 0 && (
+                              <div className="p-2 text-xs text-gray-500">Aucune élection trouvée</div>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Switch checked={newActive} onCheckedChange={(v)=>setNewActive(!!v)} />
                   <span className="text-xs sm:text-sm text-gray-600">Actif</span>

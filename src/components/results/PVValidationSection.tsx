@@ -44,6 +44,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [usersMap, setUsersMap] = useState<Map<string, string>>(new Map());
 
   // Helpers d'upload (alignés avec PVEntrySection)
   const ensureBucketExists = async (bucket: string) => {
@@ -86,11 +87,15 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         if (!selectedElection) { setPvs([]); setBureauxMap(new Map()); setCentersMap(new Map()); setLoading(false); return; }
         const { data: pvRows, error: pvErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, pv_photo_url')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url')
           .eq('election_id', selectedElection)
           .order('created_at', { ascending: false })
           .limit(500);
         if (pvErr) throw pvErr;
+        
+        // Charger les utilisateurs
+        const { data: usersData } = await supabase.from('users').select('id, name');
+        setUsersMap(new Map(usersData?.map(u => [u.id, u.name]) || []));
         // Filtrer les PV aux centres liés à l'élection via election_centers
         const bureauIds = Array.from(new Set((pvRows || []).map(r => r.bureau_id).filter(Boolean)));
         if (bureauIds.length) {
@@ -145,6 +150,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         votes_expressed: pv.votes_expressed,
         null_votes: pv.null_votes,
         pv_photo_url: pv.pv_photo_url,
+        entered_by: pv.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : 'Inconnu',
+        entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
+        validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
+        validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
       };
     });
     if (filter === 'all') return enriched;
@@ -464,6 +473,12 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     </div>
                   </div>
                   
+                  {pv.status === 'validated' && (
+                    <div className="text-xs text-green-700 mt-1">
+                      Validé par {pv.validated_by} le {pv.validated_at_str}
+                    </div>
+                  )}
+                  
                   <div className="mt-2 flex justify-between text-xs text-gray-500">
                     <span>Votants: {pv.total_voters}</span>
                     <span>Exprimés: {pv.votes_expressed}</span>
@@ -533,6 +548,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                         <div className="flex justify-between"><span>Votants:</span><span className="font-medium">{editValues.total_voters || 0}</span></div>
                         <div className="flex justify-between"><span>Bulletins nuls:</span><span className="font-medium">{editValues.null_votes || 0}</span></div>
                         <div className="flex justify-between"><span>Suffrages exprimés:</span><span className="font-medium">{editValues.votes_expressed || 0}</span></div>
+                        <div className="border-t border-gray-200 my-2 pt-2 text-xs text-gray-500">
+                          <div>Saisi par : <strong>{selectedPVData.entered_by}</strong> {selectedPVData.entered_at_str ? `le ${selectedPVData.entered_at_str}` : ''}</div>
+                          {selectedPVData.status === 'validated' && (
+                            <div className="text-green-700 font-semibold mt-1">
+                              Validé par : <strong>{selectedPVData.validated_by}</strong> {selectedPVData.validated_at_str ? `le ${selectedPVData.validated_at_str}` : ''}
+                            </div>
+                          )}
+                        </div>
                               </>
                             )}
                         </div>
@@ -725,18 +748,25 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   </Button>
                 <Button onClick={async () => {
                   if (!selectedPV) return;
-                  if (!selectedPVData?.pv_photo_url && !newPvFile) {
-                    toast.error('Un PV physique (document scanné) est requis pour valider.');
-                    return;
-                  }
+                  const { data: { user } } = await supabase.auth.getUser();
                   const { error } = await supabase
                     .from('procès_verbaux')
-                    .update({ status: 'validated', validated_at: new Date().toISOString() })
+                    .update({ 
+                      status: 'validated', 
+                      validated_at: new Date().toISOString(),
+                      validated_by: user?.id || null
+                    })
                     .eq('id', selectedPV);
                   if (error) {
                     console.error('Erreur validation PV:', error);
                   } else {
-                    setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated' } : p));
+                    const validatedByLabel = user?.id ? (usersMap.get(user.id) || user.id) : 'Inconnu';
+                    setPvs(prev => prev.map(p => p.id === selectedPV ? { 
+                      ...p, 
+                      status: 'validated',
+                      validated_by: user?.id || null,
+                      validated_at: new Date().toISOString()
+                    } : p));
                     setDetailOpen(false);
                   }
                 }} className="bg-green-600 hover:bg-green-700 text-white">

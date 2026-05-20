@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
   Calendar, 
   Users, 
@@ -31,7 +32,9 @@ import {
   Trash2,
   Copy,
   FileDown,
-  RefreshCcw
+  RefreshCcw,
+  TrendingUp,
+  Upload
 } from 'lucide-react';
 import ElectionWizard from '@/components/elections/ElectionWizard';
 import ProfessionalElectionWizard from '@/components/elections/ProfessionalElectionWizard';
@@ -40,8 +43,10 @@ import EditElectionModal from '@/components/elections/EditElectionModal';
 import EditProfessionalElectionModal from '@/components/elections/EditProfessionalElectionModal';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 const ElectionManagementUnified = () => {
+  const { user } = useAuth();
   const {
     elections,
     selectedElection,
@@ -67,7 +72,379 @@ const ElectionManagementUnified = () => {
   const [searchQuery, setSearchQueryLocal] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [yearFilter, setYearFilter] = useState<string>('all');
+  const [monthFilter, setMonthFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [electionToDelete, setElectionToDelete] = useState<Election | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // States pour le choix du mode de création (manuel vs import)
+  const [showCreationModeModal, setShowCreationModeModal] = useState(false);
+  const [selectedElectionCategory, setSelectedElectionCategory] = useState<'political' | 'professional'>('political');
+  const [prefilledData, setPrefilledData] = useState<any>(null);
+
+
+  // Télécharger un modèle Excel (.xlsx)
+  const downloadXLSXTemplate = async (category: 'political' | 'professional') => {
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.utils.book_new();
+
+      if (category === 'professional') {
+        const configData = [
+          { Key: "Nom de l'élection", Value: "Élection Professionnelle SEEG 2026" },
+          { Key: "Raison Sociale", Value: "Société d'Énergie et d'Eau du Gabon" },
+          { Key: "Numéro Enregistrement", Value: "RG-4920492" },
+          { Key: "Secteur", Value: "Privé" },
+          { Key: "Unité Administrative (Ministère de rattachement)", Value: "" },
+          { Key: "Effectif Cadres", Value: 0 },
+          { Key: "Effectif Employés", Value: 0 },
+          { Key: "Effectif Ouvriers", Value: 4 },
+          { Key: "Nom RH", Value: "Jean Dupont" },
+          { Key: "Téléphone RH", Value: "+24166123456" },
+          { Key: "Email RH", Value: "j.dupont@seeg.ga" },
+          { Key: "Date du scrutin (AAAA-MM-JJ)", Value: "2026-06-20" },
+          { Key: "Affichage listes (AAAA-MM-JJ)", Value: "2026-06-01" },
+          { Key: "Début campagne (AAAA-MM-JJ)", Value: "2026-06-05" },
+          { Key: "Fin campagne (AAAA-MM-JJ)", Value: "2026-06-15" },
+          { Key: "Deuxième tour (Oui/Non)", Value: "Oui" },
+          { Key: "Date deuxième tour (AAAA-MM-JJ)", Value: "2026-07-05" },
+          { Key: "Début recours (AAAA-MM-JJ)", Value: "2026-06-21" },
+          { Key: "Fin recours (AAAA-MM-JJ)", Value: "2026-06-25" }
+        ];
+
+        const collegesData = [
+          { "Nom du collège": "Cadres", Code: "cadres", "Nombre d'électeurs": 45, "Sièges à pourvoir": 2 },
+          { "Nom du collège": "Agent de maîtrise", Code: "employes", "Nombre d'électeurs": 120, "Sièges à pourvoir": 4 },
+          { "Nom du collège": "Employés et Ouvriers", Code: "ouvriers", "Nombre d'électeurs": 350, "Sièges à pourvoir": 6 }
+        ];
+
+        const establishmentsData = [
+          { 
+            "Région / Localisation": "Estuaire", 
+            "Nom Établissement / Site": "Siège Social Libreville", 
+            "Responsable Établissement": "Marc Ondo", 
+            "Contact Téléphone": "+24177123456",
+            "Nom Bureau de vote": "Bureau A - Rez de chaussée",
+            "Nombre d'électeurs": 250,
+            "Collège concerné": "Employés et Ouvriers"
+          },
+          { 
+            "Région / Localisation": "Estuaire", 
+            "Nom Établissement / Site": "Siège Social Libreville", 
+            "Responsable Établissement": "Marc Ondo", 
+            "Contact Téléphone": "+24177123456",
+            "Nom Bureau de vote": "Bureau B - 1er étage",
+            "Nombre d'électeurs": 150,
+            "Collège concerné": "Agent de maîtrise"
+          },
+          { 
+            "Région / Localisation": "Haut-Ogooué", 
+            "Nom Établissement / Site": "Agence Franceville", 
+            "Responsable Établissement": "Lucie Mba", 
+            "Contact Téléphone": "+24166987654",
+            "Nom Bureau de vote": "Bureau Unique - Franceville",
+            "Nombre d'électeurs": 115,
+            "Collège concerné": "general"
+          }
+        ];
+
+        const candidatesData = [
+          {
+            "Sigle Syndicat": "COSYG",
+            "Nom Complet Syndicat": "Confédération Syndicale Gabonaise",
+            "Collège concerné": "ouvriers",
+            "Nom complet du Titulaire": "Pierre Mba",
+            "Nom complet du Suppléant": "Charles Obiang"
+          },
+          {
+            "Sigle Syndicat": "SYLSEEG",
+            "Nom Complet Syndicat": "Syndicat Libre des Employés de la SEEG",
+            "Collège concerné": "employes",
+            "Nom complet du Titulaire": "Marie-Claire Eyeghe",
+            "Nom complet du Suppléant": "Alain Ndong"
+          },
+          {
+            "Sigle Syndicat": "COSYG",
+            "Nom Complet Syndicat": "Confédération Syndicale Gabonaise",
+            "Collège concerné": "cadres",
+            "Nom complet du Titulaire": "Christian Bignoumba",
+            "Nom complet du Suppléant": "Sylvie Kombila"
+          }
+        ];
+
+        const wsConfig = XLSX.utils.json_to_sheet(configData);
+        const wsColleges = XLSX.utils.json_to_sheet(collegesData);
+        const wsEstablishments = XLSX.utils.json_to_sheet(establishmentsData);
+        const wsCandidates = XLSX.utils.json_to_sheet(candidatesData);
+
+        XLSX.utils.book_append_sheet(wb, wsConfig, "Configuration");
+        XLSX.utils.book_append_sheet(wb, wsColleges, "Collèges");
+        XLSX.utils.book_append_sheet(wb, wsEstablishments, "Établissements & Bureaux");
+        XLSX.utils.book_append_sheet(wb, wsCandidates, "Candidats & Syndicats");
+      } else {
+        const configData = [
+          { Key: "Nom de l'élection", Value: "Législatives 2026 - Siège unique Moanda" },
+          { Key: "Type d'élection", Value: "Législatives" },
+          { Key: "Date du scrutin (AAAA-MM-JJ)", Value: "2026-06-20" },
+          { Key: "Sièges disponibles", Value: 1 },
+          { Key: "Budget (FCFA)", Value: 50000000 },
+          { Key: "Objectif de voix", Value: 8000 },
+          { Key: "Province", Value: "Haut-Ogooué" },
+          { Key: "Commune", Value: "Moanda" },
+          { Key: "Arrondissement", Value: "1er Arrondissement" }
+        ];
+
+        const wsConfig = XLSX.utils.json_to_sheet(configData);
+        XLSX.utils.book_append_sheet(wb, wsConfig, "Configuration");
+      }
+
+      XLSX.writeFile(wb, `modele_configuration_${category}.xlsx`);
+      toast.success("Modèle de configuration Excel téléchargé !");
+    } catch (error) {
+      console.error(error);
+      toast.error("Erreur lors de la génération du modèle Excel.");
+    }
+  };
+
+  // Parser le fichier Excel
+  const parseXLSXConfig = async (file: File, category: 'political' | 'professional'): Promise<any> => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const XLSX = await import('xlsx');
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = e.target?.result;
+            if (!data) {
+              reject(new Error("Fichier vide"));
+              return;
+            }
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            // Lire la feuille Configuration
+            const configSheet = workbook.Sheets["Configuration"];
+            if (!configSheet) {
+              reject(new Error("La feuille 'Configuration' est manquante."));
+              return;
+            }
+            const configRows = XLSX.utils.sheet_to_json<any>(configSheet);
+            
+            // Mapper les clés-valeurs en objet simple
+            const configMap: any = {};
+            configRows.forEach((row: any) => {
+              const key = String(row.Key || row.Clé || row.column1 || "").trim();
+              const val = row.Value || row.Valeur || row.column2;
+              if (key) {
+                configMap[key] = val;
+              }
+            });
+
+            if (category === 'professional') {
+              // Lire la feuille Collèges
+              const collegesSheet = workbook.Sheets["Collèges"];
+              const colleges: any[] = [];
+              if (collegesSheet) {
+                const collegesRows = XLSX.utils.sheet_to_json<any>(collegesSheet);
+                collegesRows.forEach((row: any, index: number) => {
+                  const name = row["Nom du collège"] || row["Nom"] || "";
+                  const type = row["Code"] || row["Type"] || "";
+                  const voters = Number(row["Nombre d'électeurs"] || row["Nombre de votants"] || row["Votants"] || 0);
+                  const seats = Number(row["Sièges à pourvoir"] || row["Sièges"] || 1);
+                  colleges.push({
+                    id: String(index + 1),
+                    name,
+                    type,
+                    voters,
+                    seats
+                  });
+                });
+              }
+
+              // 1. Lire la feuille Établissements & Bureaux
+              const estSheet = workbook.Sheets["Établissements & Bureaux"] || workbook.Sheets["Etablissements & Bureaux"] || workbook.Sheets["Établissements et Bureaux"] || workbook.Sheets["Etablissements et Bureaux"];
+              const votingCenters: any[] = [];
+              if (estSheet) {
+                const estRows = XLSX.utils.sheet_to_json<any>(estSheet);
+                
+                // On va grouper par Établissement/Site pour créer un voting_center avec ses bureaux
+                const centerGroups: { [key: string]: any } = {};
+                estRows.forEach((row: any) => {
+                  const region = row["Région / Localisation"] || row["Région"] || row["Province"] || "Général";
+                  const name = row["Nom Établissement / Site"] || row["Nom Établissement"] || row["Site"] || row["Etablissement"] || "";
+                  const resp = row["Responsable Établissement"] || row["Responsable"] || "";
+                  const phone = String(row["Contact Téléphone"] || row["Téléphone"] || row["Contact"] || "");
+                  const boothName = row["Nom Bureau de vote"] || row["Nom Bureau"] || row["Bureau"] || "";
+                  const voters = Number(row["Nombre d'électeurs"] || row["Votants"] || row["Electeurs"] || 0);
+                  const college = row["Collège concerné"] || row["College"] || "general";
+                  
+                  if (!name) return; // ignore invalid rows
+
+                  const groupKey = `${region}_${name}`;
+                  if (!centerGroups[groupKey]) {
+                    centerGroups[groupKey] = {
+                      name: name,
+                      address: region,
+                      contactName: resp,
+                      contactPhone: phone,
+                      voters: 0,
+                      bureaux: 0,
+                      booths: []
+                    };
+                  }
+                  
+                  centerGroups[groupKey].voters += voters;
+                  centerGroups[groupKey].bureaux += 1;
+                  if (boothName) {
+                    centerGroups[groupKey].booths.push({
+                      name: boothName,
+                      voters: voters,
+                      collegeType: college.toLowerCase().trim()
+                    });
+                  }
+                });
+                
+                Object.values(centerGroups).forEach((c: any) => {
+                  votingCenters.push(c);
+                });
+              }
+
+              // 2. Lire la feuille Candidats & Syndicats
+              const candSheet = workbook.Sheets["Candidats & Syndicats"] || workbook.Sheets["Candidats"] || workbook.Sheets["Candidats et Syndicats"];
+              const candidates: any[] = [];
+              if (candSheet) {
+                const candRows = XLSX.utils.sheet_to_json<any>(candSheet);
+                candRows.forEach((row: any) => {
+                  const unionAcronym = row["Sigle Syndicat"] || row["Sigle"] || row["Acronyme"] || "";
+                  const unionName = row["Nom Complet Syndicat"] || row["Nom Syndicat"] || row["Syndicat"] || "";
+                  const college = row["Collège concerné"] || row["Collège"] || row["College"] || "general";
+                  const titulaireName = row["Nom complet du Titulaire"] || row["Titulaire"] || "";
+                  const suppleantName = row["Nom complet du Suppléant"] || row["Suppléant"] || row["Suppleant"] || "";
+                  
+                  if (!unionName && !unionAcronym) return;
+
+                  candidates.push({
+                    unionAcronym,
+                    unionName: unionName || unionAcronym,
+                    college: college.toLowerCase().trim(),
+                    titulaireName,
+                    suppleantName
+                  });
+                });
+              }
+
+              const rawSector = String(configMap["Secteur"] || configMap["Secteur Activité"] || "").trim().toLowerCase();
+              let sector = 'prive';
+              if (rawSector.includes('public') && !rawSector.includes('para')) {
+                sector = 'public';
+              } else if (rawSector.includes('para')) {
+                sector = 'parapublic';
+              }
+
+              const cadres = String(configMap["Effectif Cadres"] ?? '0').trim();
+              const employes = String(configMap["Effectif Employés"] ?? configMap["Effectif Agent de maîtrise"] ?? '0').trim();
+              const ouvriers = String(configMap["Effectif Ouvriers"] ?? configMap["Effectif Employés et Ouvriers"] ?? '0').trim();
+              const total = (Number(cadres) + Number(employes) + Number(ouvriers)).toString();
+
+              const computedBureaux = votingCenters.reduce((sum: number, vc: any) => sum + (vc.bureaux || 0), 0);
+              const totalBureaux = computedBureaux > 0 ? computedBureaux.toString() : (configMap["Nombre total de bureaux"] || configMap["Bureaux"] || "1").toString();
+
+              resolve({
+                name: configMap["Nom de l'élection"] || configMap["Nom"] || "",
+                enterpriseName: configMap["Raison Sociale"] || configMap["Entreprise"] || "",
+                numEnregistrement: configMap["Numéro Enregistrement"] || configMap["N° Enregistrement"] || "",
+                enterpriseSector: sector,
+                administrativeUnit: configMap["Unité Administrative (Ministère de rattachement)"] || configMap["Unité Administrative"] || "",
+                employeesCadres: cadres,
+                employeesEmployes: employes,
+                employeesOuvriers: ouvriers,
+                totalEmployees: total,
+                hrName: configMap["Nom RH"] || "",
+                hrPhone: String(configMap["Téléphone RH"] || ""),
+                hrEmail: configMap["Email RH"] || "",
+                date: configMap["Date du scrutin (AAAA-MM-JJ)"] || configMap["Date scrutin"] || "",
+                listDisplayDate: configMap["Affichage listes (AAAA-MM-JJ)"] || configMap["Affichage listes"] || "",
+                campaignStart: configMap["Début campagne (AAAA-MM-JJ)"] || configMap["Début campagne"] || "",
+                campaignEnd: configMap["Fin campagne (AAAA-MM-JJ)"] || configMap["Fin campagne"] || "",
+                hasSecondRound: String(configMap["Deuxième tour (Oui/Non)"] || "").toLowerCase() === 'non' ? false : true,
+                secondRoundDate: configMap["Date deuxième tour (AAAA-MM-JJ)"] || configMap["Date deuxième tour"] || "",
+                recoursStart: configMap["Début recours (AAAA-MM-JJ)"] || configMap["Début recours"] || "",
+                recoursEnd: configMap["Fin recours (AAAA-MM-JJ)"] || configMap["Fin recours"] || "",
+                colleges: colleges.length > 0 ? colleges : undefined,
+                votingCenters: votingCenters.length > 0 ? votingCenters : undefined,
+                candidates: candidates.length > 0 ? candidates : undefined,
+                totalBureaux: totalBureaux
+              });
+            } else {
+              resolve({
+                name: configMap["Nom de l'élection"] || configMap["Nom"] || "",
+                type: configMap["Type d'élection"] || configMap["Type"] || "",
+                date: configMap["Date du scrutin (AAAA-MM-JJ)"] || configMap["Date"] || "",
+                seatsAvailable: Number(configMap["Sièges disponibles"] || configMap["Sièges"] || 1),
+                budget: Number(configMap["Budget (FCFA)"] || configMap["Budget"] || 0),
+                voteGoal: Number(configMap["Objectif de voix"] || configMap["Objectif"] || 0),
+                province: configMap["Province"] || "",
+                commune: configMap["Commune"] || "",
+                arrondissement: configMap["Arrondissement"] || ""
+              });
+            }
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  };
+
+  // Gérer l'importation de fichier
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    
+    try {
+      let importedData: any = null;
+      if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+        importedData = await parseXLSXConfig(file, selectedElectionCategory);
+      } else {
+        toast.error("Format de fichier non pris en charge. Veuillez utiliser un fichier Excel (.xlsx ou .xls)");
+        return;
+      }
+      
+      if (!importedData) {
+        throw new Error("Impossible de lire les données du fichier.");
+      }
+      
+      // Valider les champs obligatoires minimaux
+      if (!importedData.name) {
+        throw new Error("Le champ 'name' (Nom de l'élection) est obligatoire dans le fichier de configuration.");
+      }
+      
+      // Pré-remplir et ouvrir le bon assistant
+      setPrefilledData(importedData);
+      setShowCreationModeModal(false);
+      
+      if (selectedElectionCategory === 'political') {
+        setShowWizard(true);
+      } else {
+        setShowProWizard(true);
+      }
+      
+      toast.success(`Fichier de configuration "${file.name}" chargé avec succès dans l'assistant !`);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Erreur d'importation : ${err.message || 'Fichier mal formaté'}`);
+    } finally {
+      // Réinitialiser la valeur du file input pour permettre de ré-importer le même fichier
+      e.target.value = '';
+    }
+  };
 
   // Fonction pour recalculer automatiquement le nombre d'électeurs d'une élection
   const recalculateElectionVoters = useCallback(async (electionId: string) => {
@@ -139,13 +516,26 @@ const ElectionManagementUnified = () => {
       console.log('🔄 Rafraîchissement des données des élections...');
       setLoading(true);
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('elections')
         .select(`
           *,
           enterprises (id, name, province_name, commune_name)
-        `)
-        .order('created_at', { ascending: false });
+        `);
+
+      if (user && user.role !== 'super-admin' && user.role !== 'observateur' && user.role !== 'validateur') {
+        const conditions = [];
+        conditions.push(`created_by.eq.${user.id}`);
+        if (user.assigned_election_id) {
+          conditions.push(`id.eq.${user.assigned_election_id}`);
+        }
+        if ((user.role === 'agent-saisie' || user.role === 'president-bureau') && user.created_by) {
+          conditions.push(`created_by.eq.${user.created_by}`);
+        }
+        query = query.or(conditions.join(','));
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         console.error('❌ Erreur lors de la récupération des élections:', error);
@@ -296,7 +686,8 @@ const ElectionManagementUnified = () => {
           },
           cover_image: election.cover_image_url,
           enterpriseId: election.enterprise_id,
-
+          has_second_round: election.has_second_round,
+          second_round_date: election.second_round_date,
           configuration: {
             seatsAvailable: election.seats_available || 1,
             budget: election.budget || 0,
@@ -322,7 +713,11 @@ const ElectionManagementUnified = () => {
           },
           createdAt: new Date(election.created_at),
           updatedAt: new Date(election.updated_at),
+<<<<<<< HEAD
+          createdBy: election.created_by || 'system'
+=======
           createdBy: election.created_by || 'system',
+>>>>>>> cebb93cb7df8b24f4638783b1167c84f543f613d
         };
       });
 
@@ -334,7 +729,7 @@ const ElectionManagementUnified = () => {
     } finally {
       setLoading(false);
     }
-  }, [setLoading, setError, setElections, recalculateElectionVoters]);
+  }, [setLoading, setError, setElections, recalculateElectionVoters, user]);
 
   // Charger les élections depuis Supabase
   useEffect(() => {
@@ -361,8 +756,12 @@ const ElectionManagementUnified = () => {
 
     const matchesStatus = statusFilter === 'all' || election.status === statusFilter;
     const matchesType = typeFilter === 'all' || election.type === typeFilter;
+    const electionYear = new Date(election.date).getFullYear().toString();
+    const electionMonth = (new Date(election.date).getMonth() + 1).toString();
+    const matchesYear = yearFilter === 'all' || electionYear === yearFilter;
+    const matchesMonth = monthFilter === 'all' || electionMonth === monthFilter;
 
-    return matchesSearch && matchesStatus && matchesType;
+    return matchesSearch && matchesStatus && matchesType && matchesYear && matchesMonth;
   });
 
   // Fonction pour déterminer la couleur du statut
@@ -628,37 +1027,105 @@ const ElectionManagementUnified = () => {
     }
   };
 
-  const handleDeleteElection = async (electionId: string) => {
-    if (window.confirm('Êtes-vous sûr de vouloir supprimer cette élection ?')) {
+  const handleDeleteElection = (election: Election) => {
+    setElectionToDelete(election);
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!electionToDelete) return;
+    try {
+      setIsDeleting(true);
+      const electionId = electionToDelete.id;
+      
+      // Récupérer les données de l'élection avant suppression pour l'audit
+      const { data: electionData } = await supabase
+        .from('elections')
+        .select('*')
+        .eq('id', electionId)
+        .single();
+
+      // 1. Supprimer les votes/candidatures dans candidate_results liés aux PVs de cette élection
       try {
-        setLoading(true);
-        
-        // Récupérer les données de l'élection avant suppression pour l'audit
-        const { data: electionData } = await supabase
-          .from('elections')
-          .select('*')
-          .eq('id', electionId)
-          .single();
-        
-        await deleteElection(electionId);
-        
-        // Enregistrer dans l'audit
-        if (electionData) {
-          await logDelete(
-            'election',
-            electionId,
-            `Suppression de l'élection "${electionData.title}"`,
-            electionData
-          );
+        const { data: pvs } = await supabase
+          .from('procès_verbaux')
+          .select('id')
+          .eq('election_id', electionId);
+          
+        if (pvs && pvs.length > 0) {
+          const pvIds = pvs.map(p => p.id);
+          await supabase.from('candidate_results').delete().in('pv_id', pvIds);
         }
-        
-        toast.success('Élection supprimée avec succès');
-      } catch (error) {
-        console.error('Erreur lors de la suppression:', error);
-        toast.error('Erreur lors de la suppression de l\'élection');
-      } finally {
-        setLoading(false);
+      } catch (e) {
+        console.warn("Échec de la suppression dans candidate_results:", e);
       }
+
+      // 2. Supprimer les procès_verbaux liés à l'élection
+      try {
+        await supabase.from('procès_verbaux').delete().eq('election_id', electionId);
+      } catch (e) {
+        console.warn("Échec de la suppression dans procès_verbaux:", e);
+      }
+
+      // 3. Supprimer les candidats liés à l'élection
+      try {
+        await supabase.from('election_candidates').delete().eq('election_id', electionId);
+      } catch (e) {
+        console.warn("Échec de la suppression dans election_candidates:", e);
+      }
+
+      // 4. Supprimer les centres liés à l'élection
+      try {
+        await supabase.from('election_centers').delete().eq('election_id', electionId);
+      } catch (e) {
+        console.warn("Échec de la suppression dans election_centers:", e);
+      }
+
+      // 5. Supprimer les collèges électoraux (élections pro)
+      try {
+        await supabase.from('electoral_colleges').delete().eq('election_id', electionId);
+      } catch (e) {
+        console.warn("Échec de la suppression dans electoral_colleges:", e);
+      }
+
+      // 6. Supprimer les étapes de l'élection si applicable
+      try {
+        await supabase.from('election_steps').delete().eq('election_id', electionId);
+      } catch (e) {
+        console.warn("Échec de la suppression dans election_steps:", e);
+      }
+
+      // 7. Supprimer l'élection de la base de données
+      const { error: dbDeleteErr } = await supabase
+        .from('elections')
+        .delete()
+        .eq('id', electionId);
+
+      if (dbDeleteErr) {
+        throw dbDeleteErr;
+      }
+      
+      // 8. Mettre à jour l'état local
+      await deleteElection(electionId);
+      
+      // Enregistrer dans l'audit
+      if (electionData) {
+        await logDelete(
+          'election',
+          electionId,
+          `Suppression de l'élection "${electionData.title}"`,
+          electionData
+        );
+      }
+      
+      toast.success('Élection supprimée avec succès');
+      setShowDeleteModal(false);
+      setElectionToDelete(null);
+    } catch (error: any) {
+      console.error('Erreur lors de la suppression:', error);
+      toast.error(`Erreur lors de la suppression: ${error?.message || error}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1068,6 +1535,116 @@ const ElectionManagementUnified = () => {
         }
       }
 
+      // Insérer les établissements & bureaux importés
+      if (electionData.votingCenters && electionData.votingCenters.length > 0) {
+        for (const center of electionData.votingCenters) {
+          // Créer le voting_center
+          const { data: centerData, error: centerErr } = await supabase
+            .from('voting_centers')
+            .insert({
+              name: center.name,
+              address: center.address,
+              contact_name: center.contactName || 'N/A',
+              contact_phone: center.contactPhone || 'N/A',
+              total_voters: center.voters || 0,
+              total_bureaux: center.bureaux || 0,
+              enterprise_id: enterprise.id
+            })
+            .select()
+            .single();
+
+          if (centerErr) {
+            console.error('Erreur lors de la création du centre de vote:', centerErr);
+            continue;
+          }
+
+          // Lier le centre à l'élection
+          const { error: linkErr } = await supabase
+            .from('election_centers')
+            .insert({
+              election_id: electionId,
+              center_id: centerData.id
+            });
+
+          if (linkErr) {
+            console.error('Erreur lors de la liaison du centre:', linkErr);
+          }
+
+          // Insérer les bureaux de vote pour ce centre
+          if (center.booths && center.booths.length > 0) {
+            const boothsToInsert = center.booths.map((booth: any) => ({
+              name: booth.name,
+              center_id: centerData.id,
+              registered_voters: booth.voters || 0,
+              president_name: 'N/A',
+              president_phone: '000000000',
+              urns_count: 0
+            }));
+
+            const { error: boothErr } = await supabase
+              .from('voting_bureaux')
+              .insert(boothsToInsert);
+
+            if (boothErr) {
+              console.error('Erreur lors de la création des bureaux:', boothErr);
+            }
+          }
+        }
+      }
+
+      // Insérer les listes syndicales/candidats importés
+      if (electionData.candidates && electionData.candidates.length > 0) {
+        for (const cand of electionData.candidates) {
+          // Rechercher si le syndicat existe déjà
+          let unionId = null;
+          let query = supabase.from('unions').select('id');
+          if (cand.unionAcronym && cand.unionName) {
+            query = query.or(`acronym.eq.${cand.unionAcronym},name.eq.${cand.unionName}`);
+          } else if (cand.unionAcronym) {
+            query = query.eq('acronym', cand.unionAcronym);
+          } else {
+            query = query.eq('name', cand.unionName);
+          }
+          
+          const { data: existingUnion } = await query.maybeSingle();
+
+          if (existingUnion) {
+            unionId = existingUnion.id;
+          } else {
+            // Créer le syndicat
+            const { data: newUnionData, error: newUnionErr } = await supabase
+              .from('unions')
+              .insert({
+                name: cand.unionName,
+                acronym: cand.unionAcronym
+              })
+              .select()
+              .single();
+
+            if (newUnionErr) {
+              console.error('Erreur lors de la création du syndicat:', newUnionErr);
+              continue;
+            }
+            unionId = newUnionData.id;
+          }
+
+          // Créer la liste (union_list)
+          const { error: listErr } = await supabase
+            .from('union_lists')
+            .insert({
+              election_id: electionId,
+              union_id: unionId,
+              college: cand.college || 'general',
+              titulaires: cand.titulaireName ? [{ name: cand.titulaireName, role: 'Tête de liste' }] : [],
+              suppleants: cand.suppleantName ? [{ name: cand.suppleantName, role: 'Suppléant' }] : []
+            });
+
+          if (listErr) {
+            console.error('Erreur lors de la création de la liste syndicale:', listErr);
+          }
+        }
+      }
+
       await refreshElectionsData();
       
       await logCreate(
@@ -1088,12 +1665,8 @@ const ElectionManagementUnified = () => {
   };
 
   if (selectedElection) {
-    console.log('Élection sélectionnée pour la vue détaillée:', selectedElection);
-    console.log('Données de localisation de l\'élection sélectionnée:', selectedElection.location);
-    
-    // Adapter notre type Election vers le type attendu par ElectionDetailView
     const adaptedElection = {
-      id: selectedElection.id, // UUID direct
+      id: selectedElection.id,
       title: selectedElection.title,
       date: selectedElection.date.toISOString().split('T')[0],
       status: selectedElection.status,
@@ -1103,15 +1676,16 @@ const ElectionManagementUnified = () => {
       candidates: selectedElection.statistics.totalCandidates,
       location: selectedElection.location.fullAddress,
       type: selectedElection.type,
-      budget: selectedElection.configuration.budget ,
-      voteGoal: selectedElection.configuration.voteGoal ,
+      budget: selectedElection.configuration.budget,
+      voteGoal: selectedElection.configuration.voteGoal,
       seatsAvailable: selectedElection.configuration.seatsAvailable,
       province: selectedElection.location.province,
       commune: selectedElection.location.commune,
       arrondissement: selectedElection.location.arrondissement,
+      has_second_round: selectedElection.has_second_round,
+      second_round_date: selectedElection.second_round_date,
+      enterpriseId: selectedElection.enterpriseId || (selectedElection as any).enterprise_id,
     };
-    
-    console.log('Élection adaptée pour ElectionDetailView:', adaptedElection);
 
     return (
       <ElectionDetailView 
@@ -1179,14 +1753,14 @@ const ElectionManagementUnified = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-64">
-                    <DropdownMenuItem onClick={() => setShowWizard(true)} className="py-3">
+                    <DropdownMenuItem onClick={() => { setSelectedElectionCategory('political'); setShowCreationModeModal(true); }} className="py-3">
                       <div className="flex flex-col">
-                        <span className="font-medium">Classique</span>
+                        <span className="font-medium">Politique</span>
                         <span className="text-xs text-gray-500">Législatives, Locales</span>
                       </div>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setShowProWizard(true)} className="py-3">
+                    <DropdownMenuItem onClick={() => { setSelectedElectionCategory('professional'); setShowCreationModeModal(true); }} className="py-3">
                       <div className="flex flex-col">
                         <span className="font-medium text-purple-700">Professionnelle</span>
                         <span className="text-xs text-gray-500">Délégués du personnel (Entreprises)</span>
@@ -1334,6 +1908,43 @@ const ElectionManagementUnified = () => {
                     <SelectItem value="Élection Professionnelle">Professionnelle</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select value={yearFilter} onValueChange={setYearFilter}>
+                  <SelectTrigger className="w-full xs:w-auto py-3 sm:py-4 border-0 focus:border-0 focus:ring-0 rounded-lg sm:rounded-xl bg-gray-50 focus:bg-white transition-all duration-200 text-sm sm:text-base">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <SelectValue placeholder="Année" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes les années</SelectItem>
+                    <SelectItem value="2026">2026</SelectItem>
+                    <SelectItem value="2025">2025</SelectItem>
+                    <SelectItem value="2024">2024</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={monthFilter} onValueChange={setMonthFilter}>
+                  <SelectTrigger className="w-full xs:w-auto py-3 sm:py-4 border-0 focus:border-0 focus:ring-0 rounded-lg sm:rounded-xl bg-gray-50 focus:bg-white transition-all duration-200 text-sm sm:text-base">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <SelectValue placeholder="Mois" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les mois</SelectItem>
+                    <SelectItem value="1">Janvier</SelectItem>
+                    <SelectItem value="2">Février</SelectItem>
+                    <SelectItem value="3">Mars</SelectItem>
+                    <SelectItem value="4">Avril</SelectItem>
+                    <SelectItem value="5">Mai</SelectItem>
+                    <SelectItem value="6">Juin</SelectItem>
+                    <SelectItem value="7">Juillet</SelectItem>
+                    <SelectItem value="8">Août</SelectItem>
+                    <SelectItem value="9">Septembre</SelectItem>
+                    <SelectItem value="10">Octobre</SelectItem>
+                    <SelectItem value="11">Novembre</SelectItem>
+                    <SelectItem value="12">Décembre</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               
               {/* Boutons de vue */}
@@ -1396,14 +2007,14 @@ const ElectionManagementUnified = () => {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuItem onClick={() => setShowWizard(true)} className="py-3">
+                  <DropdownMenuItem onClick={() => { setSelectedElectionCategory('political'); setShowCreationModeModal(true); }} className="py-3">
                     <div className="flex flex-col">
-                      <span className="font-medium">Classique</span>
+                      <span className="font-medium">Politique</span>
                       <span className="text-xs text-gray-500">Législatives, Locales</span>
                     </div>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setShowProWizard(true)} className="py-3">
+                  <DropdownMenuItem onClick={() => { setSelectedElectionCategory('professional'); setShowCreationModeModal(true); }} className="py-3">
                     <div className="flex flex-col">
                       <span className="font-medium text-purple-700">Professionnelle</span>
                       <span className="text-xs text-gray-500">Délégués du personnel</span>
@@ -1419,7 +2030,7 @@ const ElectionManagementUnified = () => {
               {filteredElections.map((election) => (
                 <Card 
                   key={election.id} 
-                  className="election-card group hover:shadow-lg transition-all duration-300"
+                  className={`election-card group transition-all duration-300 ${election.status === 'Annulée' ? 'opacity-60 bg-gray-50 border-dashed border-gray-300 grayscale-[0.5]' : 'hover:shadow-lg'}`}
                 >
                   <CardHeader className="p-3 sm:p-4">
                     <div className="flex items-start justify-between gap-2">
@@ -1457,11 +2068,20 @@ const ElectionManagementUnified = () => {
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem 
-                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election.id); }} 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }} 
                             className="text-red-600 focus:text-red-600"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Supprimer
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
+                            <span className="mr-2 opacity-70">⏸</span>
+                            Désactiver
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
+                            <span className="mr-2 opacity-70">📦</span>
+                            Archiver
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1511,7 +2131,7 @@ const ElectionManagementUnified = () => {
                             {election.statistics.totalBureaux}
                           </p>
                         </div>
-                        <div className="text-center p-2 bg-purple-50 rounded col-span-2">
+                        <div className="text-center p-2 bg-purple-50 rounded">
                           <div className="flex items-center justify-center gap-1 text-purple-600 mb-0.5">
                             <Users className="h-3 w-3" />
                             <span className="text-[11px] font-semibold">Électeurs</span>
@@ -1520,7 +2140,45 @@ const ElectionManagementUnified = () => {
                             {election.statistics.totalVoters.toLocaleString()}
                           </p>
                         </div>
+                        <div className="text-center p-2 bg-amber-50 rounded">
+                          <div className="flex items-center justify-center gap-1 text-amber-600 mb-0.5">
+                            <TrendingUp className="h-3 w-3" />
+                            <span className="text-[11px] font-semibold">Particip.</span>
+                          </div>
+                          <p className="text-xs font-bold text-amber-700">
+                            {(election.statistics as any).participationRate ? `${(election.statistics as any).participationRate.toFixed(1)}%` : '-'}
+                          </p>
+                        </div>
                       </div>
+
+                      {election.type === 'Élection Professionnelle' && election.has_second_round && (
+                        <div className="p-2.5 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-100/50 space-y-1.5 my-1">
+                          <div className="text-[10px] font-semibold text-purple-700 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+                              Scrutin à 2 Tours liés
+                            </span>
+                            <span className="text-[9px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded">
+                              Pro
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-5 items-center text-[10px] text-gray-500 font-medium">
+                            <div className="col-span-2 text-left truncate">
+                              <span className="text-[9px] text-gray-400 block">1er Tour</span>
+                              {election.date ? election.date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                            </div>
+                            <div className="col-span-1 flex justify-center">
+                              <div className="h-0.5 w-full bg-purple-300 relative">
+                                <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-purple-600 text-[8px]">➜</span>
+                              </div>
+                            </div>
+                            <div className="col-span-2 text-right truncate">
+                              <span className="text-[9px] text-gray-400 block">2nd Tour</span>
+                              {election.second_round_date ? new Date(election.second_round_date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       <Button
                         variant="outline"
@@ -1544,7 +2202,7 @@ const ElectionManagementUnified = () => {
               {filteredElections.map((election) => (
                 <Card
                   key={election.id}
-                  className="election-card group hover:shadow-lg transition-all duration-300"
+                  className={`election-card group transition-all duration-300 ${election.status === 'Annulée' ? 'opacity-60 bg-gray-50 border-dashed border-gray-300 grayscale-[0.5]' : 'hover:shadow-lg'}`}
                 >
                   <div className="p-3 sm:p-4">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
@@ -1576,11 +2234,20 @@ const ElectionManagementUnified = () => {
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem 
-                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election.id); }} 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }} 
                                 className="text-red-600 focus:text-red-600"
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Supprimer
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
+                                <span className="mr-2 opacity-70">⏸</span>
+                                Désactiver
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
+                                <span className="mr-2 opacity-70">📦</span>
+                                Archiver
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -1611,6 +2278,32 @@ const ElectionManagementUnified = () => {
                           <MapPin className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 text-gray-500 flex-shrink-0" />
                           <span className="line-clamp-1">{election.location.fullAddress}</span>
                         </div>
+
+                        {election.type === 'Élection Professionnelle' && election.has_second_round && (
+                          <div className="p-2.5 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-100/50 space-y-1.5 mb-3 max-w-md">
+                            <div className="text-[10px] font-semibold text-purple-700 flex items-center justify-between">
+                              <span className="flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+                                Scrutin à 2 Tours liés (Professionnel)
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-5 items-center text-[10px] text-gray-500 font-medium">
+                              <div className="col-span-2 text-left truncate">
+                                <span className="text-[9px] text-gray-400 block">1er Tour</span>
+                                {election.date ? election.date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                              </div>
+                              <div className="col-span-1 flex justify-center">
+                                <div className="h-0.5 w-full bg-purple-300 relative">
+                                  <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-purple-600 text-[8px]">➜</span>
+                                </div>
+                              </div>
+                              <div className="col-span-2 text-right truncate">
+                                <span className="text-[9px] text-gray-400 block">2nd Tour</span>
+                                {election.second_round_date ? new Date(election.second_round_date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '-'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Statistiques */}
                         <div className="flex items-center gap-3 sm:gap-4 text-gray-700 text-xs sm:text-sm mb-2">
@@ -1664,6 +2357,7 @@ const ElectionManagementUnified = () => {
               setShowWizard(false);
               toast.success('Élection créée avec succès');
             }}
+            prefilledData={prefilledData}
           />
         )}
 
@@ -1672,7 +2366,119 @@ const ElectionManagementUnified = () => {
           <ProfessionalElectionWizard 
             onClose={() => setShowProWizard(false)}
             onSubmit={handleCreateProElection}
+            prefilledData={prefilledData}
           />
+        )}
+
+        {/* Modal de sélection du mode de création */}
+        {showCreationModeModal && (
+          <Dialog open={showCreationModeModal} onOpenChange={(open) => {
+            setShowCreationModeModal(open);
+            if (!open) {
+              setPrefilledData(null);
+            }
+          }}>
+            <DialogContent className="max-w-[95vw] sm:max-w-2xl bg-white border border-gray-100 shadow-2xl rounded-2xl overflow-hidden p-0">
+              <div className="p-6 bg-gradient-to-br from-[#1e40af]/5 to-[#1e3a8a]/5 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <DialogTitle className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    <span className="p-2 bg-[#1e40af]/10 rounded-lg text-[#1e40af]">
+                      <Plus className="h-5 w-5" />
+                    </span>
+                    Initialiser l'élection {selectedElectionCategory === 'professional' ? 'Professionnelle' : 'Politique'}
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-gray-500 mt-1">
+                    Choisissez votre méthode pour créer l'élection
+                  </DialogDescription>
+                </div>
+              </div>
+
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Option 1: Manuelle */}
+                  <div
+                    onClick={() => {
+                      setShowCreationModeModal(false);
+                      setPrefilledData(null);
+                      if (selectedElectionCategory === 'political') {
+                        setShowWizard(true);
+                      } else {
+                        setShowProWizard(true);
+                      }
+                    }}
+                    className="group border border-gray-100 hover:border-blue-300 hover:shadow-lg rounded-xl p-6 cursor-pointer bg-white transition-all duration-300 flex flex-col justify-between"
+                  >
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-start">
+                        <div className="p-3 bg-blue-50 text-[#1e40af] rounded-lg group-hover:bg-[#1e40af] group-hover:text-white transition-all duration-300">
+                          <Edit className="h-6 w-6" />
+                        </div>
+                        <span className="text-[10px] font-semibold bg-blue-50 text-[#1e40af] px-2 py-0.5 rounded-full">
+                          Standard
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-gray-900 text-base mb-1">Création Manuelle</h3>
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                          Saisissez pas à pas toutes les caractéristiques de l'élection à l'aide de notre assistant guidé.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-6 flex items-center text-xs font-semibold text-[#1e40af] group-hover:translate-x-1 transition-transform duration-300">
+                      Commencer l'assistant <ArrowRight className="h-3 w-3 ml-1" />
+                    </div>
+                  </div>
+
+                  {/* Option 2: Fichier de configuration */}
+                  <div
+                    onClick={() => {
+                      document.getElementById('config-file-input')?.click();
+                    }}
+                    className="group border border-purple-100 hover:border-purple-300 hover:shadow-lg rounded-xl p-6 cursor-pointer bg-[#faf5ff] hover:bg-[#f3e8ff]/40 transition-all duration-300 flex flex-col justify-between"
+                  >
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-start">
+                        <div className="p-3 bg-purple-100 text-purple-700 rounded-lg group-hover:bg-purple-700 group-hover:text-white transition-all duration-300">
+                          <Upload className="h-6 w-6" />
+                        </div>
+                        <span className="text-[10px] font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                          Rapide
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-purple-950 text-base mb-1">Importer une configuration</h3>
+                        <p className="text-xs text-purple-700/70 leading-relaxed mb-3">
+                          Initialisez l'élection en chargeant un fichier Excel pré-rempli contenant tous les paramètres.
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadXLSXTemplate(selectedElectionCategory);
+                          }}
+                          className="h-7 text-[10px] font-semibold text-purple-700 hover:text-purple-950 hover:bg-purple-100 bg-purple-50/50 p-2 rounded gap-1.5 w-fit"
+                        >
+                          <Download className="h-3 w-3" />
+                          Télécharger le modèle Excel (.xlsx)
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-6 flex items-center text-xs font-semibold text-purple-700 group-hover:translate-x-1 transition-transform duration-300">
+                      Sélectionner un fichier <ArrowRight className="h-3 w-3 ml-1" />
+                    </div>
+                    <input
+                      id="config-file-input"
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={handleFileImport}
+                    />
+                  </div>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* Edit Election Modal */}
@@ -1690,6 +2496,45 @@ const ElectionManagementUnified = () => {
               onUpdate={handleUpdateElection}
             />
           )
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && electionToDelete && (
+          <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+            <DialogContent className="max-w-[95vw] sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-base sm:text-lg text-red-600 flex items-center gap-2">
+                  <span className="p-1 bg-red-100 rounded text-red-600">⚠️</span>
+                  Supprimer l'élection
+                </DialogTitle>
+                <DialogDescription className="text-sm text-gray-500 pt-2">
+                  Êtes-vous absolument sûr de vouloir supprimer l'élection <strong className="text-gray-900">"{electionToDelete.title}"</strong> ?
+                  <br /><br />
+                  Cette action est <span className="font-semibold text-red-600">irréversible</span>. Elle supprimera définitivement cette élection ainsi que toutes les données associées : les procès-verbaux, les votes saisis, les candidats liés et les collèges électoraux.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="mt-4 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setElectionToDelete(null);
+                  }}
+                  disabled={isDeleting}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleConfirmDelete}
+                  disabled={isDeleting}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                >
+                  {isDeleting ? 'Suppression en cours...' : 'Confirmer la suppression'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
       </div>
     </Layout>

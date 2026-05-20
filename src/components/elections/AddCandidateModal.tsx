@@ -372,7 +372,7 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
             </form>
           ) : (
             <form onSubmit={handleAddUnionList} className="space-y-6">
-              <ModernFormGrid columns={2}>
+              <ModernFormGrid cols={2}>
                 <FloatingInput
                   label="Nom du Syndicat"
                   value={newUnion.name}
