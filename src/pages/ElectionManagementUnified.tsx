@@ -2073,7 +2073,7 @@ const ElectionManagementUnified = () => {
                           {can('elections:manage') && <DropdownMenuSeparator />}
                           {can('elections:manage') && (
                           <DropdownMenuItem
-                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election.id); }}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }}
                             className="text-red-600 focus:text-red-600"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
@@ -2243,7 +2243,7 @@ const ElectionManagementUnified = () => {
                               {can('elections:manage') && <DropdownMenuSeparator />}
                               {can('elections:manage') && (
                               <DropdownMenuItem
-                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election.id); }}
+                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }}
                                 className="text-red-600 focus:text-red-600"
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
