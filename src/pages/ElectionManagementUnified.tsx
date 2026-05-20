@@ -94,16 +94,6 @@ const ElectionManagementUnified = () => {
       if (category === 'professional') {
         const configData = [
           { Key: "Nom de l'élection", Value: "Élection Professionnelle SEEG 2026" },
-          { Key: "Raison Sociale", Value: "Société d'Énergie et d'Eau du Gabon" },
-          { Key: "Numéro Enregistrement", Value: "RG-4920492" },
-          { Key: "Secteur", Value: "Privé" },
-          { Key: "Unité Administrative (Ministère de rattachement)", Value: "" },
-          { Key: "Effectif Cadres", Value: 0 },
-          { Key: "Effectif Employés", Value: 0 },
-          { Key: "Effectif Ouvriers", Value: 4 },
-          { Key: "Nom RH", Value: "Jean Dupont" },
-          { Key: "Téléphone RH", Value: "+24166123456" },
-          { Key: "Email RH", Value: "j.dupont@seeg.ga" },
           { Key: "Date du scrutin (AAAA-MM-JJ)", Value: "2026-06-20" },
           { Key: "Affichage listes (AAAA-MM-JJ)", Value: "2026-06-01" },
           { Key: "Début campagne (AAAA-MM-JJ)", Value: "2026-06-05" },
@@ -713,11 +703,7 @@ const ElectionManagementUnified = () => {
           },
           createdAt: new Date(election.created_at),
           updatedAt: new Date(election.updated_at),
-<<<<<<< HEAD
-          createdBy: election.created_by || 'system'
-=======
           createdBy: election.created_by || 'system',
->>>>>>> cebb93cb7df8b24f4638783b1167c84f543f613d
         };
       });
 
