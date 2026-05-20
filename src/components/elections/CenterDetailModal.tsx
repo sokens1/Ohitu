@@ -8,6 +8,7 @@ import { X, Plus, Edit, Trash2, Building, Users, Phone } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import EditBureauModal from './EditBureauModal';
+import { useRBAC } from '@/hooks/useRBAC';
 
 interface Center {
   id: string;
@@ -35,6 +36,9 @@ interface CenterDetailModalProps {
 }
 
 const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }) => {
+  const { can } = useRBAC();
+  const canManage = can('elections:manage');
+
   const [showAddBureau, setShowAddBureau] = useState(false);
   const [showEditBureau, setShowEditBureau] = useState(false);
   const [selectedBureau, setSelectedBureau] = useState<Bureau | null>(null);
@@ -259,13 +263,15 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                     <p className="text-green-700 text-sm">{bureaux.length} bureau{bureaux.length > 1 ? 'x' : ''} configuré{bureaux.length > 1 ? 's' : ''}</p>
                   </div>
                 </div>
-                <Button 
-                  onClick={() => setShowAddBureau(true)} 
+                {canManage && (
+                <Button
+                  onClick={() => setShowAddBureau(true)}
                   className="bg-[#1e40af] hover:bg-[#1e3a8a] text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto"
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   <span className="font-medium">Ajouter un bureau</span>
                 </Button>
+                )}
               </div>
             </div>
 
@@ -343,13 +349,15 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                   </div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">Aucun bureau configuré</h3>
                   <p className="text-gray-600 mb-4">Commencez par ajouter un bureau de vote à ce centre.</p>
-                  <Button 
+                  {canManage && (
+                  <Button
                     onClick={() => setShowAddBureau(true)}
                     className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Ajouter le premier bureau
                   </Button>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -389,17 +397,20 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                           </TableCell>
                           <TableCell className="py-4 px-6">
                             <div className="flex items-center justify-center gap-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
+                              {canManage && (
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 onClick={() => handleEditBureau(bureau)}
                                 className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200 hover:border-blue-300 transition-all duration-200"
                                 title="Modifier ce bureau"
                               >
                                 <Edit className="w-4 h-4" />
                               </Button>
-                              <Button 
-                                variant="outline" 
+                              )}
+                              {canManage && (
+                              <Button
+                                variant="outline"
                                 size="sm"
                                 onClick={() => handleDeleteBureau(bureau.id)}
                                 className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 hover:border-red-300 transition-all duration-200"
@@ -407,6 +418,7 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
