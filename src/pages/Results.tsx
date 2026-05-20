@@ -16,14 +16,24 @@ import {
   TrendingUp,
   Eye,
   FileCheck,
-  Upload
+  Upload,
+  ShieldAlert
 } from 'lucide-react';
 import DataEntrySection from '@/components/results/DataEntrySection';
 import PVValidationSection from '@/components/results/PVValidationSection';
 import PublishSection from '@/components/results/PublishSection';
+import { useAuth } from '@/contexts/AuthContext';
 
 const Results = () => {
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('results_active_tab') || 'entry');
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem('results_active_tab');
+    if (saved) return saved;
+    // Sélectionner l'onglet par défaut selon le rôle
+    if (user?.role === 'validateur') return 'validation';
+    if (user?.role === 'super-admin') return 'entry';
+    return 'entry'; // Fallback
+  });
   const [selectedElection, setSelectedElection] = useState<string>(() => localStorage.getItem('results_selected_election') || '');
   const [availableElections, setAvailableElections] = useState<Array<{id: string, name: string}>>([]);
   const [globalStats, setGlobalStats] = useState({
@@ -252,15 +262,51 @@ const Results = () => {
 
               <div className="p-3 sm:p-4 lg:p-6">
                 <TabsContent value="entry" className="space-y-6 mt-0">
-                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} />
+                  {user?.role === 'super-admin' || user?.role === 'agent-saisie' ? (
+                    <DataEntrySection stats={globalStats} selectedElection={selectedElection} />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-8 text-center bg-gray-50 border border-gray-200 rounded-xl space-y-4 max-w-xl mx-auto my-8 animate-fade-in">
+                      <div className="p-4 bg-red-50 text-red-500 rounded-full">
+                        <ShieldAlert className="h-12 w-12 animate-pulse" />
+                      </div>
+                      <h3 className="font-bold text-lg text-gray-900">Accès Restreint</h3>
+                      <p className="text-sm text-gray-600 leading-relaxed">
+                        Votre profil <strong>{user?.role?.replace('-', ' ')}</strong> ne vous autorise pas à saisir des résultats. Seuls les administrateurs et les agents de saisie possèdent cette habilitation.
+                      </p>
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="validation" className="space-y-6 mt-0">
-                  <PVValidationSection selectedElection={selectedElection} />
+                  {user?.role === 'super-admin' || user?.role === 'validateur' ? (
+                    <PVValidationSection selectedElection={selectedElection} />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-8 text-center bg-gray-50 border border-gray-200 rounded-xl space-y-4 max-w-xl mx-auto my-8 animate-fade-in">
+                      <div className="p-4 bg-red-50 text-red-500 rounded-full">
+                        <ShieldAlert className="h-12 w-12 animate-pulse" />
+                      </div>
+                      <h3 className="font-bold text-lg text-gray-900">Accès Restreint</h3>
+                      <p className="text-sm text-gray-600 leading-relaxed">
+                        Votre profil <strong>{user?.role?.replace('-', ' ')}</strong> ne vous autorise pas à valider les PV d'élections. Seuls les validateurs et les administrateurs possèdent cette habilitation.
+                      </p>
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="publish" className="space-y-6 mt-0">
-                  <PublishSection selectedElection={selectedElection} />
+                  {user?.role === 'super-admin' ? (
+                    <PublishSection selectedElection={selectedElection} />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-8 text-center bg-gray-50 border border-gray-200 rounded-xl space-y-4 max-w-xl mx-auto my-8 animate-fade-in">
+                      <div className="p-4 bg-red-50 text-red-500 rounded-full">
+                        <ShieldAlert className="h-12 w-12 animate-pulse" />
+                      </div>
+                      <h3 className="font-bold text-lg text-gray-900">Accès Restreint</h3>
+                      <p className="text-sm text-gray-600 leading-relaxed">
+                        Votre profil <strong>{user?.role?.replace('-', ' ')}</strong> ne vous autorise pas à publier les résultats définitifs. Cette opération est strictement réservée au <strong>super administrateur</strong>.
+                      </p>
+                    </div>
+                  )}
                 </TabsContent>
               </div>
             </Tabs>

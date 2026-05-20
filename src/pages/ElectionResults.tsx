@@ -12,6 +12,7 @@ import { fetchElectionSummary, fetchCenterSummary, fetchBureauSummary, fetchCent
 import { toast } from 'sonner';
 import SEOHead from '@/components/SEOHead';
 import CrossAnalysisSection from '@/components/results/CrossAnalysisSection';
+import NetworkIndicator from '@/components/NetworkIndicator';
 
 // Icone WhatsApp (SVG minimal)
 const WhatsAppIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -1363,53 +1364,59 @@ const ElectionResults: React.FC = () => {
                   </div>
                 </button>
               </div>
-              <nav className="hidden md:flex items-center space-x-4 lg:space-x-6">
-                <Link to="/" className="hover:text-blue-200 transition-colors flex items-center gap-1 lg:gap-2 text-sm lg:text-base">
-                  <Home className="w-3 h-3 lg:w-4 lg:h-4" />
-                  <span className="hidden lg:inline">Accueil</span>
-                </Link>
-                {/* <a href="#about" className="hover:text-blue-200 transition-colors">A propos</a>
-              <a href="#infos" className="hover:text-blue-200 transition-colors">Infos électorales</a>
-              <a href="#candidats" className="hover:text-blue-200 transition-colors">Candidats</a> */}
-                {/* Résultats - temporairement masqué */}
-                {false && (
-                  <div className="relative text-left" onMouseEnter={() => setResultsMenuOpen(true)} onMouseLeave={() => setResultsMenuOpen(false)}>
-                    <button className="hover:text-blue-200 transition-colors flex items-center gap-2" onClick={() => setResultsMenuOpen(v => !v)}>
-                      <BarChart3 className="w-4 h-4" />
-                      Résultats
-                    </button>
-                    {resultsMenuOpen && (
-                      <div className="absolute right-0 left-auto mt-2 bg-white rounded shadow-lg border min-w-[260px] z-50 py-2">
-                        <div className="px-3 pb-2 text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-2">
-                          <Zap className="w-3 h-3" />
-                          Accès rapide
-                        </div>
-                        <button
-                          className="w-full text-left px-3 py-2 hover:bg-slate-100 text-sm text-gray-800 flex items-center gap-2"
-                          onClick={() => navigate('/')}
-                        >
-                          <Home className="w-3 h-3" />
-                          Tous les résultats (accueil)
-                        </button>
-                        {results?.election && (
+              
+              <div className="flex items-center space-x-3 sm:space-x-4">
+                {/* Indicateur de qualité de connexion réseau */}
+                <NetworkIndicator />
+
+                <nav className="hidden md:flex items-center space-x-4 lg:space-x-6">
+                  <Link to="/" className="hover:text-blue-200 transition-colors flex items-center gap-1 lg:gap-2 text-sm lg:text-base">
+                    <Home className="w-3 h-3 lg:w-4 lg:h-4" />
+                    <span className="hidden lg:inline">Accueil</span>
+                  </Link>
+                  {/* <a href="#about" className="hover:text-blue-200 transition-colors">A propos</a>
+                <a href="#infos" className="hover:text-blue-200 transition-colors">Infos électorales</a>
+                <a href="#candidats" className="hover:text-blue-200 transition-colors">Candidats</a> */}
+                  {/* Résultats - temporairement masqué */}
+                  {false && (
+                    <div className="relative text-left" onMouseEnter={() => setResultsMenuOpen(true)} onMouseLeave={() => setResultsMenuOpen(false)}>
+                      <button className="hover:text-blue-200 transition-colors flex items-center gap-2" onClick={() => setResultsMenuOpen(v => !v)}>
+                        <BarChart3 className="w-4 h-4" />
+                        Résultats
+                      </button>
+                      {resultsMenuOpen && (
+                        <div className="absolute right-0 left-auto mt-2 bg-white rounded shadow-lg border min-w-[260px] z-50 py-2">
+                          <div className="px-3 pb-2 text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-2">
+                            <Zap className="w-3 h-3" />
+                            Accès rapide
+                          </div>
                           <button
                             className="w-full text-left px-3 py-2 hover:bg-slate-100 text-sm text-gray-800 flex items-center gap-2"
-                            onClick={() => navigate(`/election/${results.election.id}/results`)}
+                            onClick={() => navigate('/')}
                           >
-                            <BarChart3 className="w-3 h-3" />
-                            Résultats courants
+                            <Home className="w-3 h-3" />
+                            Tous les résultats (accueil)
                           </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {/* <a href="#circonscriptions" className="hover:text-blue-200 transition-colors">Circonscriptions / Bureaux</a>
-              <a href="#contact" className="hover:text-blue-200 transition-colors">Contact</a> */}
-              </nav>
-              <button className="md:hidden p-1.5 sm:p-2 rounded hover:bg-white/10" aria-label="Ouvrir le menu" onClick={() => setMobileOpen(v => !v)}>
-                {mobileOpen ? <X className="w-5 h-5 sm:w-6 sm:h-6" /> : <Menu className="w-5 h-5 sm:w-6 sm:h-6" />}
-              </button>
+                          {results?.election && (
+                            <button
+                              className="w-full text-left px-3 py-2 hover:bg-slate-100 text-sm text-gray-800 flex items-center gap-2"
+                              onClick={() => navigate(`/election/${results.election.id}/results`)}
+                            >
+                              <BarChart3 className="w-3 h-3" />
+                              Résultats courants
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* <a href="#circonscriptions" className="hover:text-blue-200 transition-colors">Circonscriptions / Bureaux</a>
+                <a href="#contact" className="hover:text-blue-200 transition-colors">Contact</a> */}
+                </nav>
+                <button className="md:hidden p-1.5 sm:p-2 rounded hover:bg-white/10" aria-label="Ouvrir le menu" onClick={() => setMobileOpen(v => !v)}>
+                  {mobileOpen ? <X className="w-5 h-5 sm:w-6 sm:h-6" /> : <Menu className="w-5 h-5 sm:w-6 sm:h-6" />}
+                </button>
+              </div>
             </div>
             {mobileOpen && (
               <div className="mt-3 md:hidden border-t border-white/10 pt-3 space-y-1 sm:space-y-2">

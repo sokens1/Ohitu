@@ -713,7 +713,11 @@ const ElectionManagementUnified = () => {
           },
           createdAt: new Date(election.created_at),
           updatedAt: new Date(election.updated_at),
+<<<<<<< HEAD
           createdBy: election.created_by || 'system'
+=======
+          createdBy: election.created_by || 'system',
+>>>>>>> cebb93cb7df8b24f4638783b1167c84f543f613d
         };
       });
 
