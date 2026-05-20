@@ -101,6 +101,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [selectedBureau, setSelectedBureau] = useState<any>(null);
   const [enterprise, setEnterprise] = useState<any>(null);
+  const [loadingEnterprise, setLoadingEnterprise] = useState(false);
   const [centers, setCenters] = useState<Center[]>([]);
 
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -269,6 +270,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     const fetchEnterprise = async () => {
       const entId = election.enterpriseId || (election as any).enterprise_id;
       if (entId) {
+        setLoadingEnterprise(true);
         try {
           const { data, error } = await supabase
             .from('enterprises')
@@ -280,7 +282,12 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           setEnterprise(data);
         } catch (error) {
           console.error('Erreur lors du chargement de l\'entreprise:', error);
+        } finally {
+          setLoadingEnterprise(false);
         }
+      } else {
+        setEnterprise(null);
+        setLoadingEnterprise(false);
       }
     };
     fetchEnterprise();
@@ -684,7 +691,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         {/* Main Content avec onglets modernisés - Mobile First */}
         <div className="bg-white rounded-xl sm:rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <Tabs defaultValue="info" className="w-full">
-            <TabsList className="flex w-full bg-gray-50 p-1 rounded-none overflow-x-auto whitespace-nowrap scrollbar-none justify-start md:justify-around gap-1">
+            <TabsList className="flex h-auto w-full bg-gray-50 p-1 rounded-none overflow-x-auto whitespace-nowrap scrollbar-none justify-start md:justify-around gap-1">
               <TabsTrigger 
                 value="info" 
                 className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
@@ -857,30 +864,40 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Raison Sociale</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.name || 'Chargement...'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.name || 'Non renseignée')}
+                            </p>
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="p-3 bg-gray-50 rounded-lg">
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Secteur</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1 capitalize">{enterprise?.sector || '-'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1 capitalize">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.sector || '-')}
+                            </p>
                           </div>
                           <div className="p-3 bg-gray-50 rounded-lg">
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Effectif Total</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.total_employees || '-'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.total_employees || '-')}
+                            </p>
                           </div>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg">
                           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Unité Administrative</label>
-                          <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.administrative_unit || '-'}</p>
+                          <p className="text-sm font-bold text-gray-900 mt-1">
+                            {loadingEnterprise ? 'Chargement...' : (enterprise?.administrative_unit || '-')}
+                          </p>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg">
                           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Localisation Siège</label>
                           <p className="text-sm font-bold text-gray-900 mt-1">
-                            {enterprise?.province_name ? `${enterprise.province_name}, ${enterprise.commune_name}` : 'Non renseignée'}
+                            {loadingEnterprise 
+                              ? 'Chargement...' 
+                              : (enterprise?.province_name ? `${enterprise.province_name}, ${enterprise.commune_name}` : 'Non renseignée')}
                           </p>
                         </div>
-                        {enterprise?.hr_contact && (
+                        {!loadingEnterprise && enterprise?.hr_contact && (
                           <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
                             <label className="text-xs font-medium text-blue-600 uppercase tracking-wide">Contact RH</label>
                             <p className="text-sm font-bold text-blue-900 mt-1">{enterprise.hr_contact.name}</p>

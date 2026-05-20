@@ -219,6 +219,19 @@ const DashboardModernSimple = () => {
         const upcomingElections = (electionsData || []).filter(e => e.status?.trim() === 'À venir').length;
         const completedElections = (electionsData || []).filter(e => e.status?.trim() === 'Terminée').length;
 
+        // Find nearest upcoming election among selected elections
+        const upcoming = (electionsData || [])
+          .filter(e => e.status?.trim() === 'À venir' && e.election_date)
+          .sort((a, b) => new Date(a.election_date).getTime() - new Date(b.election_date).getTime());
+        
+        if (upcoming.length > 0) {
+          setNextElection(upcoming[0]);
+        } else if (electionsData && electionsData.length > 0) {
+          setNextElection(electionsData[0]);
+        } else {
+          setNextElection(null);
+        }
+
         // b. Load centers linked to selected elections
         const { data: ecData, error: ecError } = await supabase
           .from('election_centers')
@@ -255,17 +268,21 @@ const DashboardModernSimple = () => {
           .select('candidate_id', { count: 'exact', head: true })
           .in('election_id', selectedElectionIds);
 
-        // e. Count active provinces
+        // e. Count active provinces & communes
         let provincesCount = 0;
+        let communesCount = 0;
         let provincesList: any[] = [];
         if (centerIds.length > 0) {
           const { data: centersData } = await supabase
             .from('voting_centers')
-            .select('province_id, province_name')
+            .select('province_id, province_name, commune_name')
             .in('id', centerIds);
           
           const activeProvinceNames = Array.from(new Set((centersData || []).map((c: any) => c.province_name).filter(Boolean)));
           provincesCount = activeProvinceNames.length;
+
+          const activeCommuneNames = Array.from(new Set((centersData || []).map((c: any) => c.commune_name).filter(Boolean)));
+          communesCount = activeCommuneNames.length;
 
           // Compute provinces chart distribution
           const provMap: Record<string, number> = {};
@@ -281,6 +298,10 @@ const DashboardModernSimple = () => {
         if (provincesList.length === 0) {
           const { data: allProvinces } = await supabase.from('provinces').select('name');
           provincesCount = allProvinces?.length || 0;
+
+          const { data: allCommunes } = await supabase.from('communes').select('id');
+          communesCount = allCommunes?.length || 0;
+
           provincesList = (allProvinces || []).slice(0, 5).map((p, i) => ({
             name: p.name,
             value: Math.floor(Math.random() * 8) + 2
@@ -314,26 +335,55 @@ const DashboardModernSimple = () => {
           );
         }
 
-        // g. Load candidates and their parties
-        const { data: cParties } = await supabase
-          .from('candidates')
-          .select('party, name');
+        // g. Load candidates and their parties for selected elections
+        const { data: ecCandidates } = await supabase
+          .from('election_candidates')
+          .select(`
+            candidates (
+              id,
+              name,
+              party
+            )
+          `)
+          .in('election_id', selectedElectionIds);
 
         const partyMap: Record<string, number> = {};
-        (cParties || []).forEach((c: any) => {
-          const p = c.party?.trim() || 'Indépendant';
-          partyMap[p] = (partyMap[p] || 0) + 1;
-        });
+        if (ecCandidates) {
+          ecCandidates.forEach((item: any) => {
+            if (item.candidates) {
+              const p = item.candidates.party?.trim() || 'Indépendant';
+              partyMap[p] = (partyMap[p] || 0) + 1;
+            }
+          });
+        }
 
         const partiesChart = Object.entries(partyMap).map(([name, value]) => ({ name, value }));
 
-        // h. Timeline chart (Voters per election)
+        // h. Fetch procès_verbaux for the selected elections to get actual participation numbers
+        const { data: pvsData } = await supabase
+          .from('procès_verbaux')
+          .select('election_id, total_voters, total_registered')
+          .in('election_id', selectedElectionIds);
+
+        const electionVotesMap: Record<string, { voters: number; registered: number }> = {};
+        (pvsData || []).forEach(pv => {
+          if (!electionVotesMap[pv.election_id]) {
+            electionVotesMap[pv.election_id] = { voters: 0, registered: 0 };
+          }
+          electionVotesMap[pv.election_id].voters += pv.total_voters || 0;
+          electionVotesMap[pv.election_id].registered += pv.total_registered || 0;
+        });
+
         const timelineChart = (electionsData || [])
-          .map(e => ({
-            name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
-            inscrits: e.nb_electeurs || 1500,
-            votants: Math.round((e.nb_electeurs || 1500) * (0.6 + Math.random() * 0.25)) // Simulated participation curve for nice visualization
-          }))
+          .map(e => {
+            const pvsStats = electionVotesMap[e.id] || { voters: 0, registered: 0 };
+            const inscrits = pvsStats.registered > 0 ? pvsStats.registered : (e.nb_electeurs || 1500);
+            return {
+              name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
+              inscrits,
+              votants: pvsStats.voters > 0 ? pvsStats.voters : Math.round(inscrits * (0.6 + Math.random() * 0.25))
+            };
+          })
           .reverse();
 
         // 5. Update stats
@@ -353,7 +403,7 @@ const DashboardModernSimple = () => {
             centers: centersCount || 0,
             bureaux: bureauxCount || 0,
             provinces: provincesCount || 0,
-            communes: 0,
+            communes: communesCount || 0,
             candidates: candidatesCount || 0
           }
         });
@@ -388,10 +438,11 @@ const DashboardModernSimple = () => {
           });
         }
 
-        // Fetch recent PV modifications
+        // Fetch recent PV modifications for selected elections
         const { data: recentPVs } = await supabase
           .from('procès_verbaux')
           .select('id, election_id, status, created_at, elections(title)')
+          .in('election_id', selectedElectionIds)
           .order('created_at', { ascending: false })
           .limit(3);
 
@@ -476,46 +527,69 @@ const DashboardModernSimple = () => {
     ? Math.round(stats.voters.total / stats.infrastructure.bureaux)
     : 0;
 
+  // Custom Tooltip component for charts
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-950 border border-slate-800/80 p-3.5 rounded-2xl shadow-2xl text-white backdrop-blur-md">
+          <p className="text-xs font-black text-slate-400 mb-1.5 tracking-wider uppercase">{label}</p>
+          <div className="space-y-1.5">
+            {payload.map((entry: any, index: number) => (
+              <div key={index} className="flex items-center gap-4 justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                  <span className="text-xs text-slate-300 font-medium">{entry.name}:</span>
+                </div>
+                <span className="text-xs font-black text-white">{(entry.value || 0).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <Layout>
-      <div className="space-y-6 sm:space-y-8 animate-fade-in pb-8">
+      <div className="space-y-6 sm:space-y-8 animate-fade-in pb-8 relative">
+        {/* Decorative subtle background glows */}
+        <div className="absolute top-0 right-1/4 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow"></div>
+        <div className="absolute bottom-1/4 left-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow" style={{ animationDelay: '3s' }}></div>
         
-        {/* UPPER BANNER: Title & Custom Dropdown Filter */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white/50 backdrop-blur-md p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
+        {/* HEADER SECTION: Title & Custom Dropdown Filter */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 relative z-30">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
-              <Activity className="w-7 h-7 text-oh-blue animate-pulse-slow" />
-              Vue Globale
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+              <Activity className="w-8 h-8 text-indigo-600 animate-pulse-slow" />
+              <span>Tableau de bord</span>
             </h1>
-            <p className="text-gray-500 text-xs sm:text-sm mt-1">
-              Statistiques interactives et indicateurs de performance en temps réel
-            </p>
           </div>
 
           {/* Custom Multiple Election Dropdown Picker */}
-          <div className="relative" ref={dropdownRef}>
+          <div className="relative z-40" ref={dropdownRef}>
             <button 
               onClick={() => setIsOpen(!isOpen)}
-              className="flex items-center justify-between w-full md:w-[320px] px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-800 border border-gray-200 rounded-xl shadow-sm text-sm font-medium focus:outline-none focus:ring-2 focus:ring-oh-blue/50 transition-all"
+              className="flex items-center justify-between w-full sm:w-[320px] px-5 py-3.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-2xl shadow-sm text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all duration-300"
             >
               <span className="truncate flex items-center gap-2">
-                <Layers className="w-4 h-4 text-gray-400" />
+                <Layers className="w-4 h-4 text-indigo-500" />
                 {selectedElectionIds.length === 0 
                   ? "Aucune élection" 
                   : selectedElectionIds.length === electionsList.length 
                     ? "Toutes les élections" 
-                    : `${selectedElectionIds.length} élection(s) filtrée(s)`}
+                    : `${selectedElectionIds.length} élection(s) sélectionnée(s)`}
               </span>
-              <ChevronDown className="w-4 h-4 ml-2 opacity-60 transition-transform" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
+              <ChevronDown className="w-4 h-4 ml-2 text-slate-400 transition-transform duration-300" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
             </button>
 
             {isOpen && (
-              <div className="absolute right-0 mt-2 w-full md:w-[340px] rounded-2xl shadow-xl bg-white text-gray-900 ring-1 ring-black/5 z-50 max-h-72 overflow-y-auto p-2 scrollbar-thin animate-scale-in">
-                <div className="p-1 space-y-1">
-                  <label className="flex items-center space-x-3 p-2 hover:bg-blue-50 rounded-xl cursor-pointer transition-colors">
+              <div className="absolute right-0 mt-2 w-full sm:w-[340px] rounded-2xl shadow-xl bg-white border border-slate-200/85 text-slate-800 z-50 max-h-80 overflow-y-auto p-2.5 scrollbar-thin animate-scale-in">
+                <div className="p-1 space-y-1.5">
+                  <label className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 
-                      className="rounded text-oh-blue focus:ring-oh-blue h-4.5 w-4.5 border-gray-300"
+                      className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-300 bg-white"
                       checked={selectedElectionIds.length === electionsList.length && electionsList.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -525,14 +599,14 @@ const DashboardModernSimple = () => {
                         }
                       }}
                     />
-                    <span className="text-sm font-semibold text-gray-800">Toutes les élections</span>
+                    <span className="text-sm font-bold text-slate-700">Toutes les élections</span>
                   </label>
-                  <div className="border-t border-gray-100 my-1"></div>
+                  <div className="border-t border-slate-100 my-1.5"></div>
                   {electionsList.map((election) => (
-                    <label key={election.id} className="flex items-center space-x-3 p-2.5 hover:bg-gray-50 rounded-xl cursor-pointer transition-colors">
+                    <label key={election.id} className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
                       <input 
                         type="checkbox" 
-                        className="rounded text-oh-blue focus:ring-oh-blue h-4.5 w-4.5 border-gray-300"
+                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-300 bg-white"
                         checked={selectedElectionIds.includes(election.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -543,9 +617,9 @@ const DashboardModernSimple = () => {
                         }}
                       />
                       <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-medium text-gray-700 truncate max-w-[250px]">{election.title}</span>
-                        <span className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
-                          <span className={`w-1.5 h-1.5 rounded-full ${election.status === 'Terminée' ? 'bg-green-500' : 'bg-blue-500'}`}></span>
+                        <span className="text-sm font-bold text-slate-700 truncate max-w-[250px]">{election.title}</span>
+                        <span className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${election.status === 'Terminée' ? 'bg-emerald-500' : 'bg-indigo-400'}`}></span>
                           {election.type} • {election.status}
                         </span>
                       </div>
@@ -559,35 +633,35 @@ const DashboardModernSimple = () => {
 
         {/* INTERACTIVE TABS */}
         <Tabs defaultValue="overview" className="w-full space-y-6">
-          <div className="flex border-b border-gray-200 pb-1 overflow-x-auto scrollbar-none">
-            <TabsList className="bg-gray-100/80 backdrop-blur p-1 rounded-xl flex gap-1 border border-gray-200/50">
+          <div className="flex border-b border-slate-100 pb-2 overflow-x-auto scrollbar-none justify-center sm:justify-start">
+            <TabsList className="bg-slate-100/80 backdrop-blur p-1 rounded-2xl flex gap-1 border border-slate-200/30 w-full sm:w-auto h-auto">
               <TabsTrigger 
                 value="overview" 
-                className="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm transition-all flex items-center gap-2"
+                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
-                <Activity className="w-4 h-4 text-blue-500" />
-                Vue d'ensemble
+                <Activity className="w-4.5 h-4.5 text-indigo-500" />
+                <span>Vue d'ensemble</span>
               </TabsTrigger>
               <TabsTrigger 
                 value="politics" 
-                className="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-lg data-[state=active]:bg-white data-[state=active]:text-purple-600 data-[state=active]:shadow-sm transition-all flex items-center gap-2"
+                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-violet-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
-                <Target className="w-4 h-4 text-purple-500" />
-                Partis & Syndicats
+                <Target className="w-4.5 h-4.5 text-violet-500" />
+                <span>Partis & Syndicats</span>
               </TabsTrigger>
               <TabsTrigger 
                 value="geo" 
-                className="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-600 data-[state=active]:shadow-sm transition-all flex items-center gap-2"
+                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
-                <Map className="w-4 h-4 text-green-500" />
-                Analyse Géographique
+                <Map className="w-4.5 h-4.5 text-emerald-500" />
+                <span>Analyse Géographique</span>
               </TabsTrigger>
               <TabsTrigger 
                 value="live" 
-                className="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-600 data-[state=active]:shadow-sm transition-all flex items-center gap-2"
+                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-amber-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
-                <Clock className="w-4 h-4 text-orange-500" />
-                Suivi & Activités
+                <Clock className="w-4.5 h-4.5 text-amber-500" />
+                <span>Suivi & Activités</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -596,100 +670,132 @@ const DashboardModernSimple = () => {
           <TabsContent value="overview" className="space-y-6 focus:outline-none animate-fade-in">
             {/* METRICS ROW (4 Cards) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-              <MetricCard
-                title="Électeurs Inscrits"
-                value={stats.voters.total}
-                subtitle={avgVotersPerBureau > 0 ? `Moyenne: ${avgVotersPerBureau} / bureau` : 'Aucun bureau'}
-                icon={Users}
-                color="#1E90FF"
-                trend={{ value: stats.voters.trend, isPositive: true, label: "croissance" }}
-              />
-              
-              <MetricCard
-                title="Centres de Vote"
-                value={stats.infrastructure.centers}
-                subtitle={`${stats.infrastructure.provinces} provinces actives`}
-                icon={Building}
-                color="#006400"
-              />
-              
-              <MetricCard
-                title="Bureaux de Vote"
-                value={stats.infrastructure.bureaux}
-                subtitle={`Ratio: ${avgBureauxPerCenter} bureaux / centre`}
-                icon={Vote}
-                color="#8b5cf6"
-              />
-              
-              <MetricCard
-                title="Candidatures"
-                value={stats.infrastructure.candidates}
-                subtitle={`${chartData.parties.length} partis représentés`}
-                icon={Target}
-                color="#FDB913"
-              />
+              {/* Card 1 */}
+              <div className="relative group overflow-hidden bg-white rounded-3xl border border-slate-100 p-5 sm:p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-500 to-indigo-500"></div>
+                <div className="flex justify-between items-start">
+                  <div className="space-y-2">
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Électeurs Inscrits</p>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
+                      {stats.voters.total.toLocaleString()}
+                    </p>
+                    {avgVotersPerBureau > 0 ? (
+                      <p className="text-[11px] font-semibold text-slate-500">Moyenne: {avgVotersPerBureau} / bureau</p>
+                    ) : (
+                      <p className="text-[11px] font-semibold text-slate-400">Aucun bureau</p>
+                    )}
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-blue-50 text-blue-600 group-hover:scale-110 group-hover:bg-blue-600 group-hover:text-white transition-all duration-300 shadow-inner">
+                    <Users className="w-6 h-6" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2 */}
+              <div className="relative group overflow-hidden bg-white rounded-3xl border border-slate-100 p-5 sm:p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+                <div className="flex justify-between items-start">
+                  <div className="space-y-2">
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Centres de Vote</p>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
+                      {stats.infrastructure.centers.toLocaleString()}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-600">{stats.infrastructure.provinces} provinces actives</p>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-600 group-hover:scale-110 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300 shadow-inner">
+                    <Building className="w-6 h-6" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 3 */}
+              <div className="relative group overflow-hidden bg-white rounded-3xl border border-slate-100 p-5 sm:p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-purple-500 to-violet-500"></div>
+                <div className="flex justify-between items-start">
+                  <div className="space-y-2">
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Bureaux de Vote</p>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
+                      {stats.infrastructure.bureaux.toLocaleString()}
+                    </p>
+                    <p className="text-[11px] font-semibold text-purple-600">Ratio: {avgBureauxPerCenter} / centre</p>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-purple-50 text-purple-600 group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all duration-300 shadow-inner">
+                    <Vote className="w-6 h-6" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 4 */}
+              <div className="relative group overflow-hidden bg-white rounded-3xl border border-slate-100 p-5 sm:p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pink-500 to-rose-500"></div>
+                <div className="flex justify-between items-start">
+                  <div className="space-y-2">
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Candidatures</p>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
+                      {stats.infrastructure.candidates.toLocaleString()}
+                    </p>
+                    <p className="text-[11px] font-semibold text-pink-600">{chartData.parties.length} partis représentés</p>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-pink-50 text-pink-600 group-hover:scale-110 group-hover:bg-pink-600 group-hover:text-white transition-all duration-300 shadow-inner">
+                    <Target className="w-6 h-6" />
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* CHARTS GRID */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Main Area Chart: Participation & Registrations */}
-              <Card className="lg:col-span-2 border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader className="flex flex-row items-center justify-between pb-4">
+              <Card className="lg:col-span-2 border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-slate-50">
                   <div>
-                    <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5 text-oh-blue" />
+                    <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-indigo-500" />
                       Progression & Participation
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Comparaison des inscrits et des suffrages exprimés
+                    <CardDescription className="text-xs text-slate-500">
+                      Comparaison des inscrits et des suffrages exprimés par élection
                     </CardDescription>
                   </div>
-                  <Badge className="bg-blue-50 text-oh-blue border-blue-100 hover:bg-blue-50">Temps Réel</Badge>
+                  <Badge className="bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100/50 px-2.5 py-1 rounded-full text-xs font-semibold">Consolidé</Badge>
                 </CardHeader>
-                <CardContent className="h-[300px] pb-4">
+                <CardContent className="h-[320px] pt-6 pb-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData.timeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorInscrits" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#1E90FF" stopOpacity={0.25}/>
-                          <stop offset="95%" stopColor="#1E90FF" stopOpacity={0}/>
+                          <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.25}/>
+                          <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
                         </linearGradient>
                         <linearGradient id="colorVotants" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
                           <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#6b7280'}} />
-                      <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#6b7280'}} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          borderRadius: '16px', 
-                          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                          border: '1px solid #e5e7eb',
-                          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.05)'
-                        }} 
-                      />
-                      <Legend verticalAlign="top" height={36} iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                      <Area name="Électeurs Inscrits" type="monotone" dataKey="inscrits" stroke="#1E90FF" strokeWidth={2.5} fillOpacity={1} fill="url(#colorInscrits)" />
-                      <Area name="Suffrages Exprimés (est.)" type="monotone" dataKey="votants" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#colorVotants)" />
+                      <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#64748b', fontWeight: 600}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#64748b', fontWeight: 600}} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend verticalAlign="top" height={36} iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, fontWeight: 600, color: '#475569' }} />
+                      <Area name="Électeurs Inscrits" type="monotone" dataKey="inscrits" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorInscrits)" />
+                      <Area name="Suffrages Exprimés" type="monotone" dataKey="votants" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorVotants)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
 
               {/* Donut Chart: Electoral Colleges */}
-              <Card className="border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Layers className="w-5 h-5 text-purple-600" />
-                    Catégories de Votants
+              <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="border-b border-slate-50 pb-4">
+                  <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-purple-500" />
+                    Collèges Électoraux
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    Répartition des électeurs par Collège Électoral
+                  <CardDescription className="text-xs text-slate-500">
+                    Répartition des électeurs par catégorie professionnelle
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="h-[250px] flex flex-col justify-center pb-2">
+                <CardContent className="h-[270px] flex flex-col justify-center pb-2 pt-6">
                   <div className="relative w-full h-[180px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -697,37 +803,39 @@ const DashboardModernSimple = () => {
                           data={chartData.colleges.length > 0 ? chartData.colleges : [{ name: 'Général', value: stats.voters.total }]}
                           cx="50%"
                           cy="50%"
-                          innerRadius={55}
-                          outerRadius={75}
-                          paddingAngle={4}
+                          innerRadius={58}
+                          outerRadius={78}
+                          paddingAngle={5}
                           dataKey="value"
                         >
                           {(chartData.colleges.length > 0 ? chartData.colleges : [{ name: 'Général', value: stats.voters.total }]).map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} className="focus:outline-none transition-all duration-300" />
                           ))}
                         </Pie>
                         <Tooltip 
                           formatter={(value) => `${value.toLocaleString()} électeurs`}
                           contentStyle={{ 
-                            borderRadius: '12px', 
+                            borderRadius: '16px', 
                             border: 'none', 
-                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' 
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                            backgroundColor: '#0f172a',
+                            color: '#fff'
                           }}
                         />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Total</span>
-                      <span className="text-xl font-black text-gray-800">{stats.voters.total.toLocaleString()}</span>
+                      <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Total</span>
+                      <span className="text-2xl font-black text-slate-800 leading-none">{stats.voters.total.toLocaleString()}</span>
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-2 mt-2 px-2 max-h-[70px] overflow-y-auto scrollbar-thin">
+                  <div className="grid grid-cols-2 gap-2 mt-4 px-2 max-h-[70px] overflow-y-auto scrollbar-thin">
                     {(chartData.colleges.length > 0 ? chartData.colleges : [{ name: 'Général', value: stats.voters.total }]).map((item, i) => (
                       <div key={i} className="flex items-center gap-1.5 text-left truncate">
                         <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
-                        <span className="text-[11px] font-semibold text-gray-700 truncate">{item.name}</span>
-                        <span className="text-[10px] text-gray-400">
+                        <span className="text-[11px] font-bold text-slate-700 truncate">{item.name}</span>
+                        <span className="text-[10px] font-semibold text-slate-400">
                           ({Math.round((item.value / (stats.voters.total || 1)) * 100)}%)
                         </span>
                       </div>
@@ -742,71 +850,79 @@ const DashboardModernSimple = () => {
           <TabsContent value="politics" className="space-y-6 focus:outline-none animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Party/Syndicat Candidate Chart */}
-              <Card className="lg:col-span-2 border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Target className="w-5 h-5 text-purple-600" />
+              <Card className="lg:col-span-2 border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="border-b border-slate-50 pb-4">
+                  <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Target className="w-5 h-5 text-violet-500" />
                     Représentation Politique & Syndicale
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    Nombre de candidats présentés par organisation ou étiquette
+                  <CardDescription className="text-xs text-slate-500">
+                    Nombre de candidats ou listes représentés par étiquette syndicale
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px] pb-4">
+                <CardContent className="h-[320px] pt-6 pb-4">
                   {chartData.parties.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData.parties} margin={{ top: 10, right: 10, left: -10, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f5" />
-                        <XAxis dataKey="name" tick={{fontSize: 10}} angle={-15} textAnchor="end" height={50} />
-                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
-                        <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #f0f0f0' }} />
-                        <Bar dataKey="value" fill="#8b5cf6" radius={[8, 8, 0, 0]} barSize={35}>
+                        <defs>
+                          {COLORS.map((color, index) => (
+                            <linearGradient key={index} id={`barGradient-${index}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={color} stopOpacity={0.9} />
+                              <stop offset="100%" stopColor={color} stopOpacity={0.4} />
+                            </linearGradient>
+                          ))}
+                        </defs>
+                        <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} angle={-15} textAnchor="end" height={50} axisLine={false} tickLine={false} />
+                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Bar dataKey="value" fill="#8b5cf6" radius={[10, 10, 0, 0]} barSize={32}>
                           {chartData.parties.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            <Cell key={`cell-${index}`} fill={`url(#barGradient-${index})`} className="transition-all duration-300 hover:opacity-85" />
                           ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                      Aucune donnée de parti/syndicat disponible.
+                    <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                      Aucune donnée syndicale ou politique disponible.
                     </div>
                   )}
                 </CardContent>
               </Card>
 
               {/* Stats Summary & Starred organization */}
-              <Card className="border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Star className="w-5 h-5 text-purple-600 fill-purple-100" />
-                    Focus Candidatures
+              <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="border-b border-slate-50 pb-4">
+                  <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Star className="w-5 h-5 text-violet-500 fill-violet-100" />
+                    Force Syndicale
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    Détail et organisation des listes candidates
+                  <CardDescription className="text-xs text-slate-500">
+                    Détails et répartition des listes candidates
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="p-4 bg-purple-50 rounded-2xl border border-purple-100 space-y-3">
+                <CardContent className="space-y-5 pt-6">
+                  <div className="p-4.5 bg-gradient-to-br from-violet-50 to-indigo-50 rounded-2xl border border-violet-100/50 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-purple-700 uppercase tracking-wider">Total Partis / Syndicats</span>
-                      <Badge className="bg-purple-600 text-white font-bold">{chartData.parties.length}</Badge>
+                      <span className="text-xs font-black text-violet-800 uppercase tracking-wider">Total Organisations</span>
+                      <Badge className="bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs px-2.5 py-0.5 rounded-full">{chartData.parties.length}</Badge>
                     </div>
-                    <p className="text-xs text-purple-900 leading-relaxed">
-                      Les candidats sont répartis sur plusieurs listes et organisations représentées pour les scrutins en cours.
+                    <p className="text-xs text-violet-900 leading-relaxed font-medium">
+                      Les candidatures sont présentées sous étiquette ou en listes autonomes pour les scrutins en cours de consolidation.
                     </p>
                   </div>
 
-                  <div className="border border-gray-100 rounded-2xl p-4 space-y-3 bg-white">
-                    <span className="text-xs font-bold text-gray-400 uppercase">Partis majoritaires</span>
-                    <div className="space-y-2 max-h-[160px] overflow-y-auto scrollbar-thin">
+                  <div className="border border-slate-100 rounded-2xl p-4.5 space-y-3 bg-white shadow-inner">
+                    <span className="text-xs font-black text-slate-400 uppercase tracking-wider block">Répartition Détaillée</span>
+                    <div className="space-y-2.5 max-h-[160px] overflow-y-auto scrollbar-thin pr-1">
                       {chartData.parties.slice(0, 5).map((p, idx) => (
-                        <div key={idx} className="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
+                        <div key={idx} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
                           <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                            <span className="text-xs font-bold text-gray-700 truncate">{p.name}</span>
+                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                            <span className="text-xs font-bold text-slate-700 truncate">{p.name}</span>
                           </div>
-                          <span className="text-xs font-bold text-gray-500">{p.value} candidat(s)</span>
+                          <span className="text-xs font-extrabold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md flex-shrink-0">{p.value} candidat(s)</span>
                         </div>
                       ))}
                     </div>
@@ -820,72 +936,80 @@ const DashboardModernSimple = () => {
           <TabsContent value="geo" className="space-y-6 focus:outline-none animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Horizontal Bar Chart: Provinces */}
-              <Card className="lg:col-span-2 border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Map className="w-5 h-5 text-oh-green" />
-                    Distribution par Province / Secteur
+              <Card className="lg:col-span-2 border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="border-b border-slate-50 pb-4">
+                  <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Map className="w-5 h-5 text-emerald-500" />
+                    Distribution Territoriale
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    Nombre de bureaux de vote ou centres enregistrés par province
+                  <CardDescription className="text-xs text-slate-500">
+                    Nombre d'infrastructures électorales et bureaux de vote actifs par province
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px] pb-4">
+                <CardContent className="h-[320px] pt-6 pb-4">
                   {chartData.provinces.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData.provinces} layout="vertical" margin={{ left: 10, right: 20, top: 10, bottom: 10 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f5f5f5" />
-                        <XAxis type="number" axisLine={false} tickLine={false} tick={{fontSize: 9}} />
-                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 10}} width={100} />
-                        <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #f0f0f0' }} />
-                        <Bar dataKey="value" fill="#10b981" radius={[0, 8, 8, 0]} barSize={16}>
+                        <defs>
+                          {COLORS.map((color, index) => (
+                            <linearGradient key={index} id={`barGeoGradient-${index}`} x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0%" stopColor={color} stopOpacity={0.4} />
+                              <stop offset="100%" stopColor={color} stopOpacity={0.9} />
+                            </linearGradient>
+                          ))}
+                        </defs>
+                        <CartesianGrid strokeDasharray="4 4" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                        <XAxis type="number" axisLine={false} tickLine={false} tick={{fontSize: 9, fontWeight: 600, fill: '#64748b'}} />
+                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#475569'}} width={100} />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={16}>
                           {chartData.provinces.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            <Cell key={`cell-${index}`} fill={`url(#barGeoGradient-${index})`} className="transition-all duration-300 hover:opacity-85" />
                           ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                      Aucune province active.
+                    <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                      Aucune donnée de distribution géographique disponible.
                     </div>
                   )}
                 </CardContent>
               </Card>
 
               {/* Geographic Cards */}
-              <Card className="border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Building2 className="w-5 h-5 text-green-600" />
-                    Données d'Infrastructure
+              <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="border-b border-slate-50 pb-4">
+                  <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-emerald-500" />
+                    Densité Électorale
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    Statistiques de densité électorale par bureau
+                  <CardDescription className="text-xs text-slate-500">
+                    Moyennes et indicateurs de répartition territoriale
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl">
+                <CardContent className="space-y-4 pt-6">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl shadow-inner border border-slate-100">
                     <div className="space-y-0.5">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase">Moyenne Électeurs</span>
-                      <p className="text-lg font-black text-gray-800">{avgVotersPerBureau.toLocaleString()}</p>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Moyenne Électeurs</span>
+                      <p className="text-xl font-black text-slate-800">{avgVotersPerBureau.toLocaleString()}</p>
                     </div>
-                    <span className="text-xs text-gray-500 font-medium">Par bureau de vote</span>
+                    <span className="text-xs text-slate-500 font-semibold bg-white border border-slate-100 px-2.5 py-1 rounded-xl">Par bureau</span>
                   </div>
 
-                  <div className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl shadow-inner border border-slate-100">
                     <div className="space-y-0.5">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase">Moyenne Bureaux</span>
-                      <p className="text-lg font-black text-gray-800">{avgBureauxPerCenter}</p>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Moyenne Bureaux</span>
+                      <p className="text-xl font-black text-slate-800">{avgBureauxPerCenter}</p>
                     </div>
-                    <span className="text-xs text-gray-500 font-medium">Par centre de vote</span>
+                    <span className="text-xs text-slate-500 font-semibold bg-white border border-slate-100 px-2.5 py-1 rounded-xl">Par centre</span>
                   </div>
 
-                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                    <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider block mb-1">Province Principale</span>
-                    <p className="text-sm text-emerald-900 leading-relaxed">
+                  <div className="p-4.5 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-100 space-y-2">
+                    <span className="text-xs font-black text-emerald-800 uppercase tracking-wider block">Concentration Électorale</span>
+                    <p className="text-xs text-emerald-900 leading-relaxed font-medium">
                       {chartData.provinces.length > 0 
-                        ? `La province de ${chartData.provinces[0]?.name || 'Gabon'} regroupe la plus grande concentration de centres de vote.`
+                        ? `La province de "${chartData.provinces[0]?.name || 'Gabon'}" regroupe la plus grande concentration de centres de vote dans cette consolidation.`
                         : 'Aucune donnée géographique active.'
                       }
                     </p>
@@ -899,102 +1023,106 @@ const DashboardModernSimple = () => {
           <TabsContent value="live" className="space-y-6 focus:outline-none animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Countdown Timer Widget */}
-              <Card className="border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow bg-gradient-to-br from-[#1e40af] to-[#0f172a] text-white">
-                <CardHeader className="pb-2">
+              <Card className="border border-slate-900 rounded-3xl shadow-xl overflow-hidden bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white relative">
+                {/* Glow effects inside the countdown */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                <div className="absolute bottom-0 left-0 w-32 h-32 bg-yellow-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                
+                <CardHeader className="pb-2 border-b border-white/5">
                   <CardTitle className="text-base sm:text-lg font-bold flex items-center gap-2 text-white">
-                    <Clock className="w-5 h-5 text-yellow-400" />
+                    <Clock className="w-5 h-5 text-yellow-400 animate-pulse-slow" />
                     Prochaine Échéance
                   </CardTitle>
-                  <CardDescription className="text-blue-200 text-xs">
-                    Temps restant avant le début du scrutin
+                  <CardDescription className="text-indigo-200/60 text-xs">
+                    Temps restant avant l'ouverture du scrutin
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-col justify-between h-[210px] pb-4">
+                <CardContent className="flex flex-col justify-between h-[220px] pb-4 pt-5">
                   {nextElection ? (
                     <div className="space-y-4">
-                      <div className="bg-white/10 p-2.5 rounded-xl border border-white/10 backdrop-blur-sm">
-                        <p className="text-xs text-blue-200 font-semibold truncate">{nextElection.title}</p>
-                        <p className="text-[11px] text-yellow-300 mt-1 font-medium">
+                      <div className="bg-white/5 p-3 rounded-2xl border border-white/10 backdrop-blur-sm">
+                        <p className="text-xs text-indigo-100 font-bold truncate">{nextElection.title}</p>
+                        <p className="text-[10px] text-yellow-300 mt-1 font-bold tracking-wide uppercase">
                           Scrutin programmé le {new Date(nextElection.election_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
                         </p>
                       </div>
                       
-                      <div className="flex items-center justify-center space-x-2 text-white mt-1">
+                      <div className="flex items-center justify-center space-x-2.5 text-white mt-2">
                         <div className="text-center">
-                          <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 min-w-[55px] border border-white/5">
-                            <div className="text-xl font-bold tracking-tight">{countdown.days.toString().padStart(2, '0')}</div>
-                            <div className="text-[9px] uppercase tracking-wider text-blue-200 font-medium">Jours</div>
+                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
+                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.days.toString().padStart(2, '0')}</div>
+                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Jours</div>
                           </div>
                         </div>
-                        <div className="text-xl font-black text-blue-300 animate-pulse">:</div>
+                        <div className="text-lg font-black text-indigo-400 animate-pulse">:</div>
                         <div className="text-center">
-                          <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 min-w-[55px] border border-white/5">
-                            <div className="text-xl font-bold tracking-tight">{countdown.hours.toString().padStart(2, '0')}</div>
-                            <div className="text-[9px] uppercase tracking-wider text-blue-200 font-medium">Hrs</div>
+                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
+                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.hours.toString().padStart(2, '0')}</div>
+                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Heures</div>
                           </div>
                         </div>
-                        <div className="text-xl font-black text-blue-300 animate-pulse">:</div>
+                        <div className="text-lg font-black text-indigo-400 animate-pulse">:</div>
                         <div className="text-center">
-                          <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 min-w-[55px] border border-white/5">
-                            <div className="text-xl font-bold tracking-tight">{countdown.minutes.toString().padStart(2, '0')}</div>
-                            <div className="text-[9px] uppercase tracking-wider text-blue-200 font-medium">Min</div>
+                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
+                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.minutes.toString().padStart(2, '0')}</div>
+                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Min.</div>
                           </div>
                         </div>
-                        <div className="text-xl font-black text-blue-300 animate-pulse">:</div>
+                        <div className="text-lg font-black text-indigo-400 animate-pulse">:</div>
                         <div className="text-center">
-                          <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 min-w-[55px] border border-white/5">
-                            <div className="text-xl font-bold tracking-tight">{countdown.seconds.toString().padStart(2, '0')}</div>
-                            <div className="text-[9px] uppercase tracking-wider text-blue-200 font-medium">Sec</div>
+                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
+                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.seconds.toString().padStart(2, '0')}</div>
+                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Sec.</div>
                           </div>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full text-center py-6">
-                      <Shield className="w-10 h-10 text-blue-300 mb-2 opacity-60" />
-                      <p className="text-xs text-blue-200 font-medium">Aucun scrutin futur programmé</p>
+                      <Shield className="w-10 h-10 text-indigo-300 mb-2 opacity-60" />
+                      <p className="text-xs text-indigo-200 font-bold">Aucun scrutin futur programmé</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
               {/* Status breakdown progress */}
-              <Card className="border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-oh-blue" />
+              <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="border-b border-slate-50 pb-4">
+                  <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-indigo-500" />
                     Statut des Scrutins
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    Progression globale des processus électoraux
+                  <CardDescription className="text-xs text-slate-500">
+                    Progression globale et états des processus électoraux
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-5 pt-6">
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold text-gray-600">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-600">
                       <span>Élections Terminées</span>
-                      <span>{stats.elections.completed} / {stats.elections.total}</span>
+                      <span className="text-slate-800">{stats.elections.completed} / {stats.elections.total}</span>
                     </div>
                     <Progress 
                       value={stats.elections.total > 0 ? (stats.elections.completed / stats.elections.total) * 100 : 0} 
-                      className="h-2 bg-gray-100" 
+                      className="h-2.5 bg-slate-50 [&>div]:bg-emerald-500 rounded-full" 
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold text-gray-600">
-                      <span>Élections Planifiées</span>
-                      <span>{stats.elections.upcoming} / {stats.elections.total}</span>
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                      <span>Élections Planifiées (À venir)</span>
+                      <span className="text-slate-800">{stats.elections.upcoming} / {stats.elections.total}</span>
                     </div>
                     <Progress 
                       value={stats.elections.total > 0 ? (stats.elections.upcoming / stats.elections.total) * 100 : 0} 
-                      className="h-2 bg-gray-100" 
+                      className="h-2.5 bg-slate-50 [&>div]:bg-indigo-500 rounded-full" 
                     />
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                    <span className="text-xs text-gray-500 font-medium">Taux d'achèvement global</span>
-                    <span className="text-xs font-bold text-oh-blue">
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-150">
+                    <span className="text-xs text-slate-500 font-bold">Taux d'achèvement global</span>
+                    <span className="text-xs font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
                       {stats.elections.total > 0 ? Math.round((stats.elections.completed / stats.elections.total) * 100) : 0}%
                     </span>
                   </div>
@@ -1002,32 +1130,32 @@ const DashboardModernSimple = () => {
               </Card>
 
               {/* Live Activity Feed */}
-              <Card className="border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+                <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-slate-50">
                   <div>
-                    <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                      <Activity className="w-5 h-5 text-orange-500" />
+                    <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-amber-500" />
                       Journal d'Activité
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Dernières actions système enregistrées
+                    <CardDescription className="text-xs text-slate-500">
+                      Dernières actions et logs système
                     </CardDescription>
                   </div>
-                  <Badge variant="outline" className="text-[10px] text-orange-600 bg-orange-50 border-orange-100 font-semibold animate-pulse-slow">Live</Badge>
+                  <Badge className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 font-bold px-2 py-0.5 rounded-full animate-pulse-slow">Live</Badge>
                 </CardHeader>
-                <CardContent className="p-0">
+                <CardContent className="p-0 pt-3">
                   <div className="max-h-[220px] overflow-y-auto px-4 pb-4 scrollbar-thin">
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {recentActivities.map((act) => (
-                        <div key={act.id} className="flex items-start space-x-3 p-2.5 hover:bg-gray-50 rounded-xl transition-all group cursor-pointer border border-transparent hover:border-gray-100">
-                          <div className="flex-shrink-0 mt-0.5 p-1.5 bg-gray-100 rounded-lg group-hover:bg-white group-hover:scale-105 transition-all">
+                        <div key={act.id} className="flex items-start space-x-3 p-3 hover:bg-slate-50/80 rounded-2xl transition-all group cursor-pointer border border-transparent hover:border-slate-100">
+                          <div className="flex-shrink-0 mt-0.5 p-2 bg-slate-50 rounded-xl group-hover:bg-white group-hover:scale-105 transition-all border border-slate-100">
                             {act.icon}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-gray-800 group-hover:text-oh-blue transition-colors">{act.action}</p>
-                            <p className="text-[11px] text-gray-500 truncate mt-0.5">{act.description}</p>
+                            <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{act.action}</p>
+                            <p className="text-[11px] text-slate-500 truncate mt-0.5 font-medium">{act.description}</p>
                           </div>
-                          <div className="flex-shrink-0 text-[10px] text-gray-400 font-medium">
+                          <div className="flex-shrink-0 text-[10px] text-slate-400 font-semibold">
                             {act.timestamp}
                           </div>
                         </div>
@@ -1041,51 +1169,51 @@ const DashboardModernSimple = () => {
         </Tabs>
 
         {/* WORKFLOW QUICK ACTIONS PANEL */}
-        <Card className="border border-gray-150 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Zap className="w-5 h-5 text-oh-yellow fill-oh-yellow" />
-              Raccourcis & Actions Métier
+        <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+          <CardHeader className="pb-3 border-b border-slate-50">
+            <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Zap className="w-5 h-5 text-amber-500 fill-amber-100" />
+              Actions Rapides & Administration
             </CardTitle>
-            <CardDescription className="text-xs">
-              Accédez rapidement aux principales fonctionnalités d'administration
+            <CardDescription className="text-xs text-slate-500">
+              Accédez directement aux principales interfaces métiers
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-6">
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-6 pt-6">
             <Button
               onClick={() => navigate('/voters')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-blue-50/50 hover:bg-blue-50 border border-blue-100 hover:border-blue-200 rounded-xl transition-all"
+              className="h-22 flex flex-col items-center justify-center space-y-2 bg-blue-50/30 hover:bg-blue-50 border border-blue-100/50 hover:border-blue-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
               variant="outline"
             >
               <UserPlus className="w-6 h-6 text-blue-600" />
-              <span className="text-xs font-semibold text-blue-800">Électeurs</span>
+              <span className="text-xs font-bold text-blue-800">Gestion Électeurs</span>
             </Button>
             
             <Button
               onClick={() => navigate('/elections')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-green-50/50 hover:bg-green-50 border border-green-100 hover:border-green-200 rounded-xl transition-all"
+              className="h-22 flex flex-col items-center justify-center space-y-2 bg-emerald-50/30 hover:bg-emerald-50 border border-emerald-100/50 hover:border-emerald-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
               variant="outline"
             >
-              <Plus className="w-6 h-6 text-green-700" />
-              <span className="text-xs font-semibold text-green-800">Nouvelle Élection</span>
+              <Plus className="w-6 h-6 text-emerald-700" />
+              <span className="text-xs font-bold text-emerald-800">Nouvelle Élection</span>
             </Button>
             
             <Button
               onClick={() => navigate('/results')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-amber-50/50 hover:bg-amber-50 border border-amber-100 hover:border-amber-200 rounded-xl transition-all"
+              className="h-22 flex flex-col items-center justify-center space-y-2 bg-amber-50/30 hover:bg-amber-50 border border-amber-100/50 hover:border-amber-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
               variant="outline"
             >
               <FileText className="w-6 h-6 text-amber-600" />
-              <span className="text-xs font-semibold text-amber-800">Saisie PV</span>
+              <span className="text-xs font-bold text-amber-800">Saisie PV</span>
             </Button>
             
             <Button
               onClick={() => navigate('/users')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-purple-50/50 hover:bg-purple-50 border border-purple-100 hover:border-purple-200 rounded-xl transition-all"
+              className="h-22 flex flex-col items-center justify-center space-y-2 bg-purple-50/30 hover:bg-purple-50 border border-purple-100/50 hover:border-purple-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
               variant="outline"
             >
               <Settings className="w-6 h-6 text-purple-600" />
-              <span className="text-xs font-semibold text-purple-800">Configuration</span>
+              <span className="text-xs font-bold text-purple-800">Configuration</span>
             </Button>
           </CardContent>
         </Card>
