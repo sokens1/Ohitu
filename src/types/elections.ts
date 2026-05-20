@@ -134,6 +134,7 @@ export interface ElectionTimeline {
 
 // Interface unifiée pour les élections
 export interface Election {
+  enterpriseId: any;
   id: string;
   title: string;
   type: ElectionType;
@@ -150,7 +151,6 @@ export interface Election {
   cover_image?: string;
   has_second_round?: boolean;
   second_round_date?: string | null;
-  enterpriseId?: string | null;
   // Champs spécifiques Élection Professionnelle
   professionalConfig?: ProfessionalElectionConfig;
 }

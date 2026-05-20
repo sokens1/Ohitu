@@ -177,6 +177,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
               {/* Indicateur de qualité réseau */}
               <NetworkIndicator />
+              
               {/* Icône de notifications */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
