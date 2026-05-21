@@ -265,14 +265,16 @@ const ElectionManagementUnified = () => {
       }
       
       // Pré-remplir et ouvrir le bon assistant
-      setPrefilledData(importedData);
       setShowCreationModeModal(false);
       
-      if (selectedElectionCategory === 'political') {
-        setShowWizard(true);
-      } else {
-        setShowProWizard(true);
-      }
+      setTimeout(() => {
+        setPrefilledData(importedData);
+        if (selectedElectionCategory === 'political') {
+          setShowWizard(true);
+        } else {
+          setShowProWizard(true);
+        }
+      }, 300);
       
       toast.success(`Fichier de configuration "${file.name}" chargé avec succès dans l'assistant !`);
     } catch (err: any) {
@@ -2267,12 +2269,14 @@ const ElectionManagementUnified = () => {
                   <div
                     onClick={() => {
                       setShowCreationModeModal(false);
-                      setPrefilledData(null);
-                      if (selectedElectionCategory === 'political') {
-                        setShowWizard(true);
-                      } else {
-                        setShowProWizard(true);
-                      }
+                      setTimeout(() => {
+                        setPrefilledData(null);
+                        if (selectedElectionCategory === 'political') {
+                          setShowWizard(true);
+                        } else {
+                          setShowProWizard(true);
+                        }
+                      }, 300);
                     }}
                     className="group border border-gray-100 hover:border-blue-300 hover:shadow-lg rounded-xl p-6 cursor-pointer bg-white transition-all duration-300 flex flex-col justify-between"
                   >

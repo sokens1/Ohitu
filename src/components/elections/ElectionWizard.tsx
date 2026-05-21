@@ -56,6 +56,15 @@ const ElectionWizard: React.FC<ElectionWizardProps> = ({ onClose, onSubmit, onSu
     coverImage: prefilledData?.coverImage || ''
   });
 
+  // Sécurité pour éviter le blocage du scroll et des clics (bug Radix Dialog)
+  useEffect(() => {
+    document.body.style.pointerEvents = 'auto';
+    document.body.style.overflow = 'auto';
+    return () => {
+      document.body.style.pointerEvents = '';
+      document.body.style.overflow = '';
+    };
+  }, []);
 
   // Initialiser la date avec la date d'aujourd'hui
   useEffect(() => {
