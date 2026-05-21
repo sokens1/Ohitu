@@ -46,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ── Validation des champs ──────────────────────────────────────────────────
-  const { name, email, password, role, is_active, assigned_election_id, created_by } = req.body || {};
+  const { name, email, password, role, is_active, assigned_election_id, assigned_election_ids, created_by } = req.body || {};
 
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'Champs obligatoires manquants (name, email, password, role)' });
@@ -99,6 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       role,
       is_active: is_active ?? true,
       assigned_election_id: assigned_election_id || null,
+      assigned_election_ids: Array.isArray(assigned_election_ids) && assigned_election_ids.length > 0 ? assigned_election_ids : null,
       created_by: created_by || null,
     }, { onConflict: 'id' })
     .select()

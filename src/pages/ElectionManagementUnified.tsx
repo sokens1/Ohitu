@@ -48,7 +48,7 @@ import { useRBAC } from '@/hooks/useRBAC';
 
 const ElectionManagementUnified = () => {
   const { user } = useAuth();
-  const { can, isGlobalAdmin, assignedElectionId } = useRBAC();
+  const { can, isGlobalAdmin, assignedElectionIds } = useRBAC();
   const {
     elections,
     selectedElection,
@@ -518,12 +518,14 @@ const ElectionManagementUnified = () => {
         `);
 
       // Super-admin : voit toutes les élections
-      // Tous les autres rôles : uniquement leur élection assignée
+      // Tous les autres rôles : uniquement les élections qui leur sont assignées
       if (!isGlobalAdmin) {
-        if (assignedElectionId) {
-          query = query.eq('id', assignedElectionId);
+        if (assignedElectionIds.length > 0) {
+          query = assignedElectionIds.length === 1
+            ? query.eq('id', assignedElectionIds[0])
+            : query.in('id', assignedElectionIds);
         } else if (user) {
-          // Admin sans election assignée : voit celles qu'il a créées
+          // Admin sans élection assignée : voit celles qu'il a créées
           query = query.eq('created_by', user.id);
         }
       }
@@ -718,7 +720,8 @@ const ElectionManagementUnified = () => {
     } finally {
       setLoading(false);
     }
-  }, [setLoading, setError, setElections, recalculateElectionVoters, user, isGlobalAdmin, assignedElectionId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setLoading, setError, setElections, recalculateElectionVoters, user, isGlobalAdmin, JSON.stringify(assignedElectionIds)]);
 
   // Charger les élections depuis Supabase
   useEffect(() => {
