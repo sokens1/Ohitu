@@ -287,16 +287,16 @@ const VotingCenters = () => {
           <Card className="gov-card">
             <CardContent className="p-6">
               <Tabs defaultValue="general" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 mb-6">
-                  <TabsTrigger value="general" className="flex items-center space-x-2">
+                <TabsList className="flex flex-col sm:grid sm:grid-cols-3 h-auto w-full gap-1 p-1 mb-6">
+                  <TabsTrigger value="general" className="flex items-center justify-center space-x-2 py-2 sm:py-1.5">
                     <Building className="w-4 h-4" />
                     <span>Infos Générales</span>
                   </TabsTrigger>
-                  <TabsTrigger value="bureaux" className="flex items-center space-x-2">
+                  <TabsTrigger value="bureaux" className="flex items-center justify-center space-x-2 py-2 sm:py-1.5">
                     <Users className="w-4 h-4" />
                     <span>Bureaux de Vote</span>
                   </TabsTrigger>
-                  <TabsTrigger value="candidats" className="flex items-center space-x-2">
+                  <TabsTrigger value="candidats" className="flex items-center justify-center space-x-2 py-2 sm:py-1.5">
                     <Star className="w-4 h-4" />
                     <span>Candidats Concernés</span>
                   </TabsTrigger>
@@ -414,26 +414,28 @@ const VotingCenters = () => {
                       <CardTitle className="text-lg">Liste des Bureaux de Vote</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>ID du Bureau</TableHead>
-                            <TableHead>Électeurs Inscrits</TableHead>
-                            <TableHead>Nombre d'Urnes</TableHead>
-                            <TableHead>Président du Bureau</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {bureaux.map((bureau) => (
-                            <TableRow key={bureau.id} className="hover:bg-gray-50">
-                              <TableCell className="font-medium">{bureau.id}</TableCell>
-                              <TableCell>{bureau.registeredVoters.toLocaleString('fr-FR')}</TableCell>
-                              <TableCell>{bureau.urns}</TableCell>
-                              <TableCell>{bureau.president}</TableCell>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>ID du Bureau</TableHead>
+                              <TableHead>Électeurs Inscrits</TableHead>
+                              <TableHead>Nombre d'Urnes</TableHead>
+                              <TableHead>Président du Bureau</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {bureaux.map((bureau) => (
+                              <TableRow key={bureau.id} className="hover:bg-gray-50">
+                                <TableCell className="font-medium">{bureau.id}</TableCell>
+                                <TableCell>{bureau.registeredVoters.toLocaleString('fr-FR')}</TableCell>
+                                <TableCell>{bureau.urns}</TableCell>
+                                <TableCell>{bureau.president}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </CardContent>
                   </Card>
                 </TabsContent>

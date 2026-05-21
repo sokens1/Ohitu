@@ -96,6 +96,16 @@ const ElectionManagementUnified = () => {
       if (category === 'professional') {
         const configData = [
           { Key: "Nom de l'élection", Value: "Élection Professionnelle SEEG 2026" },
+          { Key: "Raison Sociale", Value: "Société d'Énergie et d'Eau du Gabon" },
+          { Key: "Numéro Enregistrement", Value: "RG-4920492" },
+          { Key: "Secteur", Value: "Privé" },
+          { Key: "Unité Administrative (Ministère de rattachement)", Value: "" },
+          { Key: "Effectif Cadres", Value: 0 },
+          { Key: "Effectif Employés", Value: 0 },
+          { Key: "Effectif Ouvriers", Value: 4 },
+          { Key: "Nom RH", Value: "Jean Dupont" },
+          { Key: "Téléphone RH", Value: "+24166123456" },
+          { Key: "Email RH", Value: "j.dupont@seeg.ga" },
           { Key: "Date du scrutin (AAAA-MM-JJ)", Value: "2026-06-20" },
           { Key: "Affichage listes (AAAA-MM-JJ)", Value: "2026-06-01" },
           { Key: "Début campagne (AAAA-MM-JJ)", Value: "2026-06-05" },
@@ -1401,7 +1411,8 @@ const ElectionManagementUnified = () => {
         },
         createdAt: new Date(),
         updatedAt: new Date(),
-        createdBy: 'current-user', // À remplacer par l'ID de l'utilisateur connecté
+        createdBy: 'current-user',
+        enterpriseId: undefined
       };
 
       // Recalculer automatiquement le nombre d'électeurs après création
@@ -2062,7 +2073,7 @@ const ElectionManagementUnified = () => {
                           {can('elections:manage') && <DropdownMenuSeparator />}
                           {can('elections:manage') && (
                           <DropdownMenuItem
-                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election.id); }}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }}
                             className="text-red-600 focus:text-red-600"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
@@ -2232,7 +2243,7 @@ const ElectionManagementUnified = () => {
                               {can('elections:manage') && <DropdownMenuSeparator />}
                               {can('elections:manage') && (
                               <DropdownMenuItem
-                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election.id); }}
+                                onClick={(e) => { e.stopPropagation(); handleDeleteElection(election); }}
                                 className="text-red-600 focus:text-red-600"
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />

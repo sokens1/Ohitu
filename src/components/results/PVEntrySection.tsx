@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 import { useNetworkQuality } from '@/hooks/useNetworkQuality';
 
 interface PVEntrySectionProps {
@@ -202,21 +203,12 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         if (electionError) throw electionError;
         setElectionInfo(election);
         
-        // Récupérer uniquement les candidats liés à l'élection sélectionnée
-        const { data: candidatesLinked, error: candidatesError } = await supabase
-          .from('election_candidates')
-          .select(`
-            candidates!candidate_id(id, name, party)
-          `)
-          .eq('election_id', selectedElection);
-        if (candidatesError) throw candidatesError;
-
-        const mappedCandidates = (candidatesLinked || []).map((item: any) => ({
-          id: item.candidates.id,
-          name: item.candidates.name,
-          party: item.candidates.party || 'Indépendant'
-        }));
-
+        // Récupérer les candidats selon le type d'élection
+        // (élection professionnelle → union_lists, standard → election_candidates)
+        const mappedCandidates = await resolveCandidatesForElection(
+          selectedElection,
+          election?.type
+        );
         setCandidatesData(mappedCandidates);
 
         // Pré-remplissage depuis DataEntrySection si présent
@@ -907,7 +899,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   
                   <div>
                     <h4 className="font-medium text-gray-900 mb-2">Participation</h4>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                       <div>
                         <span className="text-gray-600">Votants:</span>
                         <span className="font-semibold ml-2">{formData.votants}</span>
@@ -1002,11 +994,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       {electionInfo && (
         <Card className="gov-card border-l-4 border-l-blue-500">
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-start space-x-4">
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900">{electionInfo.title}</h3>
-                  <div className="flex items-center space-x-4 mt-1">
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
                     <div className="flex items-center space-x-1 text-sm text-gray-600">
                       <Calendar className="w-4 h-4" />
                       <span>{new Date(electionInfo.election_date).toLocaleDateString('fr-FR', { 
@@ -1022,8 +1014,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="flex items-center space-x-1 text-sm text-gray-600">
+              <div className="text-left sm:text-right">
+                <div className="flex items-center space-x-1 text-sm text-gray-600 sm:justify-end">
                   <Users className="w-4 h-4" />
                   <span>{candidatesData.length} candidats</span>
                 </div>
