@@ -65,25 +65,20 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     candidates: prefilledData?.candidates || []
   });
 
+  // Sécurité pour éviter le blocage du scroll et des clics (bug Radix Dialog)
+  useEffect(() => {
+    document.body.style.pointerEvents = 'auto';
+    document.body.style.overflow = 'auto';
+    return () => {
+      document.body.style.pointerEvents = '';
+      document.body.style.overflow = '';
+    };
+  }, []);
+
   // Auto-calculate dates based on election date
   useEffect(() => {
     if (formData.date) {
-      let electionDate: Date;
-      if (!isNaN(Number(formData.date)) && Number(formData.date) > 10000) {
-        // Excel serial date handling
-        electionDate = new Date((Number(formData.date) - 25569) * 86400 * 1000);
-      } else {
-        electionDate = new Date(formData.date);
-        // Fallback for DD/MM/YYYY
-        if (isNaN(electionDate.getTime()) && typeof formData.date === 'string') {
-          const parts = formData.date.split('/');
-          if (parts.length === 3) {
-            electionDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-          }
-        }
-      }
-
-      if (isNaN(electionDate.getTime())) return;
+      const electionDate = new Date(formData.date);
       
       const listDisplay = new Date(electionDate);
       listDisplay.setDate(listDisplay.getDate() - 5);
@@ -99,7 +94,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
 
       setFormData(prev => ({
         ...prev,
-        date: electionDate.toISOString().split('T')[0], // normalize date string
         listDisplayDate: listDisplay.toISOString().split('T')[0],
         secondRoundDate: secondRound.toISOString().split('T')[0],
         recoursStart: recoursStart.toISOString().split('T')[0],
