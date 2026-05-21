@@ -779,7 +779,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <h4 className="font-semibold text-gray-900">{candidate.name}</h4>
-                        <p className="text-sm text-gray-600">{candidate.party}</p>
+                        {candidate.suppleant && (
+                          <p className="text-xs text-gray-700 mt-0.5">Suppléant : {candidate.suppleant}</p>
+                        )}
+                        <p className="text-sm font-medium text-blue-600 mt-0.5">{candidate.party}</p>
                       </div>
                       <div className="w-32">
                         <Input

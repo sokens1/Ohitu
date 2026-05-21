@@ -111,9 +111,10 @@ const ElectionManagementUnified = () => {
         ];
 
         const collegesData = [
-          { "Nom du collège": "Cadres", Code: "cadres" },
-          { "Nom du collège": "Agent de maîtrise", Code: "employes" },
-          { "Nom du collège": "Employés et Ouvriers", Code: "ouvriers" }
+          { "Nom du collège": "Cadre", Code: "cadres" },
+          { "Nom du collège": "Maîtrise", Code: "employes" },
+          { "Nom du collège": "Exécution", Code: "ouvriers" },
+          { "Nom du collège": "Encadrement", Code: "general" }
         ];
 
         const establishmentsData = [

@@ -241,14 +241,29 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         const detailed = (filteredPvsAll || []).map((pv: any) => {
           const b = bureauMap.get(pv.bureau_id);
           const c = b ? centerMap.get(b.center_id) : undefined;
+          
+          const pvCandidateResults = crRows.filter((r: any) => r.pv_id === pv.id);
+          const candidateVotes: Record<string, number> = {};
+          
+          // Initialiser tous les candidats à 0
+          electionCandidates.forEach(cand => {
+             candidateVotes[cand.id] = 0;
+          });
+          
+          // Ajouter les votes du PV
+          pvCandidateResults.forEach((cr: any) => {
+             const cid = cr.candidates?.id || cr.candidate_id;
+             if (candidateVotes[cid] !== undefined) {
+               candidateVotes[cid] += cr.votes || 0;
+             }
+          });
+          
           return {
             center: c?.name || 'Centre',
             bureau: b?.name || 'Bureau',
             inscrits: pv.total_registered || 0, // Utiliser le nombre d'inscrits par défaut du bureau
             votants: pv.total_voters || 0,
-            notreCandidat: 0,
-            adversaire1: 0,
-            adversaire2: 0
+            candidateVotes
           };
         });
         setDetailedResults(detailed);
@@ -841,9 +856,9 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     <TableHead>Bureau</TableHead>
                     <TableHead>Inscrits</TableHead>
                     <TableHead>Votants</TableHead>
-                    <TableHead>Notre Candidat</TableHead>
-                    <TableHead>Adversaire 1</TableHead>
-                    <TableHead>Adversaire 2</TableHead>
+                    {finalResults?.candidates.map((c) => (
+                      <TableHead key={c.id}>{c.name}</TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -853,11 +868,9 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                       <TableCell>{result.bureau}</TableCell>
                       <TableCell>{result.inscrits}</TableCell>
                       <TableCell>{result.votants}</TableCell>
-                      <TableCell className="font-medium text-green-600">
-                        {result.notreCandidat}
-                      </TableCell>
-                      <TableCell>{result.adversaire1}</TableCell>
-                      <TableCell>{result.adversaire2}</TableCell>
+                      {finalResults?.candidates.map((c) => (
+                        <TableCell key={c.id}>{result.candidateVotes?.[c.id] || 0}</TableCell>
+                      ))}
                     </TableRow>
                   ))}
                 </TableBody>

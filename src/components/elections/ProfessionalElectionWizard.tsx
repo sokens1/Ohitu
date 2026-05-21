@@ -44,9 +44,10 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     
     // Collèges
     colleges: prefilledData?.colleges || [
-      { id: '1', name: 'Cadres', type: 'cadres', voters: 0, seats: 1 },
-      { id: '2', name: 'Agent de maîtrise', type: 'employes', voters: 0, seats: 1 },
-      { id: '3', name: 'Employés et Ouvriers', type: 'ouvriers', voters: 0, seats: 1 }
+      { id: '1', name: 'Cadre', type: 'cadres', voters: 0, seats: 1 },
+      { id: '2', name: 'Maîtrise', type: 'employes', voters: 0, seats: 1 },
+      { id: '3', name: 'Exécution', type: 'ouvriers', voters: 0, seats: 1 },
+      { id: '4', name: 'Encadrement', type: 'general', voters: 0, seats: 1 }
     ],
     totalBureaux: prefilledData?.totalBureaux || '1',
     

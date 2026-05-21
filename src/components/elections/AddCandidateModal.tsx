@@ -351,10 +351,10 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                   value={college}
                   onChange={(val) => setCollege(val)}
                   options={[
-                    { value: 'general', label: 'Collège Unique / Général' },
-                    { value: 'cadres', label: 'Cadres' },
-                    { value: 'employes', label: 'Employés' },
-                    { value: 'ouvriers', label: 'Ouvriers' }
+                    { value: 'general', label: 'Encadrement' },
+                    { value: 'cadres', label: 'Cadre' },
+                    { value: 'employes', label: 'Maîtrise' },
+                    { value: 'ouvriers', label: 'Exécution' }
                   ]}
                 />
               )}
@@ -391,10 +391,10 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                 value={college}
                 onChange={(val) => setCollege(val)}
                 options={[
-                  { value: 'general', label: 'Collège Unique / Général' },
-                  { value: 'cadres', label: 'Cadres' },
-                  { value: 'employes', label: 'Employés' },
-                  { value: 'ouvriers', label: 'Ouvriers' }
+                  { value: 'general', label: 'Encadrement' },
+                  { value: 'cadres', label: 'Cadre' },
+                  { value: 'employes', label: 'Maîtrise' },
+                  { value: 'ouvriers', label: 'Exécution' }
                 ]}
               />
 
