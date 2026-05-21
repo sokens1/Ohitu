@@ -9,18 +9,74 @@ import { useNavigate, Link } from 'react-router-dom';
 import type { UserRole } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { Loader2, Eye, EyeOff, Vote, Building, ArrowRight, Shield, CheckCircle, Users, BarChart3 } from 'lucide-react';
-import { fetchAllElections } from '../api/elections';
+import { fetchPublicElections } from '../api/elections';
 import NetworkIndicator from '@/components/NetworkIndicator';
+import { isProfessionalElection } from '@/utils/electionCalculations';
 
 interface Election {
   id: string;
   title: string;
   election_date: string;
   status: string;
+  type?: string;
   description?: string;
   localisation?: string;
   nb_electeurs?: number;
   is_published?: boolean;
+}
+
+function getElectionCardStyle(election: Election) {
+  const title = election.title?.toLowerCase() || '';
+  const description = election.description?.toLowerCase() || '';
+  const localisation = election.localisation?.toLowerCase() || '';
+
+  const isLocal = ['locale', 'locales', 'local', 'municipale', 'municipales'].some(
+    (keyword) =>
+      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+  );
+
+  const isLegislative = ['législative', 'législatives', 'legislative'].some(
+    (keyword) =>
+      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+  );
+
+  const isProfessional =
+    isProfessionalElection(election.type) ||
+    ['professionnelle', 'professionnel', 'syndicat', 'seeg'].some(
+      (keyword) =>
+        title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
+    );
+
+  if (isLocal) {
+    return {
+      bg: 'bg-[#116917]',
+      border: 'border-[#116917]',
+      hoverBg: 'hover:bg-[#116917]',
+      hoverBorder: 'hover:border-[#116917]',
+    };
+  }
+  if (isLegislative) {
+    return {
+      bg: 'bg-[#A51C30]',
+      border: 'border-[#A51C30]',
+      hoverBg: 'hover:bg-[#A51C30]',
+      hoverBorder: 'hover:border-[#A51C30]',
+    };
+  }
+  if (isProfessional) {
+    return {
+      bg: 'bg-emerald-600',
+      border: 'border-emerald-500',
+      hoverBg: 'hover:bg-emerald-500',
+      hoverBorder: 'hover:border-emerald-400',
+    };
+  }
+  return {
+    bg: 'bg-blue-600',
+    border: 'border-blue-600',
+    hoverBg: 'hover:bg-blue-600',
+    hoverBorder: 'hover:border-blue-600',
+  };
 }
 
 const Login = () => {
@@ -47,7 +103,7 @@ const Login = () => {
     const fetchElections = async () => {
       try {
         setElectionsLoading(true);
-        const electionsData = await fetchAllElections();
+        const electionsData = await fetchPublicElections();
         setElections(electionsData || []);
         console.log('Élections chargées:', electionsData); // Debug pour voir les élections disponibles
       } catch (error) {
@@ -124,11 +180,12 @@ const Login = () => {
         <div className="flex-1 flex flex-col items-center justify-center text-center text-white max-w-lg px-4 pt-16">
           {/* Titre principal */}
           <div className="mb-6 lg:mb-8">
-            <h2 className="text-3xl lg:text-4xl font-bold mb-3 lg:mb-4 bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent">
-              MOANDA, 1er Arr.
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-3 lg:mb-4 text-white whitespace-nowrap">
+              Expérimentez autrement une{' '}
+              <span className="text-green-400">élection</span>
             </h2>
             <p className="text-blue-100 text-base lg:text-lg leading-relaxed">
-              Sélectionnez le type d'élections pour accéder aux résultats.
+              Sélectionnez une élection pour accéder aux résultats publiés.
             </p>
           </div>
 
@@ -166,28 +223,12 @@ const Login = () => {
                  {elections
                    .sort((a, b) => new Date(b.election_date).getTime() - new Date(a.election_date).getTime())
                    .map((election) => {
-                     const title = election.title?.toLowerCase() || '';
-                     const description = election.description?.toLowerCase() || '';
-                     const localisation = election.localisation?.toLowerCase() || '';
-                     
-                     const isLocal = ['locale', 'locales', 'local', 'municipale', 'municipales'].some(keyword =>
-                       title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
-                     );
-                     
-                     const isLegislative = ['législative', 'législatives', 'legislative'].some(keyword =>
-                       title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
-                     );
-                     
-                     const bgColor = isLocal ? 'bg-[#116917]' : isLegislative ? 'bg-[#A51C30]' : 'bg-blue-600';
-                     const borderColor = isLocal ? 'border-[#116917]' : isLegislative ? 'border-[#A51C30]' : 'border-blue-600';
-                     const hoverBgColor = isLocal ? 'hover:bg-[#116917]' : isLegislative ? 'hover:bg-[#A51C30]' : 'hover:bg-blue-600';
-                     const hoverBorderColor = isLocal ? 'hover:border-[#116917]' : isLegislative ? 'hover:border-[#A51C30]' : 'hover:border-blue-600';
-                     
+                     const style = getElectionCardStyle(election);
                      return (
                        <button
                          key={election.id}
                          onClick={() => navigate(`/election/${election.id}/results`)}
-                         className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white ${bgColor} ${borderColor} ${hoverBgColor} ${hoverBorderColor}`}
+                         className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                        >
                          <div className="flex items-center justify-between">
                            <div className="text-left">
@@ -245,11 +286,12 @@ const Login = () => {
               </div>
             </div>
             
-            <h2 className="text-2xl font-bold mb-4 bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent tracking-tight leading-tight break-words">
-              MOANDA, 1er Arr.
+            <h2 className="text-lg xs:text-xl sm:text-2xl font-bold mb-4 text-white tracking-tight leading-tight whitespace-nowrap">
+              Expérimentez autrement {' '}
+              <span className="text-green-400"> une élection</span>
             </h2>
             <p className="text-blue-100 text-sm leading-relaxed whitespace-normal break-words">
-            Sélectionnez le type d'élections pour accéder aux résultats.
+            Sélectionnez une élection pour accéder aux résultats publiés.
             </p>
           </div>
 
@@ -287,28 +329,12 @@ const Login = () => {
                 {elections
                   .sort((a, b) => new Date(b.election_date).getTime() - new Date(a.election_date).getTime())
                   .map((election) => {
-                    const title = election.title?.toLowerCase() || '';
-                    const description = election.description?.toLowerCase() || '';
-                    const localisation = election.localisation?.toLowerCase() || '';
-                    
-                    const isLocal = ['locale', 'locales', 'local', 'municipale', 'municipales'].some(keyword =>
-                      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
-                    );
-                    
-                    const isLegislative = ['législative', 'législatives', 'legislative'].some(keyword =>
-                      title.includes(keyword) || description.includes(keyword) || localisation.includes(keyword)
-                    );
-                    
-                    const bgColor = isLocal ? 'bg-[#116917]' : isLegislative ? 'bg-[#A51C30]' : 'bg-blue-600';
-                    const borderColor = isLocal ? 'border-[#116917]' : isLegislative ? 'border-[#A51C30]' : 'border-blue-600';
-                    const hoverBgColor = isLocal ? 'hover:bg-[#116917]' : isLegislative ? 'hover:bg-[#A51C30]' : 'hover:bg-blue-600';
-                    const hoverBorderColor = isLocal ? 'hover:border-[#116917]' : isLegislative ? 'hover:border-[#A51C30]' : 'hover:border-blue-600';
-                    
+                    const style = getElectionCardStyle(election);
                     return (
                       <button
                         key={election.id}
                         onClick={() => navigate(`/election/${election.id}/results`)}
-                        className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white ${bgColor} ${borderColor} ${hoverBgColor} ${hoverBorderColor}`}
+                        className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="text-left flex-1">

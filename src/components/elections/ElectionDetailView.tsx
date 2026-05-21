@@ -38,6 +38,12 @@ import EditBureauModal from './EditBureauModal';
 import CandidateProfileModal from './CandidateProfileModal';
 import InitialsAvatar from '@/components/ui/initials-avatar';
 import { useRBAC } from '@/hooks/useRBAC';
+import {
+  parseEstablishmentsSheet,
+  importEstablishmentsToElection,
+  parseUnionListsSheet,
+  importUnionListsToElection,
+} from '@/utils/excelImport';
 
 interface Election {
   id: string; // UUID
@@ -411,83 +417,31 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           if (!data) throw new Error("Fichier vide");
           const workbook = XLSX.read(data, { type: 'array' });
           const isPro = election.type === 'Élection Professionnelle';
-          const estSheet = isPro 
-            ? (workbook.Sheets["Etablissements"] || workbook.Sheets["Établissements & Bureaux"])
-            : (workbook.Sheets["Établissements & Bureaux"] || workbook.Sheets["Etablissements & Bureaux"]);
-            
-          if (!estSheet) throw new Error("La feuille des établissements est introuvable");
+          const parsedCenters = parseEstablishmentsSheet(workbook, isPro);
+          if (parsedCenters.length === 0) {
+            throw new Error('Aucun établissement valide trouvé dans le fichier.');
+          }
 
-          const estRows = XLSX.utils.sheet_to_json<any>(estSheet);
-          const centerGroups: { [key: string]: any } = {};
-          
-          estRows.forEach((row: any) => {
-            const region = row["Region__Localisation"] || row["Région / Localisation"] || row["Région"] || "Général";
-            const name = row["Nom_Etablissement__Site"] || row["Nom Établissement / Site"] || row["Site"] || "";
-            if (!name) return;
-            const resp = row["Responsable_Etablissement"] || row["Responsable Établissement"] || "";
-            const phone = String(row["Contact_Telephone"] || row["Contact Téléphone"] || "");
-            
-            let totalVoters = 0;
-            let boothCount = 0;
-            let booths = [];
-            
-            if (isPro) {
-              const vEnc = Number(row["Nbre_electeurs_Encadrement"] || 0);
-              const vCad = Number(row["Nbre_electeurs_Cadre"] || 0);
-              const vMai = Number(row["Nbre _electeurs_Maitrise"] || row["Nbre_electeurs_Maitrise"] || 0);
-              const vExe = Number(row["Nbre _electeurs_Execution"] || row["Nbre_electeurs_Execution"] || 0);
-              totalVoters = vEnc + vCad + vMai + vExe;
-              boothCount = 1; // Un bureau par ligne d'établissement par défaut
-              if (vEnc > 0) booths.push({ name: name + " - Encadrement", registered_voters: vEnc });
-              if (vCad > 0) booths.push({ name: name + " - Cadres", registered_voters: vCad });
-              if (vMai > 0) booths.push({ name: name + " - Maîtrise", registered_voters: vMai });
-              if (vExe > 0) booths.push({ name: name + " - Exécution", registered_voters: vExe });
-              if (booths.length === 0) booths.push({ name: name + " - Bureau unique", registered_voters: totalVoters });
-            } else {
-              const boothName = row["Nom Bureau de vote"] || "";
-              totalVoters = Number(row["Nombre d'électeurs"] || 0);
-              boothCount = 1;
-              if (boothName) booths.push({ name: boothName, registered_voters: totalVoters });
-            }
-            
-            const groupKey = `${region}_${name}`;
-            if (!centerGroups[groupKey]) {
-              centerGroups[groupKey] = { name, address: region, contact_name: resp, contact_phone: phone, voters: 0, bureaux: 0, booths: [] };
-            }
-            centerGroups[groupKey].voters += totalVoters;
-            centerGroups[groupKey].bureaux += boothCount;
-            centerGroups[groupKey].booths.push(...booths);
-          });
+          const entId = enterprise?.id || election.enterpriseId || (election as any).enterprise_id;
+          const importResult = await importEstablishmentsToElection(
+            supabase,
+            election.id,
+            entId,
+            parsedCenters
+          );
 
-          let importedCount = 0;
-          for (const key of Object.keys(centerGroups)) {
-            const center = centerGroups[key];
-            const { data: centerData, error: centerErr } = await supabase.from('voting_centers').insert({
-              enterprise_id: enterprise?.id || election.enterpriseId || (election as any).enterprise_id,
-              name: center.name,
-              address: center.address,
-              contact_name: center.contact_name,
-              contact_phone: center.contact_phone,
-              total_voters: center.voters,
-              total_bureaux: center.bureaux
-            }).select().single();
-
-            if (centerErr || !centerData) continue;
-
-            const { error: linkErr } = await supabase.from('election_centers').insert({ election_id: election.id, center_id: centerData.id });
-            if (!linkErr) importedCount++;
-
-            if (center.booths.length > 0) {
-              const bureauxToInsert = center.booths.map((b: any) => ({
-                center_id: centerData.id,
-                name: b.name,
-                registered_voters: b.registered_voters
-              }));
-              await supabase.from('voting_bureaux').insert(bureauxToInsert);
+          if (importResult.linked === 0) {
+            const detail = importResult.errors[0] || 'vérifiez le fichier et les noms déjà en base';
+            toast.error(`Import impossible : ${detail}`);
+          } else {
+            const parts = [`${importResult.linked} établissement(s) rattaché(s)`];
+            if (importResult.created > 0) parts.push(`${importResult.created} créé(s)`);
+            if (importResult.skipped > 0) parts.push(`${importResult.skipped} ignoré(s)`);
+            toast.success(parts.join(' · '));
+            if (importResult.errors.length > 0) {
+              console.warn('Import établissements — avertissements:', importResult.errors);
             }
           }
-          
-          toast.success(`${importedCount} centres importés avec succès`);
           fetchCenters();
           if (onDataChange) onDataChange();
         } catch (err: any) {
@@ -551,11 +505,11 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
       if (election.type === 'Élection Professionnelle') {
         const link = document.createElement('a');
         link.href = '/modele_listes.xlsx';
-        link.download = 'modele_listes.xlsx';
+        link.download = 'listes.xlsx';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        toast.success("Modèle Listes téléchargé !");
+        toast.success('Modèle listes.xlsx téléchargé (feuille « Listes »)');
         return;
       }
 
@@ -589,136 +543,29 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         try {
           const data = evt.target?.result;
           if (!data) throw new Error("Fichier vide");
+          const workbook = XLSX.read(data, { type: 'array' });
           const isPro = election.type === 'Élection Professionnelle';
-          const candSheet = isPro
-            ? (workbook.Sheets["Listes"] || workbook.Sheets["Candidats"])
-            : (workbook.Sheets["Candidats & Syndicats"] || workbook.Sheets["Candidats"]);
+          const parsedLists = parseUnionListsSheet(workbook, isPro);
 
-          if (!candSheet) throw new Error("La feuille des listes est introuvable");
-
-          const candRows = XLSX.utils.sheet_to_json<any>(candSheet);
-          const unionLists: any[] = [];
-          
-          candRows.forEach((row: any) => {
-            let unionAcronym = "";
-            let unionName = "";
-            let college = "general";
-            let etablissement = "";
-            let titulaireName = "";
-            let titulaireGenre = "";
-            let titulaireAnciennete = "";
-            let suppleantName = "";
-            let suppleantGenre = "";
-
-            if (isPro) {
-              unionAcronym = row["Acronyme_Representation"] || row["Sigle"] || "";
-              unionName = row["Representation"] || row["Nom"] || "";
-              etablissement = row["Etablissement"] || "";
-              
-              const collegeVal = String(row["College"] || "").toLowerCase();
-              if (collegeVal.includes('cadre')) college = "cadres";
-              else if (collegeVal.includes('maitrise') || collegeVal.includes('maîtrise')) college = "employes";
-              else if (collegeVal.includes('execution') || collegeVal.includes('exécution')) college = "ouvriers";
-              else if (collegeVal.includes('encadrement')) college = "general";
-              
-              titulaireName = row["Titulaire"] || "";
-              titulaireGenre = row["Genre_Titulaire"] || "";
-              titulaireAnciennete = row["Anciennete_Titulaire"] || "";
-              
-              suppleantName = row["Suppleant"] || row["Suppléant"] || "";
-              suppleantGenre = row["Genre_Suppleant"] || "";
-            } else {
-              unionAcronym = row["Sigle Syndicat"] || row["Sigle"] || row["Acronyme"] || "";
-              unionName = row["Nom Complet Syndicat"] || row["Nom Syndicat"] || row["Syndicat"] || "";
-              const rawCollege = row["Collège concerné"] || row["Collège"] || row["College"] || "general";
-              titulaireName = row["Nom complet du Titulaire"] || row["Titulaire"] || "";
-              suppleantName = row["Nom complet du Suppléant"] || row["Suppléant"] || row["Suppleant"] || "";
-              
-              let normalizedCollege = rawCollege.toLowerCase().trim();
-              if (normalizedCollege.includes('maitrise') || normalizedCollege.includes('maîtrise')) normalizedCollege = 'employes';
-              else if (normalizedCollege.includes('execution') || normalizedCollege.includes('exécution')) normalizedCollege = 'ouvriers';
-              else if (normalizedCollege.includes('cadre')) normalizedCollege = 'cadres';
-              else normalizedCollege = 'general';
-              college = normalizedCollege;
-            }
-            
-            if (!unionName && !unionAcronym) return;
-            unionLists.push({ 
-              unionAcronym, 
-              unionName: unionName || unionAcronym, 
-              college,
-              etablissement,
-              titulaireName, 
-              titulaireGenre,
-              titulaireAnciennete,
-              suppleantName,
-              suppleantGenre
-            });
-          });
-
-          let importedCount = 0;
-          for (const cand of unionLists) {
-            // Find or create union
-            let unionId = null;
-            let query = supabase.from('unions').select('id');
-            if (cand.unionAcronym && cand.unionName) {
-              query = query.or(`acronym.eq.${cand.unionAcronym},name.eq.${cand.unionName}`);
-            } else if (cand.unionAcronym) {
-              query = query.eq('acronym', cand.unionAcronym);
-            } else {
-              query = query.eq('name', cand.unionName);
-            }
-            
-            const { data: existingUnion } = await query.maybeSingle();
-
-            if (existingUnion) {
-              unionId = existingUnion.id;
-            } else {
-              const { data: newUnion, error: newUnionErr } = await supabase.from('unions').insert({
-                name: cand.unionName,
-                acronym: cand.unionAcronym
-              }).select().maybeSingle();
-              
-              if (newUnionErr) {
-                console.error("Erreur lors de la création du syndicat:", newUnionErr);
-              }
-              if (newUnion) unionId = newUnion.id;
-            }
-
-            if (!unionId) continue;
-
-            const titulaires = [];
-            if (cand.titulaireName) {
-              titulaires.push({ 
-                name: cand.titulaireName, 
-                role: 'Tête de liste',
-                genre: cand.titulaireGenre,
-                anciennete: cand.titulaireAnciennete,
-                etablissement: cand.etablissement
-              });
-            }
-            const suppleants = [];
-            if (cand.suppleantName) {
-              suppleants.push({
-                name: cand.suppleantName,
-                role: 'Suppléant',
-                genre: cand.suppleantGenre
-              });
-            }
-
-            const { error: listErr } = await supabase.from('union_lists').insert({
-              election_id: election.id,
-              union_id: unionId,
-              college: cand.college,
-              titulaires: titulaires,
-              suppleants: suppleants,
-            });
-
-            if (!listErr) importedCount++;
-            else console.error("Erreur d'insertion union_lists:", listErr);
+          if (parsedLists.length === 0) {
+            throw new Error(
+              'Aucune liste trouvée dans le fichier. Remplissez au moins une ligne sous les en-têtes (feuille « Listes »).'
+            );
           }
-          
-          toast.success(`${importedCount} listes/candidats importés avec succès`);
+
+          const importResult = await importUnionListsToElection(supabase, election.id, parsedLists);
+
+          if (importResult.imported === 0) {
+            const detail = importResult.errors[0] || 'vérifiez les colonnes du modèle listes.xlsx (feuille « Listes »)';
+            toast.error(`Import impossible : ${detail}`);
+          } else {
+            const parts = [`${importResult.imported} liste(s) importée(s)`];
+            if (importResult.skipped > 0) parts.push(`${importResult.skipped} déjà présente(s) ou ignorée(s)`);
+            toast.success(parts.join(' · '));
+            if (importResult.errors.length > 0) {
+              console.warn('Import listes — avertissements:', importResult.errors);
+            }
+          }
           fetchCandidates();
           if (onDataChange) onDataChange();
         } catch (err: any) {
@@ -960,10 +807,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </div>
               
               <Badge 
-                variant={getStatusVariant(election.status)}
-                className="px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium"
+                variant={election.hiddenFromPublic ? 'outline' : getStatusVariant(election.status)}
+                className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium ${
+                  election.hiddenFromPublic
+                    ? 'bg-violet-100 text-violet-800 border-violet-300 hover:bg-violet-100'
+                    : ''
+                }`}
               >
-                {election.status}
+                {election.hiddenFromPublic ? 'Masqué au public' : election.status}
               </Badge>
             </div>
             
@@ -1126,10 +977,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Statut</label>
                       <div className="mt-1">
                         <Badge 
-                          variant={getStatusVariant(election.status)}
-                          className="px-2 py-1 text-xs font-medium"
+                          variant={election.hiddenFromPublic ? 'outline' : getStatusVariant(election.status)}
+                          className={`px-2 py-1 text-xs font-medium ${
+                            election.hiddenFromPublic
+                              ? 'bg-violet-100 text-violet-800 border-violet-300'
+                              : ''
+                          }`}
                         >
-                          {election.status}
+                          {election.hiddenFromPublic ? 'Masqué au public' : election.status}
                         </Badge>
                       </div>
                     </div>

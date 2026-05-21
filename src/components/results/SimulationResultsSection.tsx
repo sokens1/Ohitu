@@ -11,6 +11,11 @@ import { Trophy, Info, Users, TrendingUp, Filter, AlertTriangle, Calculator, Che
 import { supabase } from '@/lib/supabase';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
+import {
+  getElectionElectorsTotal,
+  getRegisteredVotersLabel,
+  isProfessionalElection,
+} from '@/utils/electionCalculations';
 
 interface SimulationResultsSectionProps {
   electionId: string;
@@ -55,6 +60,7 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
   });
   const [loading, setLoading] = useState(false);
   const [electionData, setElectionData] = useState<any>(null);
+  const [totalElectorsElection, setTotalElectorsElection] = useState(0);
   const [realAbstentionRate, setRealAbstentionRate] = useState<number | null>(null);
   const [realSuffrageExprime, setRealSuffrageExprime] = useState<number | null>(null);
   
@@ -90,6 +96,8 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
         if (electionError) throw electionError;
 
         setElectionData(electionInfo);
+        const electorsTotal = await getElectionElectorsTotal(electionId, electionInfo?.type);
+        setTotalElectorsElection(electorsTotal);
 
         // Vérifier si la date de création est postérieure au 01/10/2025
         const creationDate = new Date(electionInfo.created_at);
@@ -435,7 +443,9 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
       }, 0);
       
       const totalKnown = validatedInscrits + simulatedBureauxInscrits;
-      const remainingInscritsToSimulate = electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - totalKnown) : 0;
+      const remainingInscritsToSimulate = totalElectorsElection > 0
+        ? Math.max(0, totalElectorsElection - totalKnown)
+        : (electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - totalKnown) : 0);
       
       totalSimulatedGlobal = Math.round(
         (remainingInscritsToSimulate * participationRateGlobal / 100) * 
@@ -668,9 +678,11 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
       sum + Math.round((bureau.registered_voters * participationRate / 100)), 0);
     
     const sumPendingBureaux = pendingBureaux.reduce((sum, bureau) => sum + (bureau.registered_voters || 0), 0);
-    const totalPendingInscrits = sumPendingBureaux > 0 
+    const totalPendingInscrits = sumPendingBureaux > 0
       ? sumPendingBureaux
-      : (electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - totalValidatedInscrits) : 0);
+      : (totalElectorsElection > 0
+          ? Math.max(0, totalElectorsElection - totalValidatedInscrits)
+          : (electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - totalValidatedInscrits) : 0));
     
     return {
       totalValidatedBureaux: validatedBureaux.length,
@@ -682,7 +694,7 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
       globalAbstention: simulationParams.globalAbstention,
       suffrageExprime: simulationParams.suffrageExprime
     };
-  }, [validatedBureaux, pendingBureaux, simulationParams, electionData]);
+  }, [validatedBureaux, pendingBureaux, simulationParams, electionData, totalElectorsElection]);
 
 
   const handleAbstentionChange = (value: number[]) => {
@@ -958,7 +970,7 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                  </div>
                  <div className="text-2xl font-bold text-blue-900">{simulationStats?.totalValidatedBureaux ?? 0}</div>
                  <div className="text-xs text-blue-600">
-                   <div>{(simulationStats?.totalValidatedVoters ?? 0).toLocaleString()} votants • {(simulationStats?.totalValidatedInscrits ?? 0).toLocaleString()} inscrits</div>
+                   <div>{(simulationStats?.totalValidatedVoters ?? 0).toLocaleString()} votants • {(simulationStats?.totalValidatedInscrits ?? 0).toLocaleString()} {getRegisteredVotersLabel(electionData?.type).toLowerCase()}</div>
                  </div>
                 </div>
               
@@ -973,8 +985,9 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                     const sumPending = pendingBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0);
                     if (sumPending > 0) return sumPending;
                     const valInscrits = validatedBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0);
-                    return electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - valInscrits) : 0;
-                  })().toLocaleString()} inscrits
+                    const base = totalElectorsElection > 0 ? totalElectorsElection : (electionData?.nb_electeurs || 0);
+                    return base > 0 ? Math.max(0, base - valInscrits) : 0;
+                  })().toLocaleString()} {getRegisteredVotersLabel(electionData?.type).toLowerCase()}
                 </div>
               </div>
             </div>

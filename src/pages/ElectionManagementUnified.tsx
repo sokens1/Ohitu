@@ -45,6 +45,11 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
+import {
+  importEstablishmentsToElection,
+  normalizeWizardCandidates,
+  importUnionListsToElection,
+} from '@/utils/excelImport';
 
 const ElectionManagementUnified = () => {
   const { user } = useAuth();
@@ -320,16 +325,26 @@ const ElectionManagementUnified = () => {
         });
       }
 
-      // Si pas de centres ou si on veut aussi les collèges (pro)
+      const { data: electionRow } = await supabase
+        .from('elections')
+        .select('type')
+        .eq('id', electionId)
+        .maybeSingle();
+
       const { data: collegesData } = await supabase
         .from('electoral_colleges')
         .select('total_voters')
         .eq('election_id', electionId);
-        
+
       if (collegesData && collegesData.length > 0) {
-        const collegesTotal = collegesData.reduce((sum, college) => sum + (Number(college.total_voters) || 0), 0);
-        // Pour les pro, les collèges sont la source primaire
-        if (!hasCenters) {
+        const collegesTotal = collegesData.reduce(
+          (sum, college) => sum + (Number(college.total_voters) || 0),
+          0
+        );
+        // Élections pro : les collèges sont la source primaire des effectifs
+        if (electionRow?.type === 'Élection Professionnelle') {
+          if (collegesTotal > 0) totalElecteurs = collegesTotal;
+        } else if (!hasCenters && collegesTotal > 0) {
           totalElecteurs = collegesTotal;
         }
       }
@@ -431,17 +446,19 @@ const ElectionManagementUnified = () => {
             });
           }
 
-          // Pour les élections professionnelles, vérifier aussi les collèges électoraux
+          // Élections pro : effectifs des collèges électoraux en priorité
           if (election.type === 'Élection Professionnelle') {
             const { data: collegesData } = await supabase
               .from('electoral_colleges')
               .select('total_voters')
               .eq('election_id', election.id);
-            
+
             if (collegesData && collegesData.length > 0) {
-              const collegesTotal = collegesData.reduce((sum, college) => sum + (Number(college.total_voters) || 0), 0);
-              // Si on n'a pas de centres, on prend le total des collèges
-              if (totalElecteurs === 0) {
+              const collegesTotal = collegesData.reduce(
+                (sum, college) => sum + (Number(college.total_voters) || 0),
+                0
+              );
+              if (collegesTotal > 0) {
                 totalElecteurs = collegesTotal;
               }
             }
@@ -502,11 +519,14 @@ const ElectionManagementUnified = () => {
           commune: election.commune,
           arrondissement: election.arrondissement
         });
+        const isPublicVisible = election.is_public_visible !== false;
+        const dbStatus = (election.status || 'À venir') as Election['status'];
         return {
           id: String(election.id),
           title: election.title,
           type: election.type || 'Législatives',
-          status: election.status || 'À venir',
+          status: dbStatus,
+          hiddenFromPublic: !isPublicVisible,
           date: new Date(election.election_date || election.created_at),
           description: election.description || '',
           location: {
@@ -592,7 +612,9 @@ const ElectionManagementUnified = () => {
       election.location.commune.toLowerCase().includes(searchQuery.toLowerCase()) ||
       election.location.province.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesStatus = statusFilter === 'all' || election.status === statusFilter;
+    const matchesStatus =
+      statusFilter === 'all' ||
+      (statusFilter === '__hidden__' ? !!election.hiddenFromPublic : election.status === statusFilter);
     const matchesType = typeFilter === 'all' || election.type === typeFilter;
     const electionYear = new Date(election.date).getFullYear().toString();
     const electionMonth = (new Date(election.date).getMonth() + 1).toString();
@@ -631,9 +653,32 @@ const ElectionManagementUnified = () => {
         return 'default';
       case 'red':
         return 'destructive';
+      case 'hidden':
+        return 'outline';
       default:
         return 'secondary';
     }
+  };
+
+  type StatusBadgeVariant = 'default' | 'secondary' | 'outline' | 'destructive';
+
+  const getElectionStatusBadge = (election: Election) => {
+    if (election.hiddenFromPublic) {
+      return {
+        label: 'Masqué au public',
+        variant: 'outline' as StatusBadgeVariant,
+        className:
+          'bg-violet-100 text-violet-800 border-violet-300 hover:bg-violet-100 font-medium',
+        dataStatus: 'hidden',
+      };
+    }
+    const color = getStatusColor(election.status);
+    return {
+      label: election.status,
+      variant: getStatusVariant(color) as StatusBadgeVariant,
+      className: '',
+      dataStatus: color,
+    };
   };
 
   const handleViewElection = (election: Election) => {
@@ -990,18 +1035,62 @@ const ElectionManagementUnified = () => {
     try {
       const { error } = await supabase
         .from('elections')
-        .update({ is_published: false, status: 'Annulée' })
+        .update({
+          is_public_visible: false,
+          status: 'Annulée',
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', election.id);
-        
-      if (error) throw error;
-      
-      // Update local state by refetching
+
+      if (error) {
+        if (error.code === 'PGRST204' || error.code === '42703') {
+          toast.error(
+            "Migration requise : exécutez le fichier api/migration_election_public_visibility.sql dans l'éditeur SQL Supabase, puis réessayez."
+          );
+          return;
+        }
+        throw error;
+      }
+
       await refreshElectionsData();
-      
-      toast.success('Élection désactivée avec succès');
-    } catch (error: any) {
+
+      toast.success(
+        "Élection masquée du public. Les résultats publiés restent en base ; réactivez pour les réafficher."
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Erreur lors de la désactivation:', error);
-      toast.error(`Erreur lors de la désactivation: ${error?.message || error}`);
+      toast.error(`Erreur lors de la désactivation : ${message}`);
+    }
+  };
+
+  const handleReactivateElection = async (election: Election) => {
+    try {
+      const { error } = await supabase
+        .from('elections')
+        .update({
+          is_public_visible: true,
+          status: 'Terminée',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', election.id);
+
+      if (error) {
+        if (error.code === 'PGRST204' || error.code === '42703') {
+          toast.error(
+            "Migration requise : exécutez le fichier api/migration_election_public_visibility.sql dans l'éditeur SQL Supabase, puis réessayez."
+          );
+          return;
+        }
+        throw error;
+      }
+
+      await refreshElectionsData();
+      toast.success("Élection réactivée : elle réapparaît sur les pages publiques.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Erreur lors de la réactivation:', error);
+      toast.error(`Erreur lors de la réactivation : ${message}`);
     }
   };
 
@@ -1393,113 +1482,37 @@ const ElectionManagementUnified = () => {
         }
       }
 
-      // Insérer les établissements & bureaux importés
+      // Insérer les établissements & bureaux importés (réutilise les noms déjà en base)
       if (electionData.votingCenters && electionData.votingCenters.length > 0) {
-        for (const center of electionData.votingCenters) {
-          // Créer le voting_center
-          const { data: centerData, error: centerErr } = await supabase
-            .from('voting_centers')
-            .insert({
-              name: center.name,
-              address: center.address,
-              contact_name: center.contactName || 'N/A',
-              contact_phone: center.contactPhone || 'N/A',
-              total_voters: center.voters || 0,
-              total_bureaux: center.bureaux || 0,
-              enterprise_id: enterprise.id
-            })
-            .select()
-            .single();
-
-          if (centerErr) {
-            console.error('Erreur lors de la création du centre de vote:', centerErr);
-            continue;
-          }
-
-          // Lier le centre à l'élection
-          const { error: linkErr } = await supabase
-            .from('election_centers')
-            .insert({
-              election_id: electionId,
-              center_id: centerData.id
-            });
-
-          if (linkErr) {
-            console.error('Erreur lors de la liaison du centre:', linkErr);
-          }
-
-          // Insérer les bureaux de vote pour ce centre
-          if (center.booths && center.booths.length > 0) {
-            const boothsToInsert = center.booths.map((booth: any) => ({
-              name: booth.name,
-              center_id: centerData.id,
-              registered_voters: booth.voters || 0,
-              president_name: 'N/A',
-              president_phone: '000000000',
-              urns_count: 0
-            }));
-
-            const { error: boothErr } = await supabase
-              .from('voting_bureaux')
-              .insert(boothsToInsert);
-
-            if (boothErr) {
-              console.error('Erreur lors de la création des bureaux:', boothErr);
-            }
-          }
+        const centersPayload = electionData.votingCenters.map((center: any) => ({
+          name: center.name,
+          address: center.address || 'Général',
+          contact_name: center.contactName || 'N/A',
+          contact_phone: center.contactPhone || null,
+          voters: center.voters || 0,
+          bureaux: center.bureaux || 0,
+          booths: (center.booths || []).map((booth: any) => ({
+            name: booth.name,
+            registered_voters: booth.voters ?? booth.registered_voters ?? 0,
+          })),
+        }));
+        const importResult = await importEstablishmentsToElection(
+          supabase,
+          electionId,
+          enterprise.id,
+          centersPayload
+        );
+        if (importResult.errors.length > 0) {
+          console.warn('Import établissements (création élection):', importResult.errors);
         }
       }
 
-      // Insérer les listes syndicales/candidats importés
+      // Insérer les listes syndicales importées (format wizard ou Excel plat)
       if (electionData.candidates && electionData.candidates.length > 0) {
-        for (const cand of electionData.candidates) {
-          // Rechercher si le syndicat existe déjà
-          let unionId = null;
-          let query = supabase.from('unions').select('id');
-          if (cand.unionAcronym && cand.unionName) {
-            query = query.or(`acronym.eq.${cand.unionAcronym},name.eq.${cand.unionName}`);
-          } else if (cand.unionAcronym) {
-            query = query.eq('acronym', cand.unionAcronym);
-          } else {
-            query = query.eq('name', cand.unionName);
-          }
-          
-          const { data: existingUnion } = await query.maybeSingle();
-
-          if (existingUnion) {
-            unionId = existingUnion.id;
-          } else {
-            // Créer le syndicat
-            const { data: newUnionData, error: newUnionErr } = await supabase
-              .from('unions')
-              .insert({
-                name: cand.unionName,
-                acronym: cand.unionAcronym
-              })
-              .select()
-              .single();
-
-            if (newUnionErr) {
-              console.error('Erreur lors de la création du syndicat:', newUnionErr);
-              continue;
-            }
-            unionId = newUnionData.id;
-          }
-
-          // Créer la liste (union_list)
-          const { error: listErr } = await supabase
-            .from('union_lists')
-            .insert({
-              election_id: electionId,
-              union_id: unionId,
-              college: cand.college || 'general',
-              titulaires: cand.titulaireName ? [{ name: cand.titulaireName, role: 'Tête de liste' }] : [],
-              suppleants: cand.suppleantName ? [{ name: cand.suppleantName, role: 'Suppléant' }] : []
-            });
-
-          if (listErr) {
-            console.error('Erreur lors de la création de la liste syndicale:', listErr);
-          }
+        const listsPayload = normalizeWizardCandidates(electionData.candidates);
+        const listsResult = await importUnionListsToElection(supabase, electionId, listsPayload);
+        if (listsResult.errors.length > 0) {
+          console.warn('Import listes (création élection):', listsResult.errors);
         }
       }
 
@@ -1752,6 +1765,7 @@ const ElectionManagementUnified = () => {
                     <SelectItem value="En cours">En cours</SelectItem>
                     <SelectItem value="Terminée">Terminée</SelectItem>
                     <SelectItem value="Annulée">Annulée</SelectItem>
+                    <SelectItem value="__hidden__">Masqué au public</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -1892,7 +1906,7 @@ const ElectionManagementUnified = () => {
               {filteredElections.map((election) => (
                 <Card 
                   key={election.id} 
-                  className={`election-card group transition-all duration-300 ${election.status === 'Annulée' ? 'opacity-60 bg-gray-50 border-dashed border-gray-300 grayscale-[0.5]' : 'hover:shadow-lg'}`}
+                  className={`election-card group transition-all duration-300 ${election.hiddenFromPublic ? 'opacity-60 bg-violet-50/40 border-dashed border-violet-200' : 'hover:shadow-lg'}`}
                 >
                   <CardHeader className="p-3 sm:p-4">
                     <div className="flex items-start justify-between gap-2">
@@ -1900,13 +1914,18 @@ const ElectionManagementUnified = () => {
                         <CardTitle className="text-sm sm:text-base font-semibold group-hover:text-primary-blue mb-1 sm:mb-2 line-clamp-2 leading-snug">
                           {election.title}
                         </CardTitle>
+                        {(() => {
+                          const badge = getElectionStatusBadge(election);
+                          return (
                         <Badge 
-                          variant={getStatusVariant(getStatusColor(election.status))}
-                          className="status-badge text-[10px] px-2 py-0.5"
-                          data-status={getStatusColor(election.status)}
+                          variant={badge.variant}
+                          className={`status-badge text-[10px] px-2 py-0.5 ${badge.className}`}
+                          data-status={badge.dataStatus}
                         >
-                          {election.status}
+                          {badge.label}
                         </Badge>
+                          );
+                        })()}
                       </div>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -1941,10 +1960,17 @@ const ElectionManagementUnified = () => {
                           </DropdownMenuItem>
                           )}
                           <DropdownMenuSeparator />
+                          {election.hiddenFromPublic ? (
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleReactivateElection(election); }}>
+                            <span className="mr-2 opacity-70">▶</span>
+                            Réactiver (vue publique)
+                          </DropdownMenuItem>
+                          ) : (
                           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeactivateElection(election); }}>
                             <span className="mr-2 opacity-70">⏸</span>
-                            Désactiver
+                            Masquer du public
                           </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
                             <span className="mr-2 opacity-70">📦</span>
                             Archiver
@@ -2068,7 +2094,7 @@ const ElectionManagementUnified = () => {
               {filteredElections.map((election) => (
                 <Card
                   key={election.id}
-                  className={`election-card group transition-all duration-300 ${election.status === 'Annulée' ? 'opacity-60 bg-gray-50 border-dashed border-gray-300 grayscale-[0.5]' : 'hover:shadow-lg'}`}
+                  className={`election-card group transition-all duration-300 ${election.hiddenFromPublic ? 'opacity-60 bg-violet-50/40 border-dashed border-violet-200' : 'hover:shadow-lg'}`}
                 >
                   <div className="p-3 sm:p-4">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
@@ -2111,10 +2137,17 @@ const ElectionManagementUnified = () => {
                               </DropdownMenuItem>
                               )}
                               <DropdownMenuSeparator />
+                              {election.hiddenFromPublic ? (
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleReactivateElection(election); }}>
+                                <span className="mr-2 opacity-70">▶</span>
+                                Réactiver (vue publique)
+                              </DropdownMenuItem>
+                              ) : (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeactivateElection(election); }}>
                                 <span className="mr-2 opacity-70">⏸</span>
-                                Désactiver
+                                Masquer du public
                               </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
                                 <span className="mr-2 opacity-70">📦</span>
                                 Archiver
@@ -2124,13 +2157,18 @@ const ElectionManagementUnified = () => {
                         </div>
                         
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mb-3">
+                          {(() => {
+                            const badge = getElectionStatusBadge(election);
+                            return (
                           <Badge
-                            variant={getStatusVariant(getStatusColor(election.status))}
-                            className="status-badge text-xs px-2 py-1 w-fit"
-                            data-status={getStatusColor(election.status)}
+                            variant={badge.variant}
+                            className={`status-badge text-xs px-2 py-1 w-fit ${badge.className}`}
+                            data-status={badge.dataStatus}
                           >
-                            {election.status}
+                            {badge.label}
                           </Badge>
+                            );
+                          })()}
                           
                           <div className="flex items-center text-gray-600 text-xs sm:text-sm">
                             <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 text-gray-500 flex-shrink-0" />

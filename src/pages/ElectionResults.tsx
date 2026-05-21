@@ -7,12 +7,81 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchElectionById, fetchAllElections } from '../api/elections';
+import { fetchElectionById, fetchPublicElections } from '../api/elections';
 import { fetchElectionSummary, fetchCenterSummary, fetchBureauSummary, fetchCenterSummaryByCandidate, fetchBureauSummaryByCandidate } from '../api/results';
 import { toast } from 'sonner';
 import SEOHead from '@/components/SEOHead';
-import CrossAnalysisSection from '@/components/results/CrossAnalysisSection';
+// import CrossAnalysisSection from '@/components/results/CrossAnalysisSection'; // Vue publique : section masquée pour l'instant
 import NetworkIndicator from '@/components/NetworkIndicator';
+import {
+  getElectionElectorsTotal,
+  getRegisteredVotersLabel,
+  isProfessionalElection,
+} from '@/utils/electionCalculations';
+import { isElectionPublishedForPublic } from '@/utils/electionVisibility';
+
+type CollegeDetailRow = {
+  collegeName: string;
+  syndicatName: string;
+  votes: number;
+  seats: number;
+};
+
+function allocateSeatsProportional(
+  entries: { id: string; votes: number }[],
+  totalSeats: number
+): Map<string, number> {
+  const result = new Map<string, number>();
+  if (totalSeats <= 0 || entries.length === 0) return result;
+  const totalVotes = entries.reduce((s, e) => s + e.votes, 0);
+  if (totalVotes <= 0) return result;
+
+  let allocated = 0;
+  const remainders: { id: string; remainder: number }[] = [];
+  entries.forEach(({ id, votes }) => {
+    const exact = (totalSeats * votes) / totalVotes;
+    const floor = Math.floor(exact);
+    result.set(id, floor);
+    allocated += floor;
+    remainders.push({ id, remainder: exact - floor });
+  });
+  remainders.sort((a, b) => b.remainder - a.remainder);
+  let i = 0;
+  while (allocated < totalSeats && i < remainders.length) {
+    const id = remainders[i].id;
+    result.set(id, (result.get(id) || 0) + 1);
+    allocated++;
+    i++;
+  }
+  return result;
+}
+
+function getCandidateCollegeRows(
+  candidateBureaux: Array<{ college_votes?: Record<string, number> }>,
+  totalSeats: number | undefined,
+  totalVotes: number
+): { college: string; votes: number; seats: number }[] {
+  const collegeAgg: Record<string, number> = {};
+  candidateBureaux.forEach((b) => {
+    if (b.college_votes) {
+      Object.entries(b.college_votes).forEach(([cName, votes]) => {
+        collegeAgg[cName] = (collegeAgg[cName] || 0) + (Number(votes) || 0);
+      });
+    }
+  });
+  const entries = Object.entries(collegeAgg).map(([college, votes]) => ({ id: college, votes }));
+  const seatMap = allocateSeatsProportional(
+    entries,
+    totalSeats && totalVotes > 0 ? totalSeats : 0
+  );
+  return Object.entries(collegeAgg)
+    .map(([college, votes]) => ({
+      college,
+      votes,
+      seats: seatMap.get(college) || 0,
+    }))
+    .sort((a, b) => b.votes - a.votes);
+}
 
 // Icone WhatsApp (SVG minimal)
 const WhatsAppIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -30,6 +99,7 @@ interface ElectionData {
   description?: string;
   localisation?: string;
   is_published?: boolean;
+  is_public_visible?: boolean;
   nb_electeurs?: number;
   cover_image_url?: string;
 }
@@ -244,9 +314,10 @@ const ElectionResults: React.FC = () => {
   const [results, setResults] = useState<ElectionResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'center' | 'bureau'>('bureau');
+  const [viewMode, setViewMode] = useState<'center' | 'bureau' | 'college'>('bureau');
   const [centerRows, setCenterRows] = useState<any[]>([]);
   const [bureauRows, setBureauRows] = useState<any[]>([]);
+  const [collegeDetailRows, setCollegeDetailRows] = useState<CollegeDetailRow[]>([]);
   const [openCandidateId, setOpenCandidateId] = useState<string | null>(null);
   const [candidateCenters, setCandidateCenters] = useState<any[]>([]);
   const [candidateBureaux, setCandidateBureaux] = useState<any[]>([]);
@@ -283,8 +354,10 @@ const ElectionResults: React.FC = () => {
     return bureauRows && bureauRows.length > 0;
   };
 
+  const hasCollegeData = () => collegeDetailRows.length > 0;
+
   const hasAnyDetailedData = () => {
-    return hasCenterData() || hasBureauData();
+    return hasCenterData() || hasBureauData() || hasCollegeData();
   };
 
   // Fonction pour calculer le taux de couverture des bureaux
@@ -489,7 +562,7 @@ const ElectionResults: React.FC = () => {
     const fetchAvailableElections = async () => {
       try {
         setElectionsLoading(true);
-        const elections = await fetchAllElections();
+        const elections = await fetchPublicElections();
         setAvailableElections(elections || []);
       } catch (error) {
         console.error('Erreur lors du chargement des élections:', error);
@@ -580,14 +653,17 @@ const ElectionResults: React.FC = () => {
         throw new Error('Élection non trouvée');
       }
 
-      // Vérifier si l'élection est publiée
-      if (!election.is_published) {
-        console.log('⚠️ Élection non publiée - Aucun résultat affiché');
+      const isProElection = isProfessionalElection(election.type);
+      const totalElectorsElection = await getElectionElectorsTotal(id, election.type);
+
+      // Vérifier visibilité publique (publiée + non masquée / non annulée)
+      if (!isElectionPublishedForPublic(election)) {
+        console.log('⚠️ Élection non accessible au public - Aucun résultat affiché');
         setPublishedBureauIds(new Set());
         setResults({
           election,
           total_voters: 0,
-          total_voters_election: election.nb_electeurs || 0,
+          total_voters_election: totalElectorsElection,
           total_votes_cast: 0,
           participation_rate: 0,
           candidates: [],
@@ -646,7 +722,7 @@ const ElectionResults: React.FC = () => {
         setResults({
           election,
           total_voters: 0,
-          total_voters_election: allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0),
+          total_voters_election: totalElectorsElection,
           total_votes_cast: 0,
           participation_rate: 0,
           candidates: [],
@@ -658,7 +734,7 @@ const ElectionResults: React.FC = () => {
         return;
       }
 
-      // Récupérer TOUS les bureaux de l'élection pour calculer le vrai total d'inscrits
+      // Récupérer TOUS les bureaux de l'élection (complément au total électeurs)
       const { data: electionCenters, error: centersError } = await supabase
         .from('election_centers')
         .select('center_id')
@@ -772,12 +848,22 @@ const ElectionResults: React.FC = () => {
       const registeredInBureauxWithResults = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
       
       const totalVotesCast = expressedSum; // bulletins exprimés
-      const totalRegistered = registeredInBureauxWithResults; // Inscrits des bureaux dépouillés
-      const totalRegisteredElection = allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0); // Total réel de TOUS les bureaux
-      const participationRate = totalRegistered > 0 ? Math.min(Math.max((votersSum / totalRegistered) * 100, 0), 100) : 0;
+      let totalRegistered = registeredInBureauxWithResults;
+      const totalRegisteredElection = totalElectorsElection > 0
+        ? totalElectorsElection
+        : (allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0));
+
+      // Pro : si les PV/bureaux n'ont pas d'effectif saisi, utiliser le total électeurs de l'élection
+      if (isProElection && totalRegistered === 0 && totalRegisteredElection > 0) {
+        totalRegistered = totalRegisteredElection;
+      }
+
+      const participationRate = totalRegistered > 0
+        ? Math.min(Math.max((votersSum / totalRegistered) * 100, 0), 100)
+        : 0;
 
       // Agréger les votes par candidat ou syndicat
-      const isProfessional = election.type === 'Élection Professionnelle';
+      const isProfessional = isProElection;
       const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number; colleges: Set<string>; seats: number; remainder: number }>();
       
       (candidateResultsData || []).forEach((cr: any) => {
@@ -906,9 +992,57 @@ const ElectionResults: React.FC = () => {
       console.log('📊 [ElectionResults] Taux participation:', participationRate.toFixed(2) + '%');
       console.log('📊 [ElectionResults] Taux abstention:', (100 - participationRate).toFixed(2) + '%');
 
+      let collegeRowsBuilt: CollegeDetailRow[] = [];
+      if (isProfessional) {
+        const votesByCollegeSyndicat: Record<string, Record<string, number>> = {};
+        (candidateResultsData || []).forEach((cr: any) => {
+          const parts = String(cr.candidates?.party || '').split(' — ');
+          const syndicat = parts[0]?.trim() || 'Autre';
+          const college = parts[1]?.trim() || 'Général';
+          if (!votesByCollegeSyndicat[college]) votesByCollegeSyndicat[college] = {};
+          votesByCollegeSyndicat[college][syndicat] =
+            (votesByCollegeSyndicat[college][syndicat] || 0) + (Number(cr.votes) || 0);
+        });
+
+        const { data: electoralColleges } = await supabase
+          .from('electoral_colleges')
+          .select('name, college_type, seats_to_fill')
+          .eq('election_id', electionId);
+
+        const collegeLabels = new Set<string>();
+        (electoralColleges || []).forEach((ec: { name?: string }) => {
+          if (ec.name) collegeLabels.add(ec.name);
+        });
+        Object.keys(votesByCollegeSyndicat).forEach((c) => collegeLabels.add(c));
+
+        for (const collegeName of collegeLabels) {
+          const syndicatVotes = votesByCollegeSyndicat[collegeName] || {};
+          const ec = (electoralColleges || []).find(
+            (c: { name?: string }) => c.name === collegeName
+          );
+          const seatsToFill = Number((ec as { seats_to_fill?: number })?.seats_to_fill) || 0;
+          const entries = Object.entries(syndicatVotes).map(([id, votes]) => ({ id, votes }));
+          const seatMap =
+            seatsToFill > 0
+              ? allocateSeatsProportional(entries, seatsToFill)
+              : new Map<string, number>();
+          Object.entries(syndicatVotes)
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([syndicatName, votes]) => {
+              collegeRowsBuilt.push({
+                collegeName,
+                syndicatName,
+                votes,
+                seats: seatMap.get(syndicatName) || 0,
+              });
+            });
+        }
+      }
+
       // Utiliser les données filtrées (uniquement bureaux publiés)
       setCenterRows(filteredCenters);
       setBureauRows(filteredBureaux);
+      setCollegeDetailRows(collegeRowsBuilt);
 
       setResults({
         election,
@@ -1051,6 +1185,9 @@ const ElectionResults: React.FC = () => {
 
   // Fonction pour trier et regrouper les données
   const getSortedAndGroupedData = (): CenterGroup[] | BureauData[] => {
+    if (viewMode === 'college') {
+      return [];
+    }
     if (viewMode === 'center') {
       // Pour la vue par centre, regrouper par centre et trier les bureaux
       const groupedCenters = centerRows.reduce((acc, center) => {
@@ -1481,6 +1618,30 @@ const ElectionResults: React.FC = () => {
   };
 
   const seoData = generateSEOData();
+  const electorsLabel = getRegisteredVotersLabel(results?.election?.type);
+  const isProResults = isProfessionalElection(results?.election?.type);
+  const showPublicResults =
+    !!results?.election && isElectionPublishedForPublic(results.election);
+
+  const getSortedCollegeRows = (): CollegeDetailRow[] => {
+    return [...collegeDetailRows].sort((a, b) => {
+      let comparison = 0;
+      switch (sortBy) {
+        case 'center':
+          comparison =
+            a.collegeName.localeCompare(b.collegeName) ||
+            a.syndicatName.localeCompare(b.syndicatName);
+          break;
+        case 'votes':
+          comparison = a.votes - b.votes;
+          break;
+        default:
+          comparison =
+            a.collegeName.localeCompare(b.collegeName) || b.votes - a.votes;
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+  };
 
   return (
     <>
@@ -1699,17 +1860,21 @@ const ElectionResults: React.FC = () => {
         </section>
 
         {/* Statistiques principales modernisées */}
-        {results?.election?.is_published && (
+        {showPublicResults && (
         <section id="statistiques" className="bg-gradient-to-br from-gray-50 to-gray-100 py-6 sm:py-8 lg:py-12 xl:py-16 -mt-2 sm:-mt-4 lg:-mt-6 xl:-mt-8 relative z-10">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
               <MetricCard
-                title="Électeurs inscrits"
+                title={getRegisteredVotersLabel(results.election?.type)}
                 value={results.total_voters_election || 0}
                 icon={<Users className="w-8 h-8" />}
                 color="bg-gradient-to-br from-blue-500 to-blue-600"
-                subtitle={`Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()}`}
+                subtitle={
+                  isProfessionalElection(results.election?.type)
+                    ? `Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()} électeurs`
+                    : `Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()} inscrits`
+                }
                 animated={true}
               />
               <MetricCard
@@ -1745,21 +1910,28 @@ const ElectionResults: React.FC = () => {
         )}
 
         {/* Message si élection non publiée */}
-        {results?.election && !results.election.is_published && (
+        {results?.election && !showPublicResults && (
           <section className="py-12 sm:py-16 lg:py-24 bg-gradient-to-br from-gray-50 to-gray-100">
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
               <div className="max-w-2xl mx-auto text-center">
                 <div className="w-24 h-24 mx-auto mb-6 bg-blue-100 rounded-full flex items-center justify-center">
                   <Clock className="w-12 h-12 text-blue-600" />
                 </div>
-                <h2 className="text-3xl font-bold text-gray-900 mb-4">Résultats en cours de traitement</h2>
+                <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                  {results.election?.status === 'Annulée' || results.election?.is_public_visible === false
+                    ? 'Élection non disponible'
+                    : 'Résultats en cours de traitement'}
+                </h2>
                 <p className="text-lg text-gray-600 mb-6">
-                  Les résultats de cette élection ne sont pas encore publiés publiquement.
+                  {results.election?.status === 'Annulée' || results.election?.is_public_visible === false
+                    ? 'Cette élection a été retirée de la consultation publique.'
+                    : 'Les résultats de cette élection ne sont pas encore publiés publiquement.'}
                 </p>
                 <div className="bg-white p-6 rounded-lg shadow-sm border">
                   <p className="text-sm text-gray-700">
-                    Les opérations de dépouillement et de validation sont en cours. 
-                    Les résultats seront publiés dès que le processus de validation sera terminé.
+                    {results.election?.status === 'Annulée' || results.election?.is_public_visible === false
+                      ? 'Contactez l\'organisateur si vous pensez qu\'il s\'agit d\'une erreur.'
+                      : 'Les opérations de dépouillement et de validation sont en cours. Les résultats seront publiés dès que le processus de validation sera terminé.'}
                   </p>
                 </div>
               </div>
@@ -1768,7 +1940,7 @@ const ElectionResults: React.FC = () => {
         )}
 
         {/* Section Couverture des bureaux - Version dynamique */}
-        {results?.election?.is_published && (
+        {showPublicResults && (
         <section className="py-6 sm:py-8 lg:py-12 bg-gray-50">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center">
@@ -2175,18 +2347,20 @@ const ElectionResults: React.FC = () => {
         )}
 
         {/* Résultats des candidats modernisés */}
-        {results?.election?.is_published && (
+        {showPublicResults && (
         <section id="candidats" className="py-6 sm:py-8 lg:py-12 xl:py-16 bg-white">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-6 sm:mb-8 lg:mb-12">
               <div className="flex items-center justify-center gap-2 sm:gap-3 mb-2 sm:mb-3 lg:mb-4">
                 <Trophy className="w-5 h-5 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-black" />
                 <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-gray-800">
-                  Résultats par candidat
+                  {isProResults ? 'Résultats par syndicat' : 'Résultats par candidat'}
                 </h2>
               </div>
               <p className="text-gray-600 text-sm sm:text-base lg:text-lg max-w-2xl mx-auto px-2 sm:px-4">
-                Découvrez les performances de chaque candidat suite au vote
+                {isProResults
+                  ? 'Découvrez les performances de chaque syndicat suite au vote'
+                  : 'Découvrez les performances de chaque candidat suite au vote'}
               </p>
             </div>
             {/* Sélecteur de vue */}
@@ -2213,7 +2387,11 @@ const ElectionResults: React.FC = () => {
             {/* Aide d'interaction */}
             <div className="mb-3 sm:mb-4 text-xs sm:text-sm text-gray-600 flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2">
               <Eye className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
-              <span className="text-center sm:text-left">Cliquez sur un candidat pour voir les détails</span>
+              <span className="text-center sm:text-left">
+                {isProResults
+                  ? 'Cliquez sur un syndicat pour voir les détails'
+                  : 'Cliquez sur un candidat pour voir les détails'}
+              </span>
             </div>
 
             {results.candidates.length === 0 ? (
@@ -2251,8 +2429,15 @@ const ElectionResults: React.FC = () => {
                   <table className="min-w-full bg-white border rounded-lg">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="text-left px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">Candidat</th>
-                        <th className="text-left px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">Parti</th>
+                        <th className="text-left px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">
+                          {isProResults ? 'Syndicat' : 'Candidat'}
+                        </th>
+                        {!isProResults && (
+                          <th className="text-left px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">Parti</th>
+                        )}
+                        {isProResults && (
+                          <th className="text-right px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">Sièges</th>
+                        )}
                         <th className="text-right px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">Voix</th>
                         <th className="text-right px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">%</th>
                         <th className="text-center px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">Détails</th>
@@ -2266,7 +2451,14 @@ const ElectionResults: React.FC = () => {
                         return (
                           <tr key={c.candidate_id} className="odd:bg-white even:bg-gray-50 cursor-pointer hover:bg-blue-50/60 transition-colors" onClick={() => handleOpenCandidate(c.candidate_id)}>
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border font-medium text-gray-800 text-xs sm:text-sm">{c.candidate_name}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 border text-gray-600 text-xs sm:text-sm">{c.party_name}</td>
+                            {!isProResults && (
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 border text-gray-600 text-xs sm:text-sm">{c.party_name}</td>
+                            )}
+                            {isProResults && (
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right font-semibold text-xs sm:text-sm">
+                                {c.seats ?? 0}
+                              </td>
+                            )}
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right text-xs sm:text-sm">{c.total_votes?.toLocaleString?.() ?? c.total_votes}</td>
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right text-xs sm:text-sm">{typeof c.percentage === 'number' ? `${Math.min(Math.max(c.percentage, 0), 100).toFixed(2)}%` : '0.00%'}</td>
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border text-center">
@@ -2288,13 +2480,15 @@ const ElectionResults: React.FC = () => {
         )}
 
         {/* Modal détail candidat */}
-        {results?.election?.is_published && (
+        {showPublicResults && (
         <Dialog open={!!openCandidateId} onOpenChange={(o) => !o && setOpenCandidateId(null)}>
           <DialogContent
             className="w-[min(28rem,calc(100vw-2rem))] sm:w-full sm:max-w-4xl lg:max-w-5xl max-h-[calc(100vh-2rem)] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6"
           >
             <DialogHeader>
-              <DialogTitle className="text-lg sm:text-xl">Détails du candidat</DialogTitle>
+              <DialogTitle className="text-lg sm:text-xl">
+                {isProResults ? 'Détails du syndicat' : 'Détails du candidat'}
+              </DialogTitle>
             </DialogHeader>
             {(() => {
               const c = results.candidates.find(x => x.candidate_id === openCandidateId);
@@ -2362,7 +2556,7 @@ const ElectionResults: React.FC = () => {
                               <summary className="cursor-pointer px-3 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-100">
                                 <span className="font-semibold text-sm sm:text-base">{row.center_name}</span>
                                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 text-xs sm:text-sm">
-                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Inscrits</div><div className="font-semibold text-xs sm:text-sm">{row.total_registered?.toLocaleString() || '-'}</div></div>
+                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">{electorsLabel}</div><div className="font-semibold text-xs sm:text-sm">{row.total_registered?.toLocaleString() || '-'}</div></div>
                                   <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Votants</div><div className="font-semibold text-xs sm:text-sm">{row.total_voters?.toLocaleString() || '-'}</div></div>
                                   <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Voix</div><div className="font-semibold text-xs sm:text-sm">{row.candidate_votes}</div></div>
                                   <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Score</div><div className="font-semibold text-xs sm:text-sm">{typeof row.candidate_percentage === 'number' ? `${Math.min(Math.max(row.candidate_percentage, 0), 100).toFixed(2)}%` : '-'}</div></div>
@@ -2459,32 +2653,29 @@ const ElectionResults: React.FC = () => {
                     {results.election?.type === 'Élection Professionnelle' && (
                     <TabsContent value="college">
                       {hasCandidateBureauData() ? (
-                        <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 mt-3 -mx-4 sm:-mx-6 lg:-mx-8">
-                          <table className="min-w-full bg-white border">
-                            <thead className="bg-slate-100 text-gov-dark">
+                        <div className="mt-3 max-h-44 sm:max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                          <table className="w-full table-fixed text-[10px] sm:text-xs">
+                            <thead className="bg-slate-100 text-gov-dark sticky top-0 z-10">
                               <tr>
-                                <th className="text-left px-2 sm:px-3 py-2 border text-xs sm:text-sm whitespace-nowrap">Collège</th>
-                                <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Voix</th>
+                                <th className="text-left px-2 py-1.5 border-b w-[45%]">Collège</th>
+                                <th className="text-right px-2 py-1.5 border-b w-[22%]">Sièges</th>
+                                <th className="text-right px-2 py-1.5 border-b w-[33%]">Voix</th>
                               </tr>
                             </thead>
-                            <tbody className="text-xs sm:text-sm">
-                              {(() => {
-                                const collegeAgg: Record<string, number> = {};
-                                candidateBureaux.forEach(b => {
-                                  if (b.college_votes) {
-                                    Object.entries(b.college_votes).forEach(([cName, votes]) => {
-                                      collegeAgg[cName] = (collegeAgg[cName] || 0) + (votes as number);
-                                    });
-                                  }
-                                });
-                                const collegesList = Object.entries(collegeAgg).sort((a, b) => b[1] - a[1]);
-                                return collegesList.map(([name, votes], idx) => (
-                                  <tr key={idx} className="odd:bg-white even:bg-slate-50">
-                                    <td className="px-2 sm:px-3 py-2 border font-medium">{name}</td>
-                                    <td className="px-2 sm:px-3 py-2 border text-right font-bold">{votes.toLocaleString()}</td>
-                                  </tr>
-                                ));
-                              })()}
+                            <tbody>
+                              {getCandidateCollegeRows(
+                                candidateBureaux,
+                                c.seats,
+                                c.total_votes
+                              ).map((row, idx) => (
+                                <tr key={idx} className="odd:bg-white even:bg-slate-50">
+                                  <td className="px-2 py-1.5 border-b font-medium truncate" title={row.college}>
+                                    {row.college}
+                                  </td>
+                                  <td className="px-2 py-1.5 border-b text-right font-semibold tabular-nums">{row.seats}</td>
+                                  <td className="px-2 py-1.5 border-b text-right font-bold tabular-nums">{row.votes.toLocaleString()}</td>
+                                </tr>
+                              ))}
                             </tbody>
                           </table>
                         </div>
@@ -2504,7 +2695,7 @@ const ElectionResults: React.FC = () => {
         )}
 
         {/* Vue détaillée par centre / par bureau modernisée */}
-        {results?.election?.is_published && (
+        {showPublicResults && (
         <section id="analyse" className="py-6 sm:py-8 lg:py-12 xl:py-16 bg-gradient-to-br from-gray-50 to-gray-100">
           {hasAnyDetailedData() ? (
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -2516,13 +2707,13 @@ const ElectionResults: React.FC = () => {
                   </h2>
                 </div>
                 <p className="text-gray-600 text-sm sm:text-base lg:text-lg max-w-2xl mx-auto mb-4 sm:mb-6 lg:mb-8 px-2 sm:px-4">
-                  {results.election?.type === 'Élection Professionnelle' 
-                    ? 'Explorez les résultats par établissement ou par bureau pour une analyse approfondie' 
+                  {isProResults
+                    ? 'Explorez les résultats par établissement, par bureau ou par collège pour une analyse approfondie'
                     : 'Explorez les résultats par centre de vote ou par bureau pour une analyse approfondie'}
                 </p>
 
                 {/* Boutons de navigation modernisés */}
-                <div className="flex items-center justify-center gap-1.5 sm:gap-2 lg:gap-4 bg-white rounded-full p-0.5 sm:p-1 lg:p-2 shadow-lg border border-gray-200 max-w-xs sm:max-w-sm lg:max-w-md mx-auto">
+                <div className={`flex items-center justify-center gap-1.5 sm:gap-2 lg:gap-4 bg-white rounded-full p-0.5 sm:p-1 lg:p-2 shadow-lg border border-gray-200 mx-auto ${isProResults ? 'max-w-md sm:max-w-lg lg:max-w-2xl' : 'max-w-xs sm:max-w-sm lg:max-w-md'}`}>
                   <button
                     onClick={() => setViewMode('center')}
                     className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'center'
@@ -2549,10 +2740,23 @@ const ElectionResults: React.FC = () => {
                     <span className="hidden sm:inline">Par bureau</span>
                     <span className="sm:hidden">Bureaux</span>
                   </button>
+                  {isProResults && (
+                    <button
+                      onClick={() => setViewMode('college')}
+                      className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'college'
+                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
+                        : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
+                        }`}
+                    >
+                      <Layers className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Par collège</span>
+                      <span className="sm:hidden">Collèges</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Contrôles de tri - affichés seulement s'il y a des données */}
-                {(hasCenterData() || hasBureauData()) && (
+                {(hasCenterData() || hasBureauData() || hasCollegeData()) && (
                   <div className="mt-4 sm:mt-6 lg:mt-8 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 lg:gap-4 bg-white rounded-xl p-2 sm:p-3 lg:p-4 shadow-lg border border-gray-200 max-w-xs sm:max-w-lg lg:max-w-4xl mx-auto">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
                       <span className="text-xs sm:text-sm font-medium text-gray-700 flex items-center gap-1.5 sm:gap-2">
@@ -2601,7 +2805,48 @@ const ElectionResults: React.FC = () => {
                 )}
               </div>
 
-              {viewMode === 'center' ? (
+              {viewMode === 'college' && isProResults ? (
+                <div className="bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                  <div className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 bg-gradient-to-r from-gray-50 to-blue-50 border-b border-gray-200">
+                    <h3 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-800 flex items-center gap-1.5 sm:gap-2">
+                      <Layers className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-blue-600" />
+                      Vue détaillée par collège
+                    </h3>
+                    <p className="text-[10px] sm:text-xs lg:text-sm text-gray-600 mt-0.5 sm:mt-1">
+                      Répartition des voix et des sièges par collège électoral et par syndicat
+                    </p>
+                  </div>
+                  <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                    <table className="w-full min-w-[520px]">
+                      <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+                        <tr>
+                          <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs">Collège</th>
+                          <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs">Syndicat</th>
+                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs">Sièges obtenus</th>
+                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs">Voix</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {getSortedCollegeRows().map((row, idx) => (
+                          <tr key={`${row.collegeName}-${row.syndicatName}-${idx}`} className="hover:bg-blue-50 transition-colors duration-200">
+                            <td className="px-2 py-2 font-medium text-gray-800 text-[8px] sm:text-xs">{row.collegeName}</td>
+                            <td className="px-2 py-2 text-[8px] sm:text-xs">{row.syndicatName}</td>
+                            <td className="px-2 py-2 text-right font-bold text-blue-700 text-[8px] sm:text-xs">{row.seats}</td>
+                            <td className="px-2 py-2 text-right font-semibold text-gray-800 text-[8px] sm:text-xs">{row.votes.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                        {getSortedCollegeRows().length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="px-2 py-8 text-center text-gray-500 text-sm">
+                              Aucune donnée par collège disponible.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : viewMode === 'center' ? (
                 <div className="space-y-3 sm:space-y-4 lg:space-y-6">
                   {(getSortedAndGroupedData() as CenterGroup[]).map((group, idx) => {
                     const c = group.center;
@@ -2619,7 +2864,7 @@ const ElectionResults: React.FC = () => {
                           </div>
                           <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Inscrits</div>
+                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">{electorsLabel}</div>
                               <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_registered?.toLocaleString?.() || c.total_registered}</div>
                             </div>
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
@@ -2661,7 +2906,7 @@ const ElectionResults: React.FC = () => {
                                   <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
                                     <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
                                       <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                      <span className="hidden sm:inline">Inscrits</span>
+                                      <span className="hidden sm:inline">{electorsLabel}</span>
                                       <span className="sm:hidden">Insc.</span>
                                     </div>
                                   </th>
@@ -2782,7 +3027,7 @@ const ElectionResults: React.FC = () => {
                           <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1">
                               <Users className="w-2 h-2" />
-                              <span>Inscrits</span>
+                              <span>{electorsLabel}</span>
                             </div>
                           </th>
                           <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
@@ -2935,13 +3180,14 @@ const ElectionResults: React.FC = () => {
         </section>
         )}
 
-        {/* Nouvelle section : Analyse croisée */}
-        {results?.election?.is_published && results?.election?.id && (
+        {/* Section analyse croisée / simulation — masquée sur la vue publique pour l'instant
+        {showPublicResults && results?.election?.id && (
           <CrossAnalysisSection electionId={String(results.election.id)} />
         )}
+        */}
 
         {/* Section de navigation vers autre élection */}
-        {results?.election?.is_published && getAlternativeElection() && (
+        {showPublicResults && getAlternativeElection() && (
           <section className="py-6 sm:py-8 lg:py-12 bg-gray-50">
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
               <div className="text-center mb-6 sm:mb-8">

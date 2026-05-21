@@ -5,6 +5,7 @@ import { ModernForm, ModernFormSection, ModernFormGrid } from '@/components/ui/m
 import FloatingInput from '@/components/ui/floating-input';
 import FloatingSelect from '@/components/ui/floating-select';
 import { toast } from 'sonner';
+import { parseUnionListsSheet } from '@/utils/excelImport';
 import ImageUploader from '@/components/ui/ImageUploader';
 
 interface ProfessionalElectionWizardProps {
@@ -138,11 +139,11 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
   const downloadListesTemplate = () => {
     const link = document.createElement('a');
     link.href = '/modele_listes.xlsx';
-    link.download = 'modele_listes.xlsx';
+    link.download = 'listes.xlsx';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success("Modèle de listes syndicales téléchargé avec succès");
+    toast.success('Modèle listes.xlsx téléchargé (feuille « Listes »)');
   };
 
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,55 +284,35 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
           const data = event.target?.result;
           if (!data) return;
           const workbook = XLSX.read(data, { type: 'array' });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
+          const parsedLists = parseUnionListsSheet(workbook, true);
 
-          const candidates: any[] = [];
-          jsonData.forEach((row: any) => {
-            const unionAcronym = row["Acronyme_Representation"] || row["Sigle"] || "";
-            const unionName = row["Representation"] || row["Nom"] || "";
-            const etablissement = row["Etablissement"] || "";
-            
-            let college = "general";
-            const collegeVal = String(row["College"] || "").toLowerCase();
-            if (collegeVal.includes('cadre')) college = "cadres";
-            else if (collegeVal.includes('maitrise') || collegeVal.includes('maîtrise')) college = "employes";
-            else if (collegeVal.includes('execution') || collegeVal.includes('exécution')) college = "ouvriers";
-            else if (collegeVal.includes('encadrement')) college = "general";
-            
-            const titulaireName = row["Titulaire"] || "";
-            const titulaireGenre = row["Genre_Titulaire"] || "";
-            const titulaireAnciennete = row["Anciennete_Titulaire"] || "";
-            
-            const suppleantName = row["Suppleant"] || row["Suppléant"] || "";
-            const suppleantGenre = row["Genre_Suppleant"] || "";
-            
-            if (unionName || titulaireName) {
-              candidates.push({
-                party: unionAcronym || unionName,
-                name: unionName || unionAcronym,
-                collegeType: college,
-                etablissement,
-                candidates: [
-                  { 
-                    role: "Titulaire", 
-                    name: titulaireName,
-                    genre: titulaireGenre,
-                    anciennete: titulaireAnciennete
-                  },
-                  { 
-                    role: "Suppléant", 
-                    name: suppleantName,
-                    genre: suppleantGenre
-                  }
-                ]
-              });
-            }
-          });
+          if (parsedLists.length === 0) {
+            toast.error('Aucune liste dans le fichier. Remplissez des lignes sous les en-têtes (feuille « Listes »).');
+            return;
+          }
+
+          const candidates = parsedLists.map((list) => ({
+            party: list.unionAcronym || list.unionName,
+            name: list.unionName,
+            collegeType: list.college,
+            etablissement: list.etablissement,
+            candidates: [
+              {
+                role: 'Titulaire',
+                name: list.titulaireName,
+                genre: list.titulaireGenre,
+                anciennete: list.titulaireAnciennete,
+              },
+              {
+                role: 'Suppléant',
+                name: list.suppleantName,
+                genre: list.suppleantGenre,
+              },
+            ],
+          }));
 
           setFormData(prev => ({ ...prev, candidates }));
-          toast.success(`Fichier "${file.name}" analysé avec succès ! ${candidates.length} listes importées.`);
+          toast.success(`Fichier "${file.name}" analysé : ${candidates.length} liste(s).`);
         } catch (err) {
           console.error(err);
           toast.error("Erreur lors de la lecture des données Excel.");

@@ -171,25 +171,22 @@ export const generateUnitesVoteTemplate = async () => {
   ]);
 };
 
+/** Modèle pro : feuille « Listes » (aligné sur listes.xlsx / modele_listes.xlsx). */
 export const generateListesElectoralesTemplate = async () => {
   const headers = [
-    "Etablissement",
-    "Collège",
-    "Nom Complet Syndicat",
-    "Sigle Syndicat",
-    "Nom complet du Titulaire",
-    "Ancienneté dans l'entreprise (Facultatif)",
-    "Nom complet du Suppléant"
+    'Acronyme_Representation',
+    'Representation',
+    'College',
+    'Etablissement',
+    'Titulaire',
+    'Genre_Titulaire',
+    'Anciennete_Titulaire',
+    'Suppleant',
+    'Genre_Suppleant',
   ];
 
-  const examples = [
-    ["Siège Social Libreville", "ouvriers", "Confédération Syndicale Gabonaise", "COSYG", "Pierre Mba", "5 ans", "Charles Obiang"],
-    ["Siège Social Libreville", "employes", "Syndicat Libre des Employés de la SEEG", "SYLSEEG", "Marie-Claire Eyeghe", "10 ans", "Alain Ndong"],
-    ["Agence Franceville", "cadres", "Confédération Syndicale Gabonaise", "COSYG", "Christian Bignoumba", "3 ans", "Sylvie Kombila"]
-  ];
-
-  await exportMultiSheetExcel("modele_listes_electorales", [
-    { name: "Candidats & Syndicats", headers, data: examples.map(ex => Object.fromEntries(headers.map((h, i) => [h, ex[i]]))) }
+  await exportMultiSheetExcel('listes', [
+    { name: 'Listes', headers, data: [] },
   ]);
 };
 

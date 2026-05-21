@@ -26,6 +26,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
+import { getRegisteredVotersLabel, isProfessionalElection } from '@/utils/electionCalculations';
 import { useNetworkQuality } from '@/hooks/useNetworkQuality';
 
 interface PVEntrySectionProps {
@@ -257,8 +258,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     const selectedBureau = votingBureaux.find(b => b.id === formData.bureau);
     const inscrits = (parseInt(formData.inscrits) || 0) || (selectedBureau?.registered_voters || 0);
 
+    const inscritsLabel = getRegisteredVotersLabel(electionInfo?.type).toLowerCase();
     if (votants > inscrits) {
-      errors.votants = `Le nombre de votants (${votants}) ne peut pas dépasser le nombre d'inscrits (${inscrits})`;
+      errors.votants = `Le nombre de votants (${votants}) ne peut pas dépasser le nombre d'${inscritsLabel} (${inscrits})`;
     }
 
     if ((nuls + exprimes) !== votants && votants > 0) {
@@ -693,7 +695,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
-                <Label htmlFor="inscrits">Inscrits</Label>
+                <Label htmlFor="inscrits">{getRegisteredVotersLabel(electionInfo?.type)}</Label>
                 <Input 
                   id="inscrits" 
                   type="number" 
@@ -1066,7 +1068,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   <span>Bureau: <span className="font-semibold">{bureauName}</span></span>
                 </div>
                 {formData.inscrits && (
-                  <div className="text-blue-800">Inscrits: <span className="font-semibold">{formData.inscrits}</span></div>
+                  <div className="text-blue-800">{getRegisteredVotersLabel(electionInfo?.type)}: <span className="font-semibold">{formData.inscrits}</span></div>
                 )}
               </div>
             ) : null;
