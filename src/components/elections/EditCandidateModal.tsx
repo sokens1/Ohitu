@@ -252,10 +252,10 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                   value={formData.college}
                   onChange={(val) => handleInputChange('college', val)}
                   options={[
-                    { value: 'general', label: 'Collège Unique / Général' },
-                    { value: 'cadres', label: 'Cadres' },
-                    { value: 'employes', label: 'Employés' },
-                    { value: 'ouvriers', label: 'Ouvriers' }
+                    { value: 'general', label: 'Encadrement' },
+                    { value: 'cadres', label: 'Cadre' },
+                    { value: 'employes', label: 'Maîtrise' },
+                    { value: 'ouvriers', label: 'Exécution' }
                   ]}
                 />
 

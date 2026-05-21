@@ -120,9 +120,10 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
            setFormData(prev => ({
             ...prev,
             colleges: [
-              { id: '1', name: 'Cadres', type: 'cadres', voters: 0, seats: 1 },
-              { id: '2', name: 'Employés', type: 'employes', voters: 0, seats: 1 },
-              { id: '3', name: 'Ouvriers', type: 'ouvriers', voters: 0, seats: 1 }
+              { id: '1', name: 'Cadre', type: 'cadres', voters: 0, seats: 1 },
+              { id: '2', name: 'Maîtrise', type: 'employes', voters: 0, seats: 1 },
+              { id: '3', name: 'Exécution', type: 'ouvriers', voters: 0, seats: 1 },
+              { id: '4', name: 'Encadrement', type: 'general', voters: 0, seats: 1 }
             ]
           }));
         }
