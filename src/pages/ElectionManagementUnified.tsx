@@ -45,6 +45,11 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
+import {
+  importEstablishmentsToElection,
+  normalizeWizardCandidates,
+  importUnionListsToElection,
+} from '@/utils/excelImport';
 
 const ElectionManagementUnified = () => {
   const { user } = useAuth();
@@ -1393,113 +1398,37 @@ const ElectionManagementUnified = () => {
         }
       }
 
-      // Insérer les établissements & bureaux importés
+      // Insérer les établissements & bureaux importés (réutilise les noms déjà en base)
       if (electionData.votingCenters && electionData.votingCenters.length > 0) {
-        for (const center of electionData.votingCenters) {
-          // Créer le voting_center
-          const { data: centerData, error: centerErr } = await supabase
-            .from('voting_centers')
-            .insert({
-              name: center.name,
-              address: center.address,
-              contact_name: center.contactName || 'N/A',
-              contact_phone: center.contactPhone || 'N/A',
-              total_voters: center.voters || 0,
-              total_bureaux: center.bureaux || 0,
-              enterprise_id: enterprise.id
-            })
-            .select()
-            .single();
-
-          if (centerErr) {
-            console.error('Erreur lors de la création du centre de vote:', centerErr);
-            continue;
-          }
-
-          // Lier le centre à l'élection
-          const { error: linkErr } = await supabase
-            .from('election_centers')
-            .insert({
-              election_id: electionId,
-              center_id: centerData.id
-            });
-
-          if (linkErr) {
-            console.error('Erreur lors de la liaison du centre:', linkErr);
-          }
-
-          // Insérer les bureaux de vote pour ce centre
-          if (center.booths && center.booths.length > 0) {
-            const boothsToInsert = center.booths.map((booth: any) => ({
-              name: booth.name,
-              center_id: centerData.id,
-              registered_voters: booth.voters || 0,
-              president_name: 'N/A',
-              president_phone: '000000000',
-              urns_count: 0
-            }));
-
-            const { error: boothErr } = await supabase
-              .from('voting_bureaux')
-              .insert(boothsToInsert);
-
-            if (boothErr) {
-              console.error('Erreur lors de la création des bureaux:', boothErr);
-            }
-          }
+        const centersPayload = electionData.votingCenters.map((center: any) => ({
+          name: center.name,
+          address: center.address || 'Général',
+          contact_name: center.contactName || 'N/A',
+          contact_phone: center.contactPhone || null,
+          voters: center.voters || 0,
+          bureaux: center.bureaux || 0,
+          booths: (center.booths || []).map((booth: any) => ({
+            name: booth.name,
+            registered_voters: booth.voters ?? booth.registered_voters ?? 0,
+          })),
+        }));
+        const importResult = await importEstablishmentsToElection(
+          supabase,
+          electionId,
+          enterprise.id,
+          centersPayload
+        );
+        if (importResult.errors.length > 0) {
+          console.warn('Import établissements (création élection):', importResult.errors);
         }
       }
 
-      // Insérer les listes syndicales/candidats importés
+      // Insérer les listes syndicales importées (format wizard ou Excel plat)
       if (electionData.candidates && electionData.candidates.length > 0) {
-        for (const cand of electionData.candidates) {
-          // Rechercher si le syndicat existe déjà
-          let unionId = null;
-          let query = supabase.from('unions').select('id');
-          if (cand.unionAcronym && cand.unionName) {
-            query = query.or(`acronym.eq.${cand.unionAcronym},name.eq.${cand.unionName}`);
-          } else if (cand.unionAcronym) {
-            query = query.eq('acronym', cand.unionAcronym);
-          } else {
-            query = query.eq('name', cand.unionName);
-          }
-          
-          const { data: existingUnion } = await query.maybeSingle();
-
-          if (existingUnion) {
-            unionId = existingUnion.id;
-          } else {
-            // Créer le syndicat
-            const { data: newUnionData, error: newUnionErr } = await supabase
-              .from('unions')
-              .insert({
-                name: cand.unionName,
-                acronym: cand.unionAcronym
-              })
-              .select()
-              .single();
-
-            if (newUnionErr) {
-              console.error('Erreur lors de la création du syndicat:', newUnionErr);
-              continue;
-            }
-            unionId = newUnionData.id;
-          }
-
-          // Créer la liste (union_list)
-          const { error: listErr } = await supabase
-            .from('union_lists')
-            .insert({
-              election_id: electionId,
-              union_id: unionId,
-              college: cand.college || 'general',
-              titulaires: cand.titulaireName ? [{ name: cand.titulaireName, role: 'Tête de liste' }] : [],
-              suppleants: cand.suppleantName ? [{ name: cand.suppleantName, role: 'Suppléant' }] : []
-            });
-
-          if (listErr) {
-            console.error('Erreur lors de la création de la liste syndicale:', listErr);
-          }
+        const listsPayload = normalizeWizardCandidates(electionData.candidates);
+        const listsResult = await importUnionListsToElection(supabase, electionId, listsPayload);
+        if (listsResult.errors.length > 0) {
+          console.warn('Import listes (création élection):', listsResult.errors);
         }
       }
 
