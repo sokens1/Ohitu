@@ -4,25 +4,30 @@
 
 // Fonction pour exporter en CSV
 export const exportToCSV = (data: any[], filename: string, headers: string[]) => {
-  const csvContent = [
-    headers,
-    ...data.map(row => headers.map(header => {
-      const value = row[header] ?? '';
-      // Échapper les guillemets et les virgules
-      return `"${String(value).replace(/"/g, '""')}"`;
-    }))
-  ].map(row => row.join(',')).join('\n');
+  try {
+    const csvContent = [
+      headers.join(';'),
+      ...data.map(row => 
+        Object.values(row)
+          .map(val => `"${String(val).replace(/"/g, '""')}"`)
+          .join(';')
+      )
+    ].join('\n');
 
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', `${filename}.csv`);
-  link.style.visibility = 'hidden';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${filename}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return true;
+  } catch (error) {
+    console.error('Erreur lors de l\'export CSV:', error);
+    return false;
+  }
 };
 
 // Fonction pour exporter en Excel (format XLSX)
@@ -46,7 +51,7 @@ export const exportToExcel = async (data: any[], filename: string, headers: { ke
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Logs');
 
-    // Télécharger
+    // Sauvegarder
     XLSX.writeFile(workbook, `${filename}.xlsx`);
     return true;
   } catch (error) {
@@ -57,6 +62,32 @@ export const exportToExcel = async (data: any[], filename: string, headers: { ke
       filename,
       headers.map(h => h.label)
     );
+    return false;
+  }
+};
+
+// Fonction pour exporter un modèle Excel multi-feuilles
+export const exportMultiSheetExcel = async (
+  filename: string,
+  sheets: { name: string; data: any[]; headers: string[] }[]
+) => {
+  try {
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.utils.book_new();
+
+    sheets.forEach(sheet => {
+      const worksheetData = [
+        sheet.headers,
+        ...sheet.data.map(row => sheet.headers.map(header => row[header] ?? ''))
+      ];
+      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheet.name);
+    });
+
+    XLSX.writeFile(workbook, `${filename}.xlsx`);
+    return true;
+  } catch (error) {
+    console.error('Erreur lors de la génération du modèle Excel multi-feuilles:', error);
     return false;
   }
 };
@@ -114,5 +145,51 @@ export const exportToPDF = async (
     console.error('Erreur lors de l\'export PDF:', error);
     return false;
   }
+};
+
+// --- Templates pour Option B (Après configuration globale) ---
+
+export const generateUnitesVoteTemplate = async () => {
+  const headers = [
+    "Nom Bureau de vote (Facultatif)",
+    "Nom Établissement / Site",
+    "Région / Localisation",
+    "Responsable Établissement (Facultatif)",
+    "Contact Téléphone (Facultatif)",
+    "Nombre d'électeurs",
+    "Collège concerné"
+  ];
+
+  const examples = [
+    ["Bureau A - Rez de chaussée", "Siège Social Libreville", "Estuaire", "Marc Ondo", "+24177123456", "250", "Employés et Ouvriers"],
+    ["Bureau B - 1er étage", "Siège Social Libreville", "Estuaire", "Marc Ondo", "+24177123456", "150", "Agent de maîtrise"],
+    ["Bureau Unique - Franceville", "Agence Franceville", "Haut-Ogooué", "Lucie Mba", "+24166987654", "115", "general"]
+  ];
+
+  await exportMultiSheetExcel("modele_unites_vote", [
+    { name: "Établissements & Bureaux", headers, data: examples.map(ex => Object.fromEntries(headers.map((h, i) => [h, ex[i]]))) }
+  ]);
+};
+
+export const generateListesElectoralesTemplate = async () => {
+  const headers = [
+    "Etablissement",
+    "Collège",
+    "Nom Complet Syndicat",
+    "Sigle Syndicat",
+    "Nom complet du Titulaire",
+    "Ancienneté dans l'entreprise (Facultatif)",
+    "Nom complet du Suppléant"
+  ];
+
+  const examples = [
+    ["Siège Social Libreville", "ouvriers", "Confédération Syndicale Gabonaise", "COSYG", "Pierre Mba", "5 ans", "Charles Obiang"],
+    ["Siège Social Libreville", "employes", "Syndicat Libre des Employés de la SEEG", "SYLSEEG", "Marie-Claire Eyeghe", "10 ans", "Alain Ndong"],
+    ["Agence Franceville", "cadres", "Confédération Syndicale Gabonaise", "COSYG", "Christian Bignoumba", "3 ans", "Sylvie Kombila"]
+  ];
+
+  await exportMultiSheetExcel("modele_listes_electorales", [
+    { name: "Candidats & Syndicats", headers, data: examples.map(ex => Object.fromEntries(headers.map((h, i) => [h, ex[i]]))) }
+  ]);
 };
 

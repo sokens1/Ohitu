@@ -98,11 +98,8 @@ const ElectionManagementUnified = () => {
           { Key: "Nom de l'élection", Value: "Élection Professionnelle SEEG 2026" },
           { Key: "Raison Sociale", Value: "Société d'Énergie et d'Eau du Gabon" },
           { Key: "Numéro Enregistrement", Value: "RG-4920492" },
-          { Key: "Secteur", Value: "Privé" },
+          { Key: "Secteur (Privé, Parapublic, Public)", Value: "Privé" },
           { Key: "Unité Administrative (Ministère de rattachement)", Value: "" },
-          { Key: "Effectif Cadres", Value: 0 },
-          { Key: "Effectif Employés", Value: 0 },
-          { Key: "Effectif Ouvriers", Value: 4 },
           { Key: "Nom RH", Value: "Jean Dupont" },
           { Key: "Téléphone RH", Value: "+24166123456" },
           { Key: "Email RH", Value: "j.dupont@seeg.ga" },
@@ -110,16 +107,13 @@ const ElectionManagementUnified = () => {
           { Key: "Affichage listes (AAAA-MM-JJ)", Value: "2026-06-01" },
           { Key: "Début campagne (AAAA-MM-JJ)", Value: "2026-06-05" },
           { Key: "Fin campagne (AAAA-MM-JJ)", Value: "2026-06-15" },
-          { Key: "Deuxième tour (Oui/Non)", Value: "Oui" },
-          { Key: "Date deuxième tour (AAAA-MM-JJ)", Value: "2026-07-05" },
-          { Key: "Début recours (AAAA-MM-JJ)", Value: "2026-06-21" },
-          { Key: "Fin recours (AAAA-MM-JJ)", Value: "2026-06-25" }
+          { Key: "Deuxième tour (Oui/Non)", Value: "Oui" }
         ];
 
         const collegesData = [
-          { "Nom du collège": "Cadres", Code: "cadres", "Nombre d'électeurs": 45, "Sièges à pourvoir": 2 },
-          { "Nom du collège": "Agent de maîtrise", Code: "employes", "Nombre d'électeurs": 120, "Sièges à pourvoir": 4 },
-          { "Nom du collège": "Employés et Ouvriers", Code: "ouvriers", "Nombre d'électeurs": 350, "Sièges à pourvoir": 6 }
+          { "Nom du collège": "Cadres", Code: "cadres" },
+          { "Nom du collège": "Agent de maîtrise", Code: "employes" },
+          { "Nom du collège": "Employés et Ouvriers", Code: "ouvriers" }
         ];
 
         const establishmentsData = [
@@ -336,7 +330,7 @@ const ElectionManagementUnified = () => {
                 });
               }
 
-              const rawSector = String(configMap["Secteur"] || configMap["Secteur Activité"] || "").trim().toLowerCase();
+              const rawSector = String(configMap["Secteur (Privé, Parapublic, Public)"] || configMap["Secteur"] || configMap["Secteur Activité"] || "").trim().toLowerCase();
               let sector = 'prive';
               if (rawSector.includes('public') && !rawSector.includes('para')) {
                 sector = 'public';
@@ -369,10 +363,7 @@ const ElectionManagementUnified = () => {
                 listDisplayDate: configMap["Affichage listes (AAAA-MM-JJ)"] || configMap["Affichage listes"] || "",
                 campaignStart: configMap["Début campagne (AAAA-MM-JJ)"] || configMap["Début campagne"] || "",
                 campaignEnd: configMap["Fin campagne (AAAA-MM-JJ)"] || configMap["Fin campagne"] || "",
-                hasSecondRound: String(configMap["Deuxième tour (Oui/Non)"] || "").toLowerCase() === 'non' ? false : true,
-                secondRoundDate: configMap["Date deuxième tour (AAAA-MM-JJ)"] || configMap["Date deuxième tour"] || "",
-                recoursStart: configMap["Début recours (AAAA-MM-JJ)"] || configMap["Début recours"] || "",
-                recoursEnd: configMap["Fin recours (AAAA-MM-JJ)"] || configMap["Fin recours"] || "",
+                hasSecondRound: String(configMap["Deuxième tour (Oui/Non)"] || "").toLowerCase() === 'oui',
                 colleges: colleges.length > 0 ? colleges : undefined,
                 votingCenters: votingCenters.length > 0 ? votingCenters : undefined,
                 candidates: candidates.length > 0 ? candidates : undefined,

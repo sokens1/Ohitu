@@ -93,9 +93,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Sidebar */}
       <div className={`${
         isMobile 
-          ? sidebarOpen ? 'fixed inset-y-0 left-0 z-50 w-64' : 'hidden'
-          : sidebarOpen ? 'w-64 flex-shrink-0' : 'w-16 flex-shrink-0'
-      } transition-all duration-300 gov-bg-primary text-white flex flex-col h-screen sticky top-0`}>
+          ? `fixed inset-y-0 left-0 z-50 w-64 transform ${sidebarOpen ? 'translate-x-0 visible' : '-translate-x-full invisible'}`
+          : `sticky top-0 h-screen ${sidebarOpen ? 'w-64' : 'w-16'} flex-shrink-0`
+      } transition-all duration-300 gov-bg-primary text-white flex flex-col`}>
         <div className="flex-shrink-0 p-3 sm:p-4 border-b border-gov-blue-light">
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">

@@ -15,7 +15,7 @@ interface ProfessionalElectionWizardProps {
 }
 
 const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({ onClose, onSubmit, onSuccess, prefilledData }) => {
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(prefilledData && Object.keys(prefilledData).length > 0 ? 5 : 1);
   const steps = [
     'Informations',
     'Entreprise',
@@ -234,10 +234,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       if (onSubmit) {
         await onSubmit(formData);
       }
-      
-      if (onSuccess) {
-        onSuccess();
-      }
+      // onSuccess is handled by the parent component or not needed here because onSubmit already handles closing and toast
     } catch (error) {
       console.error(error);
       toast.error("Erreur lors de la création de l'élection professionnelle");
@@ -249,7 +246,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       case 1:
         return formData.name.trim() !== '' && formData.date.trim() !== '';
       case 2:
-        return formData.enterpriseName.trim() !== '' && parseInt(formData.totalEmployees) >= 10;
+        return formData.enterpriseName.trim() !== '';
       case 3:
         return parseInt(formData.totalBureaux) > 0;
       case 4:
@@ -291,18 +288,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 defaultValue={formData.coverImage}
               />
             </div>
-
-            <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-1.5 text-sm text-gray-500">
-              <span>Cadre légal de référence :</span>
-              <a 
-                href="https://www.droit-afrique.com/uploads/Gabon-Code-du-travail-2021.pdf" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-gov-blue hover:text-gov-blue-dark font-semibold inline-flex items-center gap-1 transition-colors hover:underline"
-              >
-                LOI-022-2021 + Arrêté 000147
-              </a>
-            </div>
           </ModernFormSection>
         );
       case 2:
@@ -328,19 +313,19 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             </ModernFormGrid>
             <ModernFormGrid cols={3}>
               <FloatingInput
-                label="Effectif Cadres"
+                label="Effectif Cadres (Facultatif)"
                 type="number"
                 value={formData.employeesCadres}
                 onChange={(e) => setFormData({ ...formData, employeesCadres: e.target.value })}
               />
               <FloatingInput
-                label="Effectif Agent de maîtrise"
+                label="Effectif Agent de maîtrise (Facultatif)"
                 type="number"
                 value={formData.employeesEmployes}
                 onChange={(e) => setFormData({ ...formData, employeesEmployes: e.target.value })}
               />
               <FloatingInput
-                label="Effectif Employés et Ouvriers"
+                label="Effectif Employés et Ouvriers (Facultatif)"
                 type="number"
                 value={formData.employeesOuvriers}
                 onChange={(e) => setFormData({ ...formData, employeesOuvriers: e.target.value })}
@@ -348,12 +333,12 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             </ModernFormGrid>
             <ModernFormGrid cols={1}>
               <FloatingInput
-                label="Effectif Total"
+                label="Effectif Total (Facultatif)"
                 type="number"
                 value={formData.totalEmployees}
                 onChange={(e) => setFormData({ ...formData, totalEmployees: e.target.value })}
                 disabled
-                helperText={parseInt(formData.totalEmployees) < 10 ? "L'effectif doit être ≥ 10 pour organiser des élections" : "Éligible aux élections professionnelles"}
+                helperText="Ces effectifs pourront être précisés ultérieurement."
               />
             </ModernFormGrid>
           </ModernFormSection>
@@ -394,17 +379,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                     </div>
                  </div>
                ))}
-             </div>
-             <div className="mt-4">
-               <ModernFormGrid cols={1}>
-                 <FloatingInput
-                   label="Nombre total de bureaux de vote prévus"
-                   type="number"
-                   value={formData.totalBureaux}
-                   onChange={(e) => setFormData({...formData, totalBureaux: e.target.value})}
-                   required
-                 />
-               </ModernFormGrid>
              </div>
              
              <div className="mt-6 border-t pt-6">
@@ -447,9 +421,19 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
               <FloatingInput label="Affichage des listes (J-5)" type="date" value={formData.listDisplayDate} onChange={(e) => setFormData({...formData, listDisplayDate: e.target.value})} />
               <FloatingInput label="Début de campagne" type="date" value={formData.campaignStart} onChange={(e) => setFormData({...formData, campaignStart: e.target.value})} />
               <FloatingInput label="Fin de campagne" type="date" value={formData.campaignEnd} onChange={(e) => setFormData({...formData, campaignEnd: e.target.value})} />
-              <FloatingInput label="Date 2nd Tour (+7J si besoin)" type="date" value={formData.secondRoundDate} onChange={(e) => setFormData({...formData, secondRoundDate: e.target.value})} />
-              <FloatingInput label="Début des recours" type="date" value={formData.recoursStart} onChange={(e) => setFormData({...formData, recoursStart: e.target.value})} />
-              <FloatingInput label="Fin des recours" type="date" value={formData.recoursEnd} onChange={(e) => setFormData({...formData, recoursEnd: e.target.value})} />
+              <div className="relative">
+                <select
+                  value={formData.hasSecondRound ? "Oui" : "Non"}
+                  onChange={(e) => setFormData({...formData, hasSecondRound: e.target.value === "Oui"})}
+                  className="block px-3 pb-2.5 pt-5 w-full text-sm text-gray-900 bg-white border border-gray-300 rounded-md appearance-none focus:outline-none focus:ring-0 focus:border-gov-blue peer"
+                >
+                  <option value="Oui">Oui</option>
+                  <option value="Non">Non</option>
+                </select>
+                <label className="absolute text-xs text-gray-500 duration-300 transform -translate-y-3 scale-75 top-4 z-10 origin-[0] left-3 peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-3">
+                  Deuxième tour prévisible (Oui/Non)
+                </label>
+              </div>
             </ModernFormGrid>
           </ModernFormSection>
         );
@@ -457,46 +441,57 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
         return (
           <ModernFormSection title="Récapitulatif" description="Vérifiez les informations" icon={<Check className="w-5 h-5" />}>
             <div className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
-                <h4 className="font-semibold text-gray-900 mb-2">Élection</h4>
-                <p><strong>Nom:</strong> {formData.name}</p>
-                <p><strong>Date 1er tour:</strong> {formData.date}</p>
-                <p><strong>Entreprise:</strong> {formData.enterpriseName} ({formData.totalEmployees} salariés)</p>
-                {formData.administrativeUnit && (
-                  <p><strong>Unité Administrative:</strong> {formData.administrativeUnit}</p>
-                )}
-                <p><strong>Secteur d'activité:</strong> {formData.enterpriseSector === 'prive' ? 'Privé' : formData.enterpriseSector === 'public' ? 'Public' : 'Parapublic'}</p>
+              <div className="mb-4">
+                <h4 className="text-sm font-semibold text-gray-900 mb-2">Image de couverture</h4>
+                <ImageUploader 
+                  onUploadSuccess={(url) => setFormData({ ...formData, coverImage: url })}
+                  defaultValue={formData.coverImage}
+                />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
+                  <h4 className="font-semibold text-gray-900 mb-2 border-b pb-1">Informations de l'Élection</h4>
+                  <p><strong>Nom:</strong> {formData.name || 'Non renseigné'}</p>
+                  <p><strong>Date 1er tour:</strong> {formData.date || 'Non renseignée'}</p>
+                  <p><strong>Entreprise:</strong> {formData.enterpriseName || 'Non renseignée'}</p>
+                  <p><strong>Secteur d'activité:</strong> {formData.enterpriseSector === 'prive' ? 'Privé' : formData.enterpriseSector === 'public' ? 'Public' : 'Parapublic'}</p>
+                  <p><strong>N° Enregistrement:</strong> {formData.numEnregistrement || 'Non renseigné'}</p>
+                  {formData.administrativeUnit && (
+                    <p><strong>Unité Administrative:</strong> {formData.administrativeUnit}</p>
+                  )}
+                </div>
+
+                <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
+                  <h4 className="font-semibold text-gray-900 mb-2 border-b pb-1">Ressources Humaines</h4>
+                  <p><strong>Nom du RH:</strong> {formData.hrName || 'Non renseigné'}</p>
+                  <p><strong>Téléphone RH:</strong> {formData.hrPhone || 'Non renseigné'}</p>
+                  <p><strong>Email RH:</strong> {formData.hrEmail || 'Non renseigné'}</p>
+                </div>
               </div>
 
-              {formData.votingCenters && formData.votingCenters.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
-                  <h4 className="font-semibold text-gray-900 mb-2">Établissements & Bureaux importés ({formData.votingCenters.length})</h4>
-                  <div className="max-h-40 overflow-y-auto space-y-1">
-                    {formData.votingCenters.map((vc: any, idx: number) => (
-                      <div key={idx} className="border-b pb-1 last:border-0 text-xs">
-                        <p><strong>{vc.name}</strong> ({vc.address}) - {vc.bureaux} bureau(x) / {vc.voters} électeurs</p>
-                      </div>
-                    ))}
-                  </div>
+                  <h4 className="font-semibold text-gray-900 mb-2 border-b pb-1">Chronogramme Électoral</h4>
+                  <p><strong>Affichage des listes:</strong> {formData.listDisplayDate || 'Non renseigné'}</p>
+                  <p><strong>Début de campagne:</strong> {formData.campaignStart || 'Non renseigné'}</p>
+                  <p><strong>Fin de campagne:</strong> {formData.campaignEnd || 'Non renseigné'}</p>
+                  <p><strong>Deuxième tour prévisible:</strong> {formData.hasSecondRound ? 'Oui' : 'Non'}</p>
                 </div>
-              )}
 
-              {formData.candidates && formData.candidates.length > 0 && (
                 <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
-                  <h4 className="font-semibold text-gray-900 mb-2">Candidats & Syndicats importés ({formData.candidates.length})</h4>
-                  <div className="max-h-40 overflow-y-auto space-y-1">
-                    {formData.candidates.map((cand: any, idx: number) => (
-                      <div key={idx} className="border-b pb-1 last:border-0 text-xs">
-                        <p>
-                          <strong>{cand.unionAcronym ? `[${cand.unionAcronym}] ` : ''}{cand.unionName}</strong> 
-                          {cand.college ? ` (Collège ${cand.college})` : ''} : 
-                          Titulaire : <em>{cand.titulaireName || 'Aucun'}</em> / Suppléant : <em>{cand.suppleantName || 'Aucun'}</em>
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                  <h4 className="font-semibold text-gray-900 mb-2 border-b pb-1">Collèges Électoraux</h4>
+                  {formData.colleges && formData.colleges.length > 0 ? (
+                    <ul className="list-disc pl-4 space-y-1">
+                      {formData.colleges.map((c, i) => (
+                        <li key={i}>{c.name} ({c.type})</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-gray-500 italic">Aucun collège configuré</p>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </ModernFormSection>
         );

@@ -970,8 +970,8 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                 <TrendingUp className="h-4 w-4" />
                 Résultats simulés
               </h3>
-               <div className="h-48 flex">
-                <div className="w-1/2">
+               <div className="flex flex-col sm:flex-row sm:h-48 gap-4">
+                <div className="w-full sm:w-1/2 h-48 sm:h-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -1007,7 +1007,7 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="w-1/2 flex items-center justify-center">
+                <div className="w-full sm:w-1/2 flex items-center justify-center py-2">
                   <div className="space-y-2">
                     {chartData.map((entry, index) => (
                       <div key={index} className="flex items-center gap-2">
