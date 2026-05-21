@@ -402,7 +402,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
           <ModernFormSection title="L'Entreprise / Établissement" description="Informations sur l'employeur" icon={<Building className="w-5 h-5" />}>
             <ModernFormGrid cols={2}>
               <FloatingInput
-                label="Raison Sociale"
+                label="Organisation"
                 value={formData.enterpriseName}
                 onChange={(e) => setFormData({ ...formData, enterpriseName: e.target.value })}
                 required
@@ -597,7 +597,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                   <p><strong>Date 1er tour:</strong> {formData.date || 'Non renseignée'}</p>
                   <p><strong>Entreprise:</strong> {formData.enterpriseName || 'Non renseignée'}</p>
                   <p><strong>Secteur d'activité:</strong> {formData.enterpriseSector === 'prive' ? 'Privé' : formData.enterpriseSector === 'public' ? 'Public' : 'Parapublic'}</p>
-                  <p><strong>N° Enregistrement:</strong> {formData.numEnregistrement || 'Non renseigné'}</p>
                   {formData.administrativeUnit && (
                     <p><strong>Tutelle:</strong> {formData.administrativeUnit}</p>
                   )}

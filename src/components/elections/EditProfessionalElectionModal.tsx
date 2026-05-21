@@ -264,7 +264,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
               >
                 <ModernFormGrid cols={2}>
                   <FloatingInput
-                    label="Raison Sociale"
+                    label="Organisation"
                     value={formData.enterpriseName}
                     onChange={(e) => setFormData({ ...formData, enterpriseName: e.target.value })}
                     required

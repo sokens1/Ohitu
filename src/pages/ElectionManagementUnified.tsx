@@ -198,7 +198,7 @@ const ElectionManagementUnified = () => {
 
               resolve({
                 name: configMap["Intitule"] || configMap["Nom de l'élection"] || configMap["Nom"] || "",
-                enterpriseName: configMap["Entreprise"] || configMap["Raison Sociale"] || "",
+                enterpriseName: configMap["Organisation"] || configMap["Entreprise"] || configMap["Raison Sociale"] || "",
                 numEnregistrement: configMap["Numero_Enregistrement"] || configMap["Numéro Enregistrement"] || configMap["N° Enregistrement"] || "",
                 enterpriseSector: sector,
                 administrativeUnit: configMap["Unite_Administrative"] || configMap["Unité Administrative (Ministère de rattachement)"] || configMap["Unité Administrative"] || "",
