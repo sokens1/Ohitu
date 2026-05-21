@@ -1206,7 +1206,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       <div className="space-y-3">
                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>
-                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Raison Sociale</label>
+                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Organisation</label>
                             <p className="text-sm font-bold text-gray-900 mt-1">
                               {loadingEnterprise ? 'Chargement...' : (enterprise?.name || 'Non renseignée')}
                             </p>
