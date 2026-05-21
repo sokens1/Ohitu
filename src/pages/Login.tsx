@@ -449,7 +449,7 @@ const Login = () => {
 
               <div className="mt-4 sm:mt-6 text-center">
                 <p className="text-xs text-gray-500">
-                  o'Hitu - une solution de CNX 4-0
+                  o'Hitu - une solution de CNX 4.0
                 </p>
             </div>
           </CardContent>
