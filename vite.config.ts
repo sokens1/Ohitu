@@ -61,7 +61,7 @@ function adminApiPlugin(): Plugin {
             return;
           }
 
-          const { name, email, password, role, is_active, assigned_election_id, created_by } = body;
+          const { name, email, password, role, is_active, assigned_election_id, assigned_election_ids, created_by } = body;
 
           if (!name || !email || !password || !role) {
             res.statusCode = 400;
@@ -157,6 +157,7 @@ function adminApiPlugin(): Plugin {
               role,
               is_active: is_active ?? true,
               assigned_election_id: assigned_election_id || null,
+              assigned_election_ids: Array.isArray(assigned_election_ids) && assigned_election_ids.length > 0 ? assigned_election_ids : null,
               created_by: created_by || null,
             }, { onConflict: 'id' })
             .select()

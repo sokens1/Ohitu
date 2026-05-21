@@ -84,15 +84,9 @@ class AuditService {
    * Récupère l'adresse IP du client (pour usage navigateur)
    */
   private async getClientIP(): Promise<string | null> {
-    try {
-      // Essayer de récupérer l'IP via un service externe
-      const response = await fetch('https://api.ipify.org?format=json');
-      const data = await response.json();
-      return data.ip || null;
-    } catch (error) {
-      console.warn('Impossible de récupérer l\'IP:', error);
-      return null;
-    }
+    // L'IP client n'est pas récupérée côté navigateur (requête bloquée par les ad-blockers).
+    // Elle sera renseignée côté serveur dans un contexte production si nécessaire.
+    return null;
   }
 
   /**

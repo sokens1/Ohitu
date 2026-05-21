@@ -12,6 +12,7 @@ export interface User {
   role: UserRole;
   isActive: boolean;
   assigned_election_id?: string | null;
+  assigned_election_ids?: string[] | null;
   created_by?: string | null;
 }
 
@@ -55,6 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               role: userData.role,
               isActive: userData.is_active,
               assigned_election_id: userData.assigned_election_id,
+              assigned_election_ids: userData.assigned_election_ids ?? null,
               created_by: userData.created_by
             };
             setUser(u);

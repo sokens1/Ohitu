@@ -1,8 +1,7 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserRole } from '@/contexts/AuthContext';
-import { toast } from 'sonner';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -13,16 +12,6 @@ const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateu
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
   const { user, authLoading } = useAuth();
-
-  useEffect(() => {
-    if (!authLoading && user && allowedRoles && !allowedRoles.includes(user.role)) {
-      toast.error('Accès refusé', {
-        description: 'Votre profil ne dispose pas des autorisations nécessaires pour accéder à cette section.',
-        duration: 5000,
-        position: 'top-right',
-      });
-    }
-  }, [user, authLoading, allowedRoles]);
 
   if (authLoading) {
     return (
