@@ -77,12 +77,22 @@ export function useRBAC() {
     return OPERATIONAL_ROLES.includes(user.role) ? '/results' : '/dashboard';
   };
 
+  // IDs des élections assignées (plusieurs possible)
+  const assignedElectionIds: string[] =
+    user?.assigned_election_ids?.length
+      ? user.assigned_election_ids
+      : user?.assigned_election_id
+        ? [user.assigned_election_id]
+        : [];
+
   return {
     can,
     defaultRoute,
     defaultResultsTab,
     role: user?.role,
-    assignedElectionId: user?.assigned_election_id ?? null,
+    // Compatibilité : première élection assignée (ou null)
+    assignedElectionId: assignedElectionIds[0] ?? null,
+    assignedElectionIds,
     isGlobalAdmin: user?.role === 'super-admin',
     isAdmin: user?.role === 'admin',
     isOperational: OPERATIONAL_ROLES.includes(user?.role ?? '' as UserRole),

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
+
 import {
   Users,
   Plus,
@@ -26,6 +26,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
 import type { UserRole } from '@/contexts/AuthContext';
+import FloatingInput from '@/components/ui/floating-input';
+import FloatingSelect from '@/components/ui/floating-select';
 
 interface AppUser {
   id: string;
@@ -36,6 +38,7 @@ interface AppUser {
   createdAt: string;
   lastLogin?: string;
   assigned_election_id?: string | null;
+  assigned_election_ids?: string[] | null;
   created_by?: string | null;
   electionTitle?: string;
 }
@@ -74,6 +77,88 @@ const ROLE_BADGE: Record<UserRole, string> = {
 const getRoleLabel = (role: UserRole): string =>
   ALL_ROLES.find(r => r.value === role)?.label ?? role;
 
+// ── Multi-select élections (inline, sans modal) ────────────────────────────
+interface ElectionMultiSelectProps {
+  label: string;
+  elections: { id: string; title: string }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}
+
+const ElectionMultiSelect: React.FC<ElectionMultiSelectProps> = ({ label, elections, selected, onChange }) => {
+  const [search, setSearch] = React.useState('');
+  const filtered = elections.filter(e => e.title.toLowerCase().includes(search.toLowerCase()));
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]);
+
+  return (
+    <div className="space-y-2 border-2 border-gray-300 rounded-xl p-3 bg-white hover:border-gray-400 transition-colors">
+      {/* Label style floating */}
+      <span className="block text-xs font-medium text-gray-500 mb-1">{label}</span>
+
+      {/* Badges */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selected.map(id => {
+            const title = elections.find(e => e.id === id)?.title ?? id;
+            return (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#1B2E5A] text-white"
+              >
+                {title}
+                <button type="button" onClick={() => toggle(id)} className="ml-0.5 hover:opacity-70 leading-none">
+                  ×
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Recherche */}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+        <Input
+          placeholder="Rechercher une élection…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="h-8 text-sm pl-8 border-gray-200 bg-gray-50 focus:bg-white"
+        />
+      </div>
+
+      {/* Liste checkboxes */}
+      <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 divide-y bg-white">
+        {filtered.length === 0 ? (
+          <p className="text-xs text-gray-400 py-3 text-center">Aucune élection trouvée</p>
+        ) : filtered.map(e => (
+          <label
+            key={e.id}
+            className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-blue-50 transition-colors text-sm"
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(e.id)}
+              onChange={() => toggle(e.id)}
+              className="h-4 w-4 rounded accent-[#1B2E5A]"
+            />
+            <span className="truncate text-gray-800">{e.title}</span>
+            {selected.includes(e.id) && (
+              <CheckCircle className="ml-auto h-3.5 w-3.5 text-[#1B2E5A] flex-shrink-0" />
+            )}
+          </label>
+        ))}
+      </div>
+
+      {selected.length > 0 && (
+        <p className="text-xs text-gray-400">
+          {selected.length} élection{selected.length > 1 ? 's' : ''} sélectionnée{selected.length > 1 ? 's' : ''}
+        </p>
+      )}
+    </div>
+  );
+};
+
 const UserManagement = () => {
   const { user: currentUser } = useAuth();
   const { isGlobalAdmin, isAdmin } = useRBAC();
@@ -98,9 +183,8 @@ const UserManagement = () => {
   const [fPassword, setFPassword] = useState('');
   const [fRole, setFRole] = useState<UserRole>('observateur');
   const [fActive, setFActive] = useState(true);
-  const [fElectionId, setFElectionId] = useState<string>('');
+  const [fElectionIds, setFElectionIds] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
-  const [searchElectionQuery, setSearchElectionQuery] = useState('');
 
   // États d'opération
   const [creating, setCreating] = useState(false);
@@ -189,7 +273,7 @@ const UserManagement = () => {
   const resetForm = () => {
     setFName(''); setFEmail(''); setFPassword('');
     setFRole('observateur'); setFActive(true);
-    setFElectionId(''); setSearchElectionQuery('');
+    setFElectionIds([]);
     setShowPassword(false);
   };
 
@@ -197,8 +281,11 @@ const UserManagement = () => {
     setEditingUser(u);
     setFName(u.name); setFEmail(u.email);
     setFPassword(''); setFRole(u.role); setFActive(u.isActive);
-    setFElectionId(u.assigned_election_id ?? '');
-    setSearchElectionQuery('');
+    // Charger les élections assignées (multi ou simple)
+    const ids = u.assigned_election_ids?.length
+      ? u.assigned_election_ids
+      : u.assigned_election_id ? [u.assigned_election_id] : [];
+    setFElectionIds(ids);
     setShowEditModal(true);
   };
 
@@ -210,8 +297,8 @@ const UserManagement = () => {
     if (fPassword.length < 6) {
       toast.error('Le mot de passe doit contenir au moins 6 caractères'); return;
     }
-    if (isAdmin && !fElectionId) {
-      toast.error('Vous devez assigner une élection à cet utilisateur'); return;
+    if (isAdmin && fElectionIds.length === 0) {
+      toast.error('Vous devez assigner au moins une élection à cet utilisateur'); return;
     }
     setCreating(true);
     try {
@@ -231,7 +318,8 @@ const UserManagement = () => {
           password: fPassword,
           role: fRole,
           is_active: fActive,
-          assigned_election_id: fElectionId || null,
+          assigned_election_id: fElectionIds[0] ?? null,
+          assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
           created_by: currentUser?.id || null,
         }),
       });
@@ -243,7 +331,8 @@ const UserManagement = () => {
       }
 
       const inserted = result.user;
-      const electionTitle = allElections.find(e => e.id === inserted.assigned_election_id)?.title;
+      const ids: string[] = inserted.assigned_election_ids ?? (inserted.assigned_election_id ? [inserted.assigned_election_id] : []);
+      const electionTitle = ids.map((id: string) => allElections.find(e => e.id === id)?.title).filter(Boolean).join(', ');
       setUsers(prev => [{
         id: inserted.id,
         name: inserted.name,
@@ -252,6 +341,7 @@ const UserManagement = () => {
         isActive: inserted.is_active,
         createdAt: new Date(inserted.created_at).toISOString().split('T')[0],
         assigned_election_id: inserted.assigned_election_id,
+        assigned_election_ids: ids,
         created_by: inserted.created_by,
         electionTitle,
       }, ...prev]);
@@ -281,7 +371,8 @@ const UserManagement = () => {
           email: fEmail.trim(),
           role: fRole,
           is_active: fActive,
-          assigned_election_id: fElectionId || null,
+          assigned_election_id: fElectionIds[0] ?? null,
+          assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
         })
         .eq('id', editingUser.id);
 
@@ -292,9 +383,9 @@ const UserManagement = () => {
         if (pwdError) toast.warning('Utilisateur mis à jour, mais le mot de passe n\'a pas pu être changé');
       }
 
-      const electionTitle = allElections.find(e => e.id === fElectionId)?.title;
+      const electionTitle = fElectionIds.map(id => allElections.find(e => e.id === id)?.title).filter(Boolean).join(', ');
       setUsers(prev => prev.map(u => u.id === editingUser.id
-        ? { ...u, name: fName.trim(), email: fEmail.trim(), role: fRole, isActive: fActive, assigned_election_id: fElectionId || null, electionTitle }
+        ? { ...u, name: fName.trim(), email: fEmail.trim(), role: fRole, isActive: fActive, assigned_election_id: fElectionIds[0] ?? null, assigned_election_ids: fElectionIds, electionTitle }
         : u
       ));
       toast.success('Utilisateur mis à jour');
@@ -338,58 +429,51 @@ const UserManagement = () => {
 
   // ── JSX partagé pour les champs communs du formulaire ──────────────────────
   const formFields = (
-    <>
-      <div>
-        <Label className="text-sm">Nom complet</Label>
-        <Input placeholder="Nom complet" value={fName} onChange={e => setFName(e.target.value)} />
-      </div>
-      <div>
-        <Label className="text-sm">Email</Label>
-        <Input type="email" placeholder="email@example.com" value={fEmail} onChange={e => setFEmail(e.target.value)} />
-      </div>
-      <div>
-        <Label className="text-sm">Rôle</Label>
-        <Select value={fRole} onValueChange={v => setFRole(v as UserRole)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {availableRoles.map(r => (
-              <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="space-y-4">
+      {/* Ligne 1 : Nom + Email */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <FloatingInput
+          label="Nom complet"
+          value={fName}
+          onChange={e => setFName(e.target.value)}
+          autoComplete="off"
+        />
+        <FloatingInput
+          label="Email"
+          type="email"
+          value={fEmail}
+          onChange={e => setFEmail(e.target.value)}
+          autoComplete="off"
+        />
       </div>
 
+      {/* Ligne 2 : Rôle */}
+      <FloatingSelect
+        label="Rôle"
+        options={availableRoles.map(r => ({ value: r.value, label: r.label }))}
+        value={fRole}
+        onChange={v => setFRole(v as UserRole)}
+      />
+
+      {/* Ligne 3 : Élections assignées */}
       {(isAdmin || fRole !== 'super-admin') && (
-        <div className="space-y-2 border rounded-lg p-3 bg-gray-50">
-          <Label className="text-xs font-semibold text-gray-700">
-            {isAdmin ? 'Élection assignée (obligatoire)' : 'Élection assignée (optionnel)'}
-          </Label>
-          <Input
-            placeholder="Rechercher une élection..."
-            value={searchElectionQuery}
-            onChange={e => setSearchElectionQuery(e.target.value)}
-            className="h-8 text-sm"
-          />
-          <Select value={fElectionId || '__none__'} onValueChange={v => setFElectionId(v === '__none__' ? '' : v)}>
-            <SelectTrigger className="text-sm h-8">
-              <SelectValue placeholder="Choisir une élection" />
-            </SelectTrigger>
-            <SelectContent>
-              {!isAdmin && <SelectItem value="__none__">Aucune</SelectItem>}
-              {allElections
-                .filter(e => e.title.toLowerCase().includes(searchElectionQuery.toLowerCase()))
-                .map(e => <SelectItem key={e.id} value={e.id}>{e.title}</SelectItem>)
-              }
-            </SelectContent>
-          </Select>
-        </div>
+        <ElectionMultiSelect
+          label={isAdmin ? 'Élections assignées (obligatoire)' : 'Élections assignées (optionnel)'}
+          elections={allElections}
+          selected={fElectionIds}
+          onChange={setFElectionIds}
+        />
       )}
 
-      <div className="flex items-center gap-2">
+      {/* Compte actif */}
+      <div className="flex items-center gap-3 px-1 py-2 bg-gray-50 rounded-xl border border-gray-200">
         <Switch checked={fActive} onCheckedChange={v => setFActive(!!v)} />
-        <span className="text-sm text-gray-600">Compte actif</span>
+        <div>
+          <span className="text-sm font-medium text-gray-800">Compte actif</span>
+          <p className="text-xs text-gray-500">{fActive ? "L'utilisateur peut se connecter" : "Accès suspendu"}</p>
+        </div>
       </div>
-    </>
+    </div>
   );
 
   // ── Rendu ────────────────────────────────────────────────────────────────────
@@ -424,7 +508,7 @@ const UserManagement = () => {
                 : 'Utilisateurs que vous avez créés et rattachés à vos élections'}
             </p>
           </div>
-          <Button onClick={() => { resetForm(); setShowAddModal(true); }} className="w-full sm:w-auto bg-[#006400] hover:bg-[#005200] text-white">
+          <Button onClick={() => { resetForm(); setShowAddModal(true); }} className="w-full sm:w-auto bg-[#1B2E5A] hover:bg-[#142347] text-white">
             <Plus className="h-4 w-4 mr-2" />
             Ajouter un utilisateur
           </Button>
@@ -560,78 +644,103 @@ const UserManagement = () => {
 
       {/* Modal Ajout */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <DialogContent className="max-w-md" aria-describedby={undefined}>
-          <DialogHeader>
-            <DialogTitle>Ajouter un utilisateur</DialogTitle>
+        <DialogContent
+          className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto"
+          aria-describedby={undefined}
+        >
+          <DialogHeader className="pb-2 border-b">
+            <DialogTitle className="text-lg font-semibold text-[#1B2E5A]">
+              Nouvel utilisateur
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+
+          <div className="py-4 space-y-5">
             {formFields}
-            <div>
-              <Label className="text-sm">Mot de passe</Label>
-              <div className="relative">
-                <Input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={fPassword}
-                  onChange={e => setFPassword(e.target.value)}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+
+            {/* Mot de passe */}
+            <div className="relative">
+              <FloatingInput
+                label="Mot de passe"
+                type={showPassword ? 'text' : 'password'}
+                value={fPassword}
+                onChange={e => setFPassword(e.target.value)}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setShowAddModal(false)}>Annuler</Button>
-              <Button onClick={handleCreate} disabled={creating}>
-                <CheckCircle className="h-4 w-4 mr-2" />
-                {creating ? 'Création...' : "Créer l'utilisateur"}
-              </Button>
-            </div>
+          </div>
+
+          <div className="pt-3 border-t flex flex-col-reverse sm:flex-row justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowAddModal(false)} className="w-full sm:w-auto">
+              Annuler
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={creating}
+              className="w-full sm:w-auto bg-[#1B2E5A] hover:bg-[#142347] text-white"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              {creating ? 'Création en cours…' : "Créer l'utilisateur"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
 
       {/* Modal Modification */}
       <Dialog open={showEditModal} onOpenChange={v => { setShowEditModal(v); if (!v) setEditingUser(null); }}>
-        <DialogContent className="max-w-md" aria-describedby={undefined}>
-          <DialogHeader>
-            <DialogTitle>Modifier l'utilisateur</DialogTitle>
+        <DialogContent
+          className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto"
+          aria-describedby={undefined}
+        >
+          <DialogHeader className="pb-2 border-b">
+            <DialogTitle className="text-lg font-semibold text-[#1B2E5A]">
+              Modifier l'utilisateur
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+
+          <div className="py-4 space-y-5">
             {formFields}
-            <div>
-              <Label className="text-sm">Nouveau mot de passe (optionnel)</Label>
-              <div className="relative">
-                <Input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Laisser vide pour ne pas changer"
-                  value={fPassword}
-                  onChange={e => setFPassword(e.target.value)}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+
+            {/* Nouveau mot de passe */}
+            <div className="relative">
+              <FloatingInput
+                label="Nouveau mot de passe (optionnel)"
+                type={showPassword ? 'text' : 'password'}
+                value={fPassword}
+                onChange={e => setFPassword(e.target.value)}
+                autoComplete="new-password"
+                helperText="Laissez vide pour ne pas modifier le mot de passe actuel"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(v => !v)}
+                className="absolute right-3 top-[22px] text-gray-400 hover:text-gray-600 z-10"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => { setShowEditModal(false); setEditingUser(null); }}>Annuler</Button>
-              <Button onClick={handleUpdate} disabled={updating}>
-                <CheckCircle className="h-4 w-4 mr-2" />
-                {updating ? 'Mise à jour...' : 'Enregistrer'}
-              </Button>
-            </div>
+          </div>
+
+          <div className="pt-3 border-t flex flex-col-reverse sm:flex-row justify-end gap-2">
+            <Button variant="outline" onClick={() => { setShowEditModal(false); setEditingUser(null); }} className="w-full sm:w-auto">
+              Annuler
+            </Button>
+            <Button
+              onClick={handleUpdate}
+              disabled={updating}
+              className="w-full sm:w-auto bg-[#1B2E5A] hover:bg-[#142347] text-white"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              {updating ? 'Enregistrement…' : 'Enregistrer les modifications'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -33,7 +33,8 @@ const TAB_DEFS = [
 
 // ─── Composant ────────────────────────────────────────────────────────────────
 const Results = () => {
-  const { can, assignedElectionId, role, isGlobalAdmin } = useRBAC();
+  const { can, assignedElectionId, assignedElectionIds, role, isGlobalAdmin } = useRBAC();
+  const hasMultipleElections = assignedElectionIds.length > 1;
 
   const allowedTabs = TAB_DEFS.filter(t => can(t.permission));
 
@@ -61,7 +62,7 @@ const Results = () => {
         setLoading(true);
 
         // Non super-admin sans élection assignée → aucune élection accessible
-        if (!isGlobalAdmin && !assignedElectionId) {
+        if (!isGlobalAdmin && assignedElectionIds.length === 0) {
           setAvailableElections([]);
           setSelectedElection('');
           return;
@@ -69,9 +70,11 @@ const Results = () => {
 
         let query = supabase.from('elections').select('id, title').order('election_date', { ascending: false });
 
-        // Tout rôle non super-admin : restreindre à l'élection assignée uniquement
-        if (!isGlobalAdmin && assignedElectionId) {
-          query = query.eq('id', assignedElectionId);
+        // Tout rôle non super-admin : restreindre aux élections assignées
+        if (!isGlobalAdmin && assignedElectionIds.length > 0) {
+          query = assignedElectionIds.length === 1
+            ? query.eq('id', assignedElectionIds[0])
+            : query.in('id', assignedElectionIds);
         }
 
         const { data, error } = await query;
@@ -82,8 +85,8 @@ const Results = () => {
         );
         setAvailableElections(elections);
 
-        if (assignedElectionId) {
-          setSelectedElection(assignedElectionId);
+        if (assignedElectionIds.length === 1) {
+          setSelectedElection(assignedElectionIds[0]);
         } else if (!localStorage.getItem('results_selected_election') && elections.length > 0) {
           setSelectedElection(elections[0].id);
         }
@@ -206,8 +209,11 @@ const Results = () => {
                   Élection active :
                 </label>
 
-                {/* Non super-admin : élection verrouillée sur leur assignation */}
-                {!isGlobalAdmin ? (
+                {/* Sélecteur selon le rôle :
+                    - super-admin : toutes les élections (libre)
+                    - rôle avec 1 élection : verrouillé
+                    - rôle avec plusieurs élections : sélecteur restreint */}
+                {!isGlobalAdmin && !hasMultipleElections ? (
                   <div className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-md text-sm text-gray-800 w-full sm:w-80">
                     <Lock className="h-4 w-4 text-gray-400 flex-shrink-0" />
                     <span className="truncate">
