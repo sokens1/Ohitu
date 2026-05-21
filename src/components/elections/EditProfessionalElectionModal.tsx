@@ -282,7 +282,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                 </ModernFormGrid>
                 <ModernFormGrid cols={1}>
                   <FloatingInput
-                    label="Unité Administrative (Ministère de rattachement)"
+                    label="Tutelle"
                     value={formData.administrativeUnit}
                     onChange={(e) => setFormData({ ...formData, administrativeUnit: e.target.value })}
                   />
