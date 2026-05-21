@@ -29,6 +29,11 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 import { toast } from 'sonner';
 import SimulationResultsSection from './SimulationResultsSection';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
+import {
+  getElectionElectorsTotal,
+  getRegisteredVotersLabel,
+  isProfessionalElection,
+} from '@/utils/electionCalculations';
 
 interface PublishSectionProps {
   selectedElection: string;
@@ -46,6 +51,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const [nonValidatedByCenter, setNonValidatedByCenter] = useState<any[]>([]);
   const [nonValidatedByBureau, setNonValidatedByBureau] = useState<any[]>([]);
   const [nonValidatedCount, setNonValidatedCount] = useState<number>(0);
+  const [electionType, setElectionType] = useState<string | undefined>();
 
   // Fonction pour charger les résultats (provisoires = entered + validés) et calculer les agrégats
   const loadFinalResults = useCallback(async () => {
@@ -56,9 +62,16 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         // 0) Charger le type de l'élection (pour différencier pro / standard)
         const { data: electionData } = await supabase
           .from('elections')
-          .select('type')
+          .select('type, nb_electeurs')
           .eq('id', selectedElection)
           .single();
+
+        const isPro = isProfessionalElection(electionData?.type);
+        setElectionType(electionData?.type);
+        const totalElectorsElection = await getElectionElectorsTotal(
+          selectedElection,
+          electionData?.type
+        );
 
         // 1) Récupérer PV par statut (validés ET publiés ensemble)
         const { data: pvsValidated, error: pvValErr } = await supabase
@@ -107,7 +120,11 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           filteredEnteredPvs = filteredEnteredPvs.filter((pv: any) => allowedBureauIds.has(pv.bureau_id));
         }
         
-        console.log('📊 [PublishSection] Total inscrits calculé depuis TOUS les bureaux:', totalInscritsElection);
+        if (totalInscritsElection === 0 && totalElectorsElection > 0) {
+          totalInscritsElection = totalElectorsElection;
+        }
+
+        console.log('📊 [PublishSection] Total électeurs/inscrits élection:', totalInscritsElection, 'isPro:', isPro);
         
         const filteredPvsAll = [...filteredValidatedPvs, ...filteredEnteredPvs];
         setNonValidatedCount(filteredEnteredPvs.length);
@@ -179,8 +196,10 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           totalExprimesPV += Number(pv.votes_expressed) || 0;
         });
 
-        // Pour le calcul du taux : utiliser les inscrits des bureaux avec PV
-        const totalInscrits = totalInscritsDesBureauxAvecPV;
+        let totalInscrits = totalInscritsDesBureauxAvecPV;
+        if (isPro && totalInscrits === 0 && totalInscritsElection > 0) {
+          totalInscrits = totalInscritsElection;
+        }
         
         console.log('📊 [PublishSection] Total inscrits (bureaux avec PV):', totalInscrits);
         console.log('📊 [PublishSection] Total inscrits élection (TOUS bureaux - calculé):', totalInscritsElection);
@@ -634,7 +653,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                       </>
                     ) : '0'}
                   </div>
-                  <div className="text-gray-600">Inscrits</div>
+                  <div className="text-gray-600">{getRegisteredVotersLabel(electionType)}</div>
                 </div>
                 <div>
                   <div className="font-medium text-gray-900">
@@ -854,7 +873,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                   <TableRow>
                     <TableHead>Centre de Vote</TableHead>
                     <TableHead>Bureau</TableHead>
-                    <TableHead>Inscrits</TableHead>
+                    <TableHead>{getRegisteredVotersLabel(electionType)}</TableHead>
                     <TableHead>Votants</TableHead>
                     {finalResults?.candidates.map((c) => (
                       <TableHead key={c.id}>{c.name}</TableHead>

@@ -807,10 +807,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </div>
               
               <Badge 
-                variant={getStatusVariant(election.status)}
-                className="px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium"
+                variant={election.hiddenFromPublic ? 'outline' : getStatusVariant(election.status)}
+                className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium ${
+                  election.hiddenFromPublic
+                    ? 'bg-violet-100 text-violet-800 border-violet-300 hover:bg-violet-100'
+                    : ''
+                }`}
               >
-                {election.status}
+                {election.hiddenFromPublic ? 'Masqué au public' : election.status}
               </Badge>
             </div>
             
@@ -973,10 +977,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Statut</label>
                       <div className="mt-1">
                         <Badge 
-                          variant={getStatusVariant(election.status)}
-                          className="px-2 py-1 text-xs font-medium"
+                          variant={election.hiddenFromPublic ? 'outline' : getStatusVariant(election.status)}
+                          className={`px-2 py-1 text-xs font-medium ${
+                            election.hiddenFromPublic
+                              ? 'bg-violet-100 text-violet-800 border-violet-300'
+                              : ''
+                          }`}
                         >
-                          {election.status}
+                          {election.hiddenFromPublic ? 'Masqué au public' : election.status}
                         </Badge>
                       </div>
                     </div>

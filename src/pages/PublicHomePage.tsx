@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Link, useNavigate } from 'react-router-dom';
 import { Calendar, Users, TrendingUp, RefreshCw, Flag, Landmark, Megaphone, Facebook, Link as LinkIcon, Menu, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchAllElections, fetchRunningElection, fetchPublishedElection, fetchLatestElection } from '../api/elections';
+import { fetchPublicElections, fetchRunningElection, fetchPublishedElection, fetchLatestElection } from '../api/elections';
+import { isElectionVisibleOnPublic } from '@/utils/electionVisibility';
 import { fetchGlobalMetrics } from '../api/metrics';
 import { toast } from 'sonner';
 import SEOHead from '@/components/SEOHead';
@@ -133,11 +134,12 @@ const PublicHomePage = () => {
 
       // Prochaine élection (client: plus proche >= aujourd'hui, sinon plus récente passée)
       try {
-        const all = await fetchAllElections();
+        const all = await fetchPublicElections();
         setAllElections(all as any);
         if (all && all.length > 0) {
           const now = new Date();
           const filtered = all.filter((e: any) => {
+            if (!isElectionVisibleOnPublic(e)) return false;
             const s = String(e.status || '').toLowerCase();
             return !(s === 'terminée' || s === 'terminee' || s === 'terminé' || s === 'termine' || s === 'terminer' || s === 'fini');
           });

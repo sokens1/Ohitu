@@ -153,6 +153,8 @@ export interface Election {
   second_round_date?: string | null;
   // Champs spécifiques Élection Professionnelle
   professionalConfig?: ProfessionalElectionConfig;
+  /** Masquée des pages publiques (is_public_visible = false). */
+  hiddenFromPublic?: boolean;
 }
 
 // Interface pour les candidats
