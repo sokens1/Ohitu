@@ -41,6 +41,8 @@ interface CandidateResult {
   total_votes: number;
   percentage: number;
   rank: number;
+  seats?: number;
+  colleges?: string[];
 }
 
 interface ElectionResults {
@@ -183,19 +185,25 @@ const CandidateCard: React.FC<{
             <h3 className="text-lg sm:text-xl font-bold text-gray-800 mb-1 group-hover:text-blue-600 transition-colors leading-tight">
               {candidate.candidate_name}
             </h3>
-            <p className="text-gray-600 text-xs sm:text-sm font-medium">
-              {candidate.party_name || 'Candidat indépendant'}
-            </p>
+            {candidate.colleges && candidate.colleges.length > 0 ? (
+               <div className="flex flex-wrap gap-1 mt-2">
+                 {candidate.colleges.map(c => <span key={c} className="px-2 py-1 bg-blue-100 text-blue-800 font-medium text-xs rounded-full border border-blue-200">{c}</span>)}
+               </div>
+            ) : (
+               <p className="text-gray-600 text-xs sm:text-sm font-medium">
+                 {candidate.party_name || 'Candidat indépendant'}
+               </p>
+            )}
           </div>
 
           {/* Barre de progression moderne */}
           <div className="mb-3 sm:mb-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
-                {candidate.total_votes.toLocaleString()}
+                {candidate.seats !== undefined ? `${candidate.seats} sièges` : candidate.total_votes.toLocaleString()}
               </span>
               <span className="text-sm sm:text-base lg:text-lg font-semibold text-blue-600">
-                {percentage.toFixed(2)}%
+                {candidate.seats !== undefined ? `(${candidate.total_votes.toLocaleString()} voix - ${percentage.toFixed(2)}%)` : `${percentage.toFixed(2)}%`}
               </span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2 sm:h-3 overflow-hidden">
@@ -211,7 +219,9 @@ const CandidateCard: React.FC<{
           </div>
 
           <div className="text-center">
-            <span className="text-xs sm:text-sm text-gray-500">voix exprimées</span>
+            <span className="text-xs sm:text-sm text-gray-500">
+              {candidate.seats !== undefined ? "voix exprimées (répartition calculée)" : "voix exprimées"}
+            </span>
           </div>
 
           {/* Indication d'interaction */}
@@ -756,31 +766,136 @@ const ElectionResults: React.FC = () => {
       console.log('📊 [ElectionResults] Bureaux construits:', filteredBureaux.length);
       console.log('📊 [ElectionResults] Centres construits:', filteredCenters.length);
 
-      // Agréger les votes par candidat
-      const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number }>();
-      (candidateResultsData || []).forEach((cr: any) => {
-        const existing = candidateVotesMap.get(cr.candidate_id) || {
-          candidate_id: cr.candidate_id,
-          candidate_name: cr.candidates?.name || '',
-          party: cr.candidates?.party || '',
-          total_votes: 0
-        };
-        existing.total_votes += Number(cr.votes) || 0;
-        candidateVotesMap.set(cr.candidate_id, existing);
-      });
-
-      const filteredSummaryData = Array.from(candidateVotesMap.values());
-
-      // Calculer les totaux globaux
+      // Calculer les totaux globaux (il faut les calculer avant les sièges)
       const votersSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
       const expressedSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
       const registeredInBureauxWithResults = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
-
-      // Totaux affichés en tête
+      
       const totalVotesCast = expressedSum; // bulletins exprimés
       const totalRegistered = registeredInBureauxWithResults; // Inscrits des bureaux dépouillés
       const totalRegisteredElection = allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0); // Total réel de TOUS les bureaux
       const participationRate = totalRegistered > 0 ? Math.min(Math.max((votersSum / totalRegistered) * 100, 0), 100) : 0;
+
+      // Agréger les votes par candidat ou syndicat
+      const isProfessional = election.type === 'Élection Professionnelle';
+      const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number; colleges: Set<string>; seats: number; remainder: number }>();
+      
+      (candidateResultsData || []).forEach((cr: any) => {
+        let groupKey = cr.candidate_id;
+        let candidateName = cr.candidates?.name || '';
+        let partyName = cr.candidates?.party || '';
+        let collegeName = 'Général';
+
+        if (isProfessional) {
+           const parts = (cr.candidates?.party || '').split(' — ');
+           groupKey = parts[0] || cr.candidate_id; // Syndicat
+           partyName = groupKey;
+           candidateName = groupKey;
+           if (parts.length > 1) {
+             collegeName = parts[1];
+           }
+        }
+
+        const existing = candidateVotesMap.get(groupKey) || {
+          candidate_id: groupKey,
+          candidate_name: candidateName,
+          party: partyName,
+          total_votes: 0,
+          colleges: new Set<string>(),
+          seats: 0,
+          remainder: 0,
+        };
+        existing.total_votes += Number(cr.votes) || 0;
+        if (isProfessional) {
+          existing.colleges.add(collegeName);
+        }
+        candidateVotesMap.set(groupKey, existing);
+      });
+
+      let filteredSummaryData = Array.from(candidateVotesMap.values());
+
+      // Calculer les sièges (Quotient électoral + Plus forte moyenne) pour les élections professionnelles
+      // Implémentation des Articles 17 et 18 de l'Arrêté n°000147/MTEFP/SG/DGTMOE/DTR
+      if (isProfessional) {
+        const totalSeats = Number(election.seats_available) || Number((election as any).configuration?.seatsAvailable) || Number((election as any).configuration?.nb_sieges) || 0;
+        if (totalSeats > 0 && totalVotesCast > 0) {
+           const electoralQuotient = totalVotesCast / totalSeats;
+           let allocatedSeats = 0;
+           
+           // --- ARTICLE 17 : Attribution par quotient électoral ---
+           filteredSummaryData.forEach(c => {
+             c.seats = Math.floor(c.total_votes / electoralQuotient);
+             allocatedSeats += c.seats;
+           });
+
+           // --- ARTICLE 18 : Attribution des sièges restants par plus forte moyenne ---
+           const remainingSeats = totalSeats - allocatedSeats;
+           
+           for (let tour = 0; tour < remainingSeats; tour++) {
+             let maxAverage = -1;
+             let tieList: typeof filteredSummaryData = [];
+             
+             filteredSummaryData.forEach(c => {
+               const average = c.total_votes / (c.seats + 1);
+               if (average > maxAverage) {
+                 maxAverage = average;
+                 tieList = [c];
+               } else if (average === maxAverage) {
+                 tieList.push(c);
+               }
+             });
+             
+             let winner = tieList[0];
+             
+             if (tieList.length > 1) {
+               if (tour < remainingSeats - 1) {
+                 // Ce n'est PAS le dernier siège à attribuer
+                 winner = tieList[0];
+               } else {
+                 // C'est le DERNIER siège : départage par le plus grand nombre de voix
+                 let maxVotes = -1;
+                 let tieVotesList: typeof filteredSummaryData = [];
+                 
+                 tieList.forEach(c => {
+                   if (c.total_votes > maxVotes) {
+                     maxVotes = c.total_votes;
+                     tieVotesList = [c];
+                   } else if (c.total_votes === maxVotes) {
+                     tieVotesList.push(c);
+                   }
+                 });
+                 
+                 // En cas d'égalité parfaite (même moyenne et même voix),
+                 // la loi exige un départage manuel par ancienneté puis âge.
+                 // Le système informatique attribue par défaut au premier de la liste.
+                 winner = tieVotesList[0];
+               }
+             }
+             
+             if (winner) {
+               winner.seats += 1;
+             }
+           }
+        }
+      }
+
+      // Format final des candidats
+      const finalCandidates: CandidateResult[] = filteredSummaryData
+          .map(c => ({
+            candidate_id: c.candidate_id,
+            candidate_name: c.candidate_name,
+            party_name: c.party || '',
+            total_votes: c.total_votes || 0,
+            percentage: totalVotesCast > 0 ? (100 * (c.total_votes || 0)) / totalVotesCast : 0,
+            rank: 0,
+            seats: c.seats,
+            colleges: Array.from(c.colleges)
+          }))
+          .sort((a, b) => b.total_votes - a.total_votes)
+          .map((c, idx) => ({
+            ...c,
+            rank: (c.total_votes > 0 && (election.status === 'Terminée' || election.status === 'En cours')) ? idx + 1 : 0
+          }));
 
       console.log('📊 [ElectionResults] Election data:', election);
       console.log('📊 [ElectionResults] election.nb_electeurs (BDD):', election.nb_electeurs);
@@ -798,24 +913,10 @@ const ElectionResults: React.FC = () => {
       setResults({
         election,
         total_voters: totalRegistered,
-        total_voters_election: totalRegisteredElection, // Ajouter le total pour affichage
+        total_voters_election: totalRegisteredElection,
         total_votes_cast: totalVotesCast,
         participation_rate: participationRate,
-        candidates: filteredSummaryData
-          .map((c: any) => ({
-            candidate_id: c.candidate_id,
-            candidate_name: c.candidate_name,
-            party_name: c.party || '',
-            total_votes: c.total_votes || 0,
-            percentage: totalVotesCast > 0 ? (100 * (c.total_votes || 0)) / totalVotesCast : 0,
-            rank: 0
-          }))
-          .sort((a: CandidateResult, b: CandidateResult) => b.total_votes - a.total_votes)
-          .map((c, idx) => ({
-            ...c,
-            // Ne donner un rang que si l'élection est terminée ou en cours ET qu'il y a des votes
-            rank: (c.total_votes > 0 && (election.status === 'Terminée' || election.status === 'En cours')) ? idx + 1 : 0
-          })),
+        candidates: finalCandidates,
         last_updated: new Date().toISOString()
       });
 
@@ -1126,36 +1227,98 @@ const ElectionResults: React.FC = () => {
       }
 
       // Récupérer les résultats du candidat pour les PV publiés
-      const { data: candidateResults } = await supabase
-        .from('candidate_results')
-        .select(`
-          pv_id,
-          votes,
-          procès_verbaux!inner(
-            id,
-            bureau_id,
-            total_registered,
-            total_voters,
-            votes_expressed,
-            voting_bureaux!inner(id, name, center_id, registered_voters)
-          )
-        `)
-        .in('pv_id', publishedPVIds)
-        .eq('candidate_id', candidateId);
+      let candidateResults;
+      const isProfessional = results.election.type === 'Élection Professionnelle';
+
+      if (isProfessional) {
+        const { data: allCandidateResults } = await supabase
+          .from('candidate_results')
+          .select(`
+            pv_id,
+            votes,
+            candidate_id,
+            candidates!inner(id, name, party),
+            procès_verbaux!inner(
+              id,
+              bureau_id,
+              total_registered,
+              total_voters,
+              votes_expressed,
+              voting_bureaux!inner(id, name, center_id, registered_voters)
+            )
+          `)
+          .in('pv_id', publishedPVIds);
+          
+         // filtrer par syndicat (candidateId contient le nom du syndicat dans ce cas)
+         candidateResults = (allCandidateResults || []).filter((cr: any) => {
+            const parts = (cr.candidates?.party || '').split(' — ');
+            const syndicat = parts[0] || cr.candidate_id;
+            return syndicat === candidateId;
+         });
+      } else {
+        const { data } = await supabase
+          .from('candidate_results')
+          .select(`
+            pv_id,
+            votes,
+            candidate_id,
+            procès_verbaux!inner(
+              id,
+              bureau_id,
+              total_registered,
+              total_voters,
+              votes_expressed,
+              voting_bureaux!inner(id, name, center_id, registered_voters)
+            )
+          `)
+          .in('pv_id', publishedPVIds)
+          .eq('candidate_id', candidateId);
+        candidateResults = data;
+      }
 
       console.log('📊 Modal candidat - Résultats bruts:', candidateResults);
 
-      // Construire les données des bureaux
-      const filteredBureaux = (candidateResults || []).map((cr: any) => {
+      // Agréger les résultats par bureau (important pour les syndicats avec multiples candidats dans le même bureau)
+      const bureauResultsMap = new Map();
+      (candidateResults || []).forEach((cr: any) => {
         const pv = cr.procès_verbaux;
-        const bureau = pv?.voting_bureaux;
+        const bureauId = pv?.bureau_id;
+        if (!bureauId) return;
+        
+        let collegeName = 'Général';
+        if (isProfessional) {
+            const parts = (cr.candidates?.party || '').split(' — ');
+            if (parts.length > 1) {
+              collegeName = parts[1];
+            }
+        }
+        
+        if (!bureauResultsMap.has(bureauId)) {
+          bureauResultsMap.set(bureauId, {
+             pv,
+             bureau: pv?.voting_bureaux,
+             candidate_votes: 0,
+             colleges: new Set<string>(),
+             college_votes: {} as Record<string, number>
+          });
+        }
+        const b = bureauResultsMap.get(bureauId);
+        b.candidate_votes += Number(cr.votes) || 0;
+        b.colleges.add(collegeName);
+        b.college_votes[collegeName] = (b.college_votes[collegeName] || 0) + (Number(cr.votes) || 0);
+      });
+
+      // Construire les données des bureaux
+      const filteredBureaux = Array.from(bureauResultsMap.values()).map((b: any) => {
         return {
-          bureau_id: pv?.bureau_id,
-          bureau_name: bureau?.name || '',
-          center_id: bureau?.center_id || '',
-          candidate_votes: Number(cr.votes) || 0,
-          candidate_percentage: Number(pv?.votes_expressed) > 0 ? (Number(cr.votes) / Number(pv.votes_expressed)) * 100 : 0,
-          candidate_participation_pct: Number(pv?.total_registered) > 0 ? (Number(pv?.total_voters) / Number(pv?.total_registered)) * 100 : 0
+          bureau_id: b.pv?.bureau_id,
+          bureau_name: b.bureau?.name || '',
+          center_id: b.bureau?.center_id || '',
+          candidate_votes: b.candidate_votes,
+          candidate_percentage: Number(b.pv?.votes_expressed) > 0 ? (b.candidate_votes / Number(b.pv.votes_expressed)) * 100 : 0,
+          candidate_participation_pct: Number(b.pv?.total_registered) > 0 ? (Number(b.pv?.total_voters) / Number(b.pv?.total_registered)) * 100 : 0,
+          colleges: Array.from(b.colleges),
+          college_votes: b.college_votes
         };
       });
 
@@ -2144,9 +2307,14 @@ const ElectionResults: React.FC = () => {
                     {/* <div className="mt-2 text-sm text-gov-gray">Voix: {c.total_votes.toLocaleString()} • Part: {c.percentage.toFixed(1)}%</div> */}
                   </div>
                   <Tabs defaultValue="center">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="center" className="text-xs sm:text-sm">Par centre</TabsTrigger>
+                    <TabsList className={`grid w-full ${results.election?.type === 'Élection Professionnelle' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                      <TabsTrigger value="center" className="text-xs sm:text-sm">
+                        {results.election?.type === 'Élection Professionnelle' ? 'Par établissement' : 'Par centre'}
+                      </TabsTrigger>
                       <TabsTrigger value="bureau" className="text-xs sm:text-sm">Par bureau</TabsTrigger>
+                      {results.election?.type === 'Élection Professionnelle' && (
+                        <TabsTrigger value="college" className="text-xs sm:text-sm">Par collège</TabsTrigger>
+                      )}
                     </TabsList>
 
                     {/* Contrôles de tri pour les modales des candidats - affichés seulement s'il y a des données */}
@@ -2287,6 +2455,46 @@ const ElectionResults: React.FC = () => {
                         </div>
                       )}
                     </TabsContent>
+                    
+                    {results.election?.type === 'Élection Professionnelle' && (
+                    <TabsContent value="college">
+                      {hasCandidateBureauData() ? (
+                        <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 mt-3 -mx-4 sm:-mx-6 lg:-mx-8">
+                          <table className="min-w-full bg-white border">
+                            <thead className="bg-slate-100 text-gov-dark">
+                              <tr>
+                                <th className="text-left px-2 sm:px-3 py-2 border text-xs sm:text-sm whitespace-nowrap">Collège</th>
+                                <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Voix</th>
+                              </tr>
+                            </thead>
+                            <tbody className="text-xs sm:text-sm">
+                              {(() => {
+                                const collegeAgg: Record<string, number> = {};
+                                candidateBureaux.forEach(b => {
+                                  if (b.college_votes) {
+                                    Object.entries(b.college_votes).forEach(([cName, votes]) => {
+                                      collegeAgg[cName] = (collegeAgg[cName] || 0) + (votes as number);
+                                    });
+                                  }
+                                });
+                                const collegesList = Object.entries(collegeAgg).sort((a, b) => b[1] - a[1]);
+                                return collegesList.map(([name, votes], idx) => (
+                                  <tr key={idx} className="odd:bg-white even:bg-slate-50">
+                                    <td className="px-2 sm:px-3 py-2 border font-medium">{name}</td>
+                                    <td className="px-2 sm:px-3 py-2 border text-right font-bold">{votes.toLocaleString()}</td>
+                                  </tr>
+                                ));
+                              })()}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="mt-6 p-8 text-center">
+                          <h3 className="text-lg font-semibold text-gray-800 mb-2">Aucune donnée par collège</h3>
+                        </div>
+                      )}
+                    </TabsContent>
+                    )}
                   </Tabs>
                 </div>
               );
@@ -2308,7 +2516,9 @@ const ElectionResults: React.FC = () => {
                   </h2>
                 </div>
                 <p className="text-gray-600 text-sm sm:text-base lg:text-lg max-w-2xl mx-auto mb-4 sm:mb-6 lg:mb-8 px-2 sm:px-4">
-                  Explorez les résultats par centre de vote ou par bureau pour une analyse approfondie
+                  {results.election?.type === 'Élection Professionnelle' 
+                    ? 'Explorez les résultats par établissement ou par bureau pour une analyse approfondie' 
+                    : 'Explorez les résultats par centre de vote ou par bureau pour une analyse approfondie'}
                 </p>
 
                 {/* Boutons de navigation modernisés */}
@@ -2321,8 +2531,12 @@ const ElectionResults: React.FC = () => {
                       }`}
                   >
                     <Building className="w-3 h-3 sm:w-4 sm:h-4" />
-                    <span className="hidden sm:inline">Par centre</span>
-                    <span className="sm:hidden">Centres</span>
+                    <span className="hidden sm:inline">
+                      {results.election?.type === 'Élection Professionnelle' ? 'Par établissement' : 'Par centre'}
+                    </span>
+                    <span className="sm:hidden">
+                      {results.election?.type === 'Élection Professionnelle' ? 'Étab.' : 'Centres'}
+                    </span>
                   </button>
                   <button
                     onClick={() => setViewMode('bureau')}
@@ -2351,7 +2565,9 @@ const ElectionResults: React.FC = () => {
                         onChange={(e) => setSortBy(e.target.value as any)}
                         className="px-1.5 sm:px-2 lg:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full sm:w-auto"
                       >
-                        <option value="center">Centre</option>
+                        <option value="center">
+                          {results.election?.type === 'Élection Professionnelle' ? 'Établissement' : 'Centre'}
+                        </option>
                         <option value="participation">Abstention</option>
                         {/* <option value="score">Score</option> */}
                         <option value="votes">Votes</option>
@@ -2548,8 +2764,12 @@ const ElectionResults: React.FC = () => {
                           <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
                             <div className="flex items-center gap-1">
                               <Building className="w-2 h-2" />
-                              <span className="hidden sm:inline">Centre</span>
-                              <span className="sm:hidden">Cent.</span>
+                              <span className="hidden sm:inline">
+                                {results.election?.type === 'Élection Professionnelle' ? 'Établissement' : 'Centre'}
+                              </span>
+                              <span className="sm:hidden">
+                                {results.election?.type === 'Élection Professionnelle' ? 'Étab.' : 'Cent.'}
+                              </span>
                             </div>
                           </th>
                           <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">

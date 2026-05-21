@@ -53,8 +53,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     
     // Chronogramme
     listDisplayDate: prefilledData?.listDisplayDate || '',
-    campaignStart: prefilledData?.campaignStart || '',
-    campaignEnd: prefilledData?.campaignEnd || '',
     hasSecondRound: prefilledData?.hasSecondRound !== undefined ? prefilledData.hasSecondRound : true,
     secondRoundDate: prefilledData?.secondRoundDate || '',
     recoursStart: prefilledData?.recoursStart || '',
@@ -75,12 +73,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       const listDisplay = new Date(electionDate);
       listDisplay.setDate(listDisplay.getDate() - 5);
       
-      const campaignEnd = new Date(electionDate);
-      campaignEnd.setDate(campaignEnd.getDate() - 1);
-      
-      const campaignStart = new Date(campaignEnd);
-      campaignStart.setDate(campaignStart.getDate() - 7);
-      
       const secondRound = new Date(electionDate);
       secondRound.setDate(secondRound.getDate() + 7);
       
@@ -93,8 +85,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       setFormData(prev => ({
         ...prev,
         listDisplayDate: listDisplay.toISOString().split('T')[0],
-        campaignStart: campaignStart.toISOString().split('T')[0],
-        campaignEnd: campaignEnd.toISOString().split('T')[0],
         secondRoundDate: secondRound.toISOString().split('T')[0],
         recoursStart: recoursStart.toISOString().split('T')[0],
         recoursEnd: recoursEnd.toISOString().split('T')[0]
@@ -125,29 +115,24 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     }
   };
 
-  const downloadTemplate = async () => {
-    try {
-      const XLSX = await import('xlsx');
-      const wb = XLSX.utils.book_new();
+  const downloadTemplate = () => {
+    const link = document.createElement('a');
+    link.href = '/modele_etablissements.xlsx';
+    link.download = 'modele_etablissements.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Modèle d'établissements téléchargé avec succès");
+  };
 
-      const headers = ["Matricule", "Nom", "Prénom", "Genre", "Poste", "Collège"];
-      const examples = [
-        ["MAT001", "Mba", "Jean", "M", "Directeur Technique", "Cadres"],
-        ["MAT002", "Ndong", "Sylvie", "F", "Chef d'équipe", "Agent de maîtrise"],
-        ["MAT003", "Obame", "Pierre", "M", "Opérateur de saisie", "Employés et Ouvriers"],
-        ["MAT004", "Kassa", "Aline", "F", "Technicien de surface", "Employés et Ouvriers"]
-      ];
-
-      const wsData = [headers, ...examples];
-      const ws = XLSX.utils.aoa_to_sheet(wsData);
-      XLSX.utils.book_append_sheet(wb, ws, "Liste Électorale");
-
-      XLSX.writeFile(wb, "modele_liste_electorale.xlsx");
-      toast.success("Modèle de liste électorale téléchargé avec succès (format Excel .xlsx)");
-    } catch (e) {
-      console.error(e);
-      toast.error("Erreur lors de la création du modèle Excel.");
-    }
+  const downloadListesTemplate = () => {
+    const link = document.createElement('a');
+    link.href = '/modele_listes.xlsx';
+    link.download = 'modele_listes.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Modèle de listes syndicales téléchargé avec succès");
   };
 
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,51 +156,97 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             return;
           }
 
-          let cadresCount = 0;
+          let encadrementCount = 0;
+          let cadreCount = 0;
           let maitriseCount = 0;
-          let employesOuvriersCount = 0;
-          let employesCount = 0;
-          let ouvriersCount = 0;
+          let executionCount = 0;
+          
+          let encadrementSeats = 0;
+          let cadreSeats = 0;
+          let maitriseSeats = 0;
+          let executionSeats = 0;
+          let totalBureaux = 0;
+          
+          const votingCenters: any[] = [];
+          const centerGroups: { [key: string]: any } = {};
 
           jsonData.forEach((row: any) => {
-            const college = String(row["Collège"] || row["college"] || "").trim().toLowerCase();
-            const poste = String(row["Poste"] || row["poste"] || "").trim().toLowerCase();
+            const region = row["Region__Localisation"] || row["Région"] || "Général";
+            const name = row["Nom_Etablissement__Site"] || row["Etablissement"] || "";
+            const resp = row["Responsable_Etablissement"] || "";
+            const phone = String(row["Contact_Telephone"] || "");
+            const lieuVote = row["Lieu_vote"] || "";
+            
+            const vEncadrement = Number(row["Nbre_electeurs_Encadrement"] || 0);
+            const vCadre = Number(row["Nbre_electeurs_Cadre"] || 0);
+            const vMaitrise = Number(row["Nbre _electeurs_Maitrise"] || row["Nbre_electeurs_Maitrise"] || 0);
+            const vExecution = Number(row["Nbre _electeurs_Execution"] || row["Nbre_electeurs_Execution"] || 0);
 
-            if (college.includes("cadre")) {
-              cadresCount++;
-            } else if (college.includes("maîtrise") || college.includes("maitrise") || college.includes("agent")) {
-              maitriseCount++;
-              employesCount++;
-            } else if (college.includes("ouvrier") || poste.includes("ouvrier")) {
-              ouvriersCount++;
-              employesOuvriersCount++;
-            } else {
-              employesCount++;
-              employesOuvriersCount++;
+            const sEncadrement = Number(row["nb_sieges_Encadrement"] || 0);
+            const sCadre = Number(row["nb_sieges_Cadre"] || 0);
+            const sMaitrise = Number(row["nb_sieges_Maitrise"] || 0);
+            const sExecution = Number(row["nb_sieges_Execution"] || 0);
+
+            encadrementCount += vEncadrement;
+            cadreCount += vCadre;
+            maitriseCount += vMaitrise;
+            executionCount += vExecution;
+            
+            encadrementSeats += sEncadrement;
+            cadreSeats += sCadre;
+            maitriseSeats += sMaitrise;
+            executionSeats += sExecution;
+            
+            if (!name) return;
+
+            const groupKey = `${region}_${name}`;
+            if (!centerGroups[groupKey]) {
+              centerGroups[groupKey] = {
+                name: name,
+                address: region,
+                contactName: resp,
+                contactPhone: phone,
+                voters: 0,
+                bureaux: 0,
+                booths: []
+              };
+            }
+            
+            const totalRowVoters = vEncadrement + vCadre + vMaitrise + vExecution;
+            centerGroups[groupKey].voters += totalRowVoters;
+            centerGroups[groupKey].bureaux += 1;
+            totalBureaux += 1;
+            
+            if (lieuVote) {
+              if (vEncadrement > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Encadrement`, voters: vEncadrement, collegeType: 'general' });
+              if (vCadre > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Cadre`, voters: vCadre, collegeType: 'cadres' });
+              if (vMaitrise > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Maîtrise`, voters: vMaitrise, collegeType: 'employes' });
+              if (vExecution > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Exécution`, voters: vExecution, collegeType: 'ouvriers' });
             }
           });
+          
+          Object.values(centerGroups).forEach((c: any) => votingCenters.push(c));
 
-          const total = cadresCount + employesCount + ouvriersCount;
-          const totalCollegesVoters = cadresCount + maitriseCount + employesOuvriersCount;
+          const total = encadrementCount + cadreCount + maitriseCount + executionCount;
 
           // Mettre à jour les collèges
           const updatedColleges = formData.colleges.map(c => {
-            if (c.type === 'cadres') return { ...c, voters: cadresCount };
-            if (c.type === 'employes') return { ...c, voters: maitriseCount };
-            if (c.type === 'ouvriers') return { ...c, voters: employesOuvriersCount };
+            if (c.type === 'general') return { ...c, voters: encadrementCount, seats: encadrementSeats || c.seats };
+            if (c.type === 'cadres') return { ...c, voters: cadreCount, seats: cadreSeats || c.seats };
+            if (c.type === 'employes') return { ...c, voters: maitriseCount, seats: maitriseSeats || c.seats };
+            if (c.type === 'ouvriers') return { ...c, voters: executionCount, seats: executionSeats || c.seats };
             return c;
           });
 
           setFormData(prev => ({
             ...prev,
             totalEmployees: total.toString(),
-            employeesCadres: cadresCount.toString(),
-            employeesEmployes: employesCount.toString(),
-            employeesOuvriers: ouvriersCount.toString(),
-            colleges: updatedColleges
+            totalBureaux: totalBureaux.toString(),
+            colleges: updatedColleges,
+            votingCenters: votingCenters
           }));
 
-          toast.success(`Fichier "${file.name}" analysé avec succès ! ${total} salariés et ${totalCollegesVoters} électeurs répartis par collèges.`);
+          toast.success(`Fichier "${file.name}" analysé avec succès ! ${total} électeurs répartis par collèges.`);
         } catch (err) {
           console.error(err);
           toast.error("Erreur lors de la lecture des données Excel.");
@@ -227,6 +258,81 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       toast.error("Erreur d'importation du parser Excel.");
     } finally {
       e.target.value = ''; // Reset input to allow re-upload
+    }
+  };
+
+  const handleListesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const XLSX = await import('xlsx');
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const data = event.target?.result;
+          if (!data) return;
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
+
+          const candidates: any[] = [];
+          jsonData.forEach((row: any) => {
+            const unionAcronym = row["Acronyme_Representation"] || row["Sigle"] || "";
+            const unionName = row["Representation"] || row["Nom"] || "";
+            const etablissement = row["Etablissement"] || "";
+            
+            let college = "general";
+            const collegeVal = String(row["College"] || "").toLowerCase();
+            if (collegeVal.includes('cadre')) college = "cadres";
+            else if (collegeVal.includes('maitrise') || collegeVal.includes('maîtrise')) college = "employes";
+            else if (collegeVal.includes('execution') || collegeVal.includes('exécution')) college = "ouvriers";
+            else if (collegeVal.includes('encadrement')) college = "general";
+            
+            const titulaireName = row["Titulaire"] || "";
+            const titulaireGenre = row["Genre_Titulaire"] || "";
+            const titulaireAnciennete = row["Anciennete_Titulaire"] || "";
+            
+            const suppleantName = row["Suppleant"] || row["Suppléant"] || "";
+            const suppleantGenre = row["Genre_Suppleant"] || "";
+            
+            if (unionName || titulaireName) {
+              candidates.push({
+                party: unionAcronym || unionName,
+                name: unionName || unionAcronym,
+                collegeType: college,
+                etablissement,
+                candidates: [
+                  { 
+                    role: "Titulaire", 
+                    name: titulaireName,
+                    genre: titulaireGenre,
+                    anciennete: titulaireAnciennete
+                  },
+                  { 
+                    role: "Suppléant", 
+                    name: suppleantName,
+                    genre: suppleantGenre
+                  }
+                ]
+              });
+            }
+          });
+
+          setFormData(prev => ({ ...prev, candidates }));
+          toast.success(`Fichier "${file.name}" analysé avec succès ! ${candidates.length} listes importées.`);
+        } catch (err) {
+          console.error(err);
+          toast.error("Erreur lors de la lecture des données Excel.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur d'importation du parser Excel.");
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -314,6 +420,11 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             </ModernFormGrid>
             <ModernFormGrid cols={3}>
               <FloatingInput
+                label="Tutelle"
+                value={formData.administrativeUnit}
+                onChange={(e) => setFormData({ ...formData, administrativeUnit: e.target.value })}
+              />
+              <FloatingInput
                 label="Effectif Cadres (Facultatif)"
                 type="number"
                 value={formData.employeesCadres}
@@ -378,13 +489,12 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                         }}
                       />
                     </div>
-                 </div>
-               ))}
-             </div>
-             
-             <div className="mt-6 border-t pt-6">
-               <h4 className="text-sm font-semibold text-gray-900 mb-2">Import de la liste électorale (Optionnel)</h4>
-               <p className="text-xs text-gray-600 mb-4">Téléchargez le modèle Excel, remplissez-le avec les informations des salariés (nom, prénom, collège, etc.) et importez-le ici pour automatiser la création du fichier électoral.</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-6 border-t pt-6">
+               <h4 className="text-sm font-semibold text-gray-900 mb-2">Import des Établissements & Bureaux (Optionnel)</h4>
+               <p className="text-xs text-gray-600 mb-4">Téléchargez le modèle Excel des établissements, remplissez-le et importez-le ici pour créer automatiquement la structure des électeurs et des sièges.</p>
                <div className="flex items-center gap-4">
                   <Button 
                     variant="outline" 
@@ -408,7 +518,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                       className="cursor-pointer bg-gov-blue hover:bg-gov-blue-dark text-white px-4 py-2 rounded-md text-xs font-medium flex items-center gap-2 transition-colors"
                     >
                       <Upload className="w-4 h-4" />
-                      Importer la liste remplie
+                      Importer le fichier
                     </label>
                   </div>
                </div>
@@ -420,8 +530,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
           <ModernFormSection title="Chronogramme Électoral" description="Calendrier des opérations" icon={<Calendar className="w-5 h-5" />}>
             <ModernFormGrid cols={2}>
               <FloatingInput label="Affichage des listes (J-5)" type="date" value={formData.listDisplayDate} onChange={(e) => setFormData({...formData, listDisplayDate: e.target.value})} />
-              <FloatingInput label="Début de campagne" type="date" value={formData.campaignStart} onChange={(e) => setFormData({...formData, campaignStart: e.target.value})} />
-              <FloatingInput label="Fin de campagne" type="date" value={formData.campaignEnd} onChange={(e) => setFormData({...formData, campaignEnd: e.target.value})} />
               <div className="relative">
                 <select
                   value={formData.hasSecondRound ? "Oui" : "Non"}
@@ -436,6 +544,38 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 </label>
               </div>
             </ModernFormGrid>
+
+            <div className="mt-6 border-t pt-6">
+               <h4 className="text-sm font-semibold text-gray-900 mb-2">Import des Listes Syndicales (Optionnel)</h4>
+               <p className="text-xs text-gray-600 mb-4">Téléchargez le modèle Excel des listes, renseignez les candidats et importez-le ici.</p>
+               <div className="flex items-center gap-4">
+                  <Button 
+                    variant="outline" 
+                    type="button" 
+                    className="text-xs flex items-center gap-2 border-purple-600 text-purple-600 hover:bg-purple-50" 
+                    onClick={downloadListesTemplate}
+                  >
+                    <Download className="w-4 h-4" />
+                    Télécharger le modèle Listes
+                  </Button>
+                  <div>
+                    <input 
+                      type="file" 
+                      id="listes-upload" 
+                      accept=".xlsx, .xls" 
+                      className="hidden" 
+                      onChange={handleListesUpload}
+                    />
+                    <label 
+                      htmlFor="listes-upload" 
+                      className="cursor-pointer bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-xs font-medium flex items-center gap-2 transition-colors"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Importer les listes
+                    </label>
+                  </div>
+               </div>
+            </div>
           </ModernFormSection>
         );
       case 5:
@@ -459,7 +599,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                   <p><strong>Secteur d'activité:</strong> {formData.enterpriseSector === 'prive' ? 'Privé' : formData.enterpriseSector === 'public' ? 'Public' : 'Parapublic'}</p>
                   <p><strong>N° Enregistrement:</strong> {formData.numEnregistrement || 'Non renseigné'}</p>
                   {formData.administrativeUnit && (
-                    <p><strong>Unité Administrative:</strong> {formData.administrativeUnit}</p>
+                    <p><strong>Tutelle:</strong> {formData.administrativeUnit}</p>
                   )}
                 </div>
 
@@ -475,8 +615,6 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
                   <h4 className="font-semibold text-gray-900 mb-2 border-b pb-1">Chronogramme Électoral</h4>
                   <p><strong>Affichage des listes:</strong> {formData.listDisplayDate || 'Non renseigné'}</p>
-                  <p><strong>Début de campagne:</strong> {formData.campaignStart || 'Non renseigné'}</p>
-                  <p><strong>Fin de campagne:</strong> {formData.campaignEnd || 'Non renseigné'}</p>
                   <p><strong>Deuxième tour prévisible:</strong> {formData.hasSecondRound ? 'Oui' : 'Non'}</p>
                 </div>
 

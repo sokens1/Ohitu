@@ -368,6 +368,17 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
   const handleDownloadCentersTemplate = async () => {
     try {
+      if (election.type === 'Élection Professionnelle') {
+        const link = document.createElement('a');
+        link.href = '/modele_etablissements.xlsx';
+        link.download = 'modele_etablissements.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success("Modèle Établissements téléchargé !");
+        return;
+      }
+      
       const XLSX = await import('xlsx');
       const ws_data = [
         ["Région / Localisation", "Nom Établissement / Site", "Responsable Établissement", "Contact Téléphone", "Nom Bureau de vote", "Nombre d'électeurs", "Collège concerné"],
@@ -399,31 +410,53 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           const data = evt.target?.result;
           if (!data) throw new Error("Fichier vide");
           const workbook = XLSX.read(data, { type: 'array' });
-          const estSheet = workbook.Sheets["Établissements & Bureaux"] || workbook.Sheets["Etablissements & Bureaux"];
-          if (!estSheet) throw new Error("La feuille 'Établissements & Bureaux' est introuvable");
+          const isPro = election.type === 'Élection Professionnelle';
+          const estSheet = isPro 
+            ? (workbook.Sheets["Etablissements"] || workbook.Sheets["Établissements & Bureaux"])
+            : (workbook.Sheets["Établissements & Bureaux"] || workbook.Sheets["Etablissements & Bureaux"]);
+            
+          if (!estSheet) throw new Error("La feuille des établissements est introuvable");
 
           const estRows = XLSX.utils.sheet_to_json<any>(estSheet);
           const centerGroups: { [key: string]: any } = {};
           
           estRows.forEach((row: any) => {
-            const region = row["Région / Localisation"] || row["Région"] || "Général";
-            const name = row["Nom Établissement / Site"] || row["Site"] || "";
+            const region = row["Region__Localisation"] || row["Région / Localisation"] || row["Région"] || "Général";
+            const name = row["Nom_Etablissement__Site"] || row["Nom Établissement / Site"] || row["Site"] || "";
             if (!name) return;
-            const resp = row["Responsable Établissement"] || "";
-            const phone = String(row["Contact Téléphone"] || "");
-            const boothName = row["Nom Bureau de vote"] || "";
-            const voters = Number(row["Nombre d'électeurs"] || 0);
-            const college = row["Collège concerné"] || "general";
+            const resp = row["Responsable_Etablissement"] || row["Responsable Établissement"] || "";
+            const phone = String(row["Contact_Telephone"] || row["Contact Téléphone"] || "");
+            
+            let totalVoters = 0;
+            let boothCount = 0;
+            let booths = [];
+            
+            if (isPro) {
+              const vEnc = Number(row["Nbre_electeurs_Encadrement"] || 0);
+              const vCad = Number(row["Nbre_electeurs_Cadre"] || 0);
+              const vMai = Number(row["Nbre _electeurs_Maitrise"] || row["Nbre_electeurs_Maitrise"] || 0);
+              const vExe = Number(row["Nbre _electeurs_Execution"] || row["Nbre_electeurs_Execution"] || 0);
+              totalVoters = vEnc + vCad + vMai + vExe;
+              boothCount = 1; // Un bureau par ligne d'établissement par défaut
+              if (vEnc > 0) booths.push({ name: name + " - Encadrement", registered_voters: vEnc });
+              if (vCad > 0) booths.push({ name: name + " - Cadres", registered_voters: vCad });
+              if (vMai > 0) booths.push({ name: name + " - Maîtrise", registered_voters: vMai });
+              if (vExe > 0) booths.push({ name: name + " - Exécution", registered_voters: vExe });
+              if (booths.length === 0) booths.push({ name: name + " - Bureau unique", registered_voters: totalVoters });
+            } else {
+              const boothName = row["Nom Bureau de vote"] || "";
+              totalVoters = Number(row["Nombre d'électeurs"] || 0);
+              boothCount = 1;
+              if (boothName) booths.push({ name: boothName, registered_voters: totalVoters });
+            }
             
             const groupKey = `${region}_${name}`;
             if (!centerGroups[groupKey]) {
               centerGroups[groupKey] = { name, address: region, contact_name: resp, contact_phone: phone, voters: 0, bureaux: 0, booths: [] };
             }
-            centerGroups[groupKey].voters += voters;
-            centerGroups[groupKey].bureaux += 1;
-            if (boothName) {
-              centerGroups[groupKey].booths.push({ name: boothName, registered_voters: voters });
-            }
+            centerGroups[groupKey].voters += totalVoters;
+            centerGroups[groupKey].bureaux += boothCount;
+            centerGroups[groupKey].booths.push(...booths);
           });
 
           let importedCount = 0;
@@ -515,6 +548,17 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
   const handleDownloadCandidatesTemplate = async () => {
     try {
+      if (election.type === 'Élection Professionnelle') {
+        const link = document.createElement('a');
+        link.href = '/modele_listes.xlsx';
+        link.download = 'modele_listes.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success("Modèle Listes téléchargé !");
+        return;
+      }
+
       const XLSX = await import('xlsx');
       const ws_data = [
         ["Sigle Syndicat", "Nom Complet Syndicat", "Collège concerné", "Nom complet du Titulaire", "Nom complet du Suppléant"],
@@ -545,28 +589,71 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         try {
           const data = evt.target?.result;
           if (!data) throw new Error("Fichier vide");
-          const workbook = XLSX.read(data, { type: 'array' });
-          const candSheet = workbook.Sheets["Candidats & Syndicats"] || workbook.Sheets["Candidats"] || workbook.Sheets["Candidats et Syndicats"];
-          if (!candSheet) throw new Error("La feuille 'Candidats & Syndicats' est introuvable");
+          const isPro = election.type === 'Élection Professionnelle';
+          const candSheet = isPro
+            ? (workbook.Sheets["Listes"] || workbook.Sheets["Candidats"])
+            : (workbook.Sheets["Candidats & Syndicats"] || workbook.Sheets["Candidats"]);
+
+          if (!candSheet) throw new Error("La feuille des listes est introuvable");
 
           const candRows = XLSX.utils.sheet_to_json<any>(candSheet);
           const unionLists: any[] = [];
           
           candRows.forEach((row: any) => {
-            const unionAcronym = row["Sigle Syndicat"] || row["Sigle"] || row["Acronyme"] || "";
-            const unionName = row["Nom Complet Syndicat"] || row["Nom Syndicat"] || row["Syndicat"] || "";
-            const college = row["Collège concerné"] || row["Collège"] || row["College"] || "general";
-            const titulaireName = row["Nom complet du Titulaire"] || row["Titulaire"] || "";
-            const suppleantName = row["Nom complet du Suppléant"] || row["Suppléant"] || row["Suppleant"] || "";
-            
-            let normalizedCollege = college.toLowerCase().trim();
-            if (normalizedCollege.includes('maitrise') || normalizedCollege.includes('maîtrise')) normalizedCollege = 'employes';
-            else if (normalizedCollege.includes('execution') || normalizedCollege.includes('exécution')) normalizedCollege = 'ouvriers';
-            else if (normalizedCollege.includes('cadre')) normalizedCollege = 'cadres';
-            else normalizedCollege = 'general';
+            let unionAcronym = "";
+            let unionName = "";
+            let college = "general";
+            let etablissement = "";
+            let titulaireName = "";
+            let titulaireGenre = "";
+            let titulaireAnciennete = "";
+            let suppleantName = "";
+            let suppleantGenre = "";
+
+            if (isPro) {
+              unionAcronym = row["Acronyme_Representation"] || row["Sigle"] || "";
+              unionName = row["Representation"] || row["Nom"] || "";
+              etablissement = row["Etablissement"] || "";
+              
+              const collegeVal = String(row["College"] || "").toLowerCase();
+              if (collegeVal.includes('cadre')) college = "cadres";
+              else if (collegeVal.includes('maitrise') || collegeVal.includes('maîtrise')) college = "employes";
+              else if (collegeVal.includes('execution') || collegeVal.includes('exécution')) college = "ouvriers";
+              else if (collegeVal.includes('encadrement')) college = "general";
+              
+              titulaireName = row["Titulaire"] || "";
+              titulaireGenre = row["Genre_Titulaire"] || "";
+              titulaireAnciennete = row["Anciennete_Titulaire"] || "";
+              
+              suppleantName = row["Suppleant"] || row["Suppléant"] || "";
+              suppleantGenre = row["Genre_Suppleant"] || "";
+            } else {
+              unionAcronym = row["Sigle Syndicat"] || row["Sigle"] || row["Acronyme"] || "";
+              unionName = row["Nom Complet Syndicat"] || row["Nom Syndicat"] || row["Syndicat"] || "";
+              const rawCollege = row["Collège concerné"] || row["Collège"] || row["College"] || "general";
+              titulaireName = row["Nom complet du Titulaire"] || row["Titulaire"] || "";
+              suppleantName = row["Nom complet du Suppléant"] || row["Suppléant"] || row["Suppleant"] || "";
+              
+              let normalizedCollege = rawCollege.toLowerCase().trim();
+              if (normalizedCollege.includes('maitrise') || normalizedCollege.includes('maîtrise')) normalizedCollege = 'employes';
+              else if (normalizedCollege.includes('execution') || normalizedCollege.includes('exécution')) normalizedCollege = 'ouvriers';
+              else if (normalizedCollege.includes('cadre')) normalizedCollege = 'cadres';
+              else normalizedCollege = 'general';
+              college = normalizedCollege;
+            }
             
             if (!unionName && !unionAcronym) return;
-            unionLists.push({ unionAcronym, unionName: unionName || unionAcronym, college: normalizedCollege, titulaireName, suppleantName });
+            unionLists.push({ 
+              unionAcronym, 
+              unionName: unionName || unionAcronym, 
+              college,
+              etablissement,
+              titulaireName, 
+              titulaireGenre,
+              titulaireAnciennete,
+              suppleantName,
+              suppleantGenre
+            });
           });
 
           let importedCount = 0;
@@ -600,12 +687,31 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
             if (!unionId) continue;
 
+            const titulaires = [];
+            if (cand.titulaireName) {
+              titulaires.push({ 
+                name: cand.titulaireName, 
+                role: 'Tête de liste',
+                genre: cand.titulaireGenre,
+                anciennete: cand.titulaireAnciennete,
+                etablissement: cand.etablissement
+              });
+            }
+            const suppleants = [];
+            if (cand.suppleantName) {
+              suppleants.push({
+                name: cand.suppleantName,
+                role: 'Suppléant',
+                genre: cand.suppleantGenre
+              });
+            }
+
             const { error: listErr } = await supabase.from('union_lists').insert({
               election_id: election.id,
               union_id: unionId,
               college: cand.college,
-              titulaires: cand.titulaireName ? [{ name: cand.titulaireName, role: 'Tête de liste' }] : [],
-              suppleants: cand.suppleantName ? [{ name: cand.suppleantName, role: 'Suppléant' }] : [],
+              titulaires: titulaires,
+              suppleants: suppleants,
             });
 
             if (!listErr) importedCount++;
@@ -963,8 +1069,12 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-green-600 data-[state=active]:text-white" />
                 </div>
                 <div className="text-left hidden xs:block">
-                  <div className="font-medium text-xs sm:text-sm">Centres & Bureaux</div>
-                  <div className="text-xs text-gray-500">Organisation territoriale</div>
+                  <div className="font-medium text-xs sm:text-sm">
+                    {election.type === 'Élection Professionnelle' ? 'Établissements' : 'Centres & Bureaux'}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {election.type === 'Élection Professionnelle' ? 'Établissements' : 'Organisation territoriale'}
+                  </div>
                 </div>
                 <div className="text-left xs:hidden">
                   <div className="font-medium text-xs">Centres</div>
@@ -1117,7 +1227,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           </div>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg">
-                          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Unité Administrative</label>
+                          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tutelle</label>
                           <p className="text-sm font-bold text-gray-900 mt-1">
                             {loadingEnterprise ? 'Chargement...' : (enterprise?.administrative_unit || '-')}
                           </p>

@@ -90,97 +90,19 @@ const ElectionManagementUnified = () => {
   // Télécharger un modèle Excel (.xlsx)
   const downloadXLSXTemplate = async (category: 'political' | 'professional') => {
     try {
-      const XLSX = await import('xlsx');
-      const wb = XLSX.utils.book_new();
-
       if (category === 'professional') {
-        const configData = [
-          { Key: "Nom de l'élection", Value: "Élection Professionnelle SEEG 2026" },
-          { Key: "Raison Sociale", Value: "Société d'Énergie et d'Eau du Gabon" },
-          { Key: "Numéro Enregistrement", Value: "RG-4920492" },
-          { Key: "Secteur (Privé, Parapublic, Public)", Value: "Privé" },
-          { Key: "Unité Administrative (Ministère de rattachement)", Value: "" },
-          { Key: "Nom RH", Value: "Jean Dupont" },
-          { Key: "Téléphone RH", Value: "+24166123456" },
-          { Key: "Email RH", Value: "j.dupont@seeg.ga" },
-          { Key: "Date du scrutin (AAAA-MM-JJ)", Value: "2026-06-20" },
-          { Key: "Affichage listes (AAAA-MM-JJ)", Value: "2026-06-01" },
-          { Key: "Début campagne (AAAA-MM-JJ)", Value: "2026-06-05" },
-          { Key: "Fin campagne (AAAA-MM-JJ)", Value: "2026-06-15" },
-          { Key: "Deuxième tour (Oui/Non)", Value: "Oui" }
-        ];
-
-        const collegesData = [
-          { "Nom du collège": "Cadre", Code: "cadres" },
-          { "Nom du collège": "Maîtrise", Code: "employes" },
-          { "Nom du collège": "Exécution", Code: "ouvriers" },
-          { "Nom du collège": "Encadrement", Code: "general" }
-        ];
-
-        const establishmentsData = [
-          { 
-            "Région / Localisation": "Estuaire", 
-            "Nom Établissement / Site": "Siège Social Libreville", 
-            "Responsable Établissement": "Marc Ondo", 
-            "Contact Téléphone": "+24177123456",
-            "Nom Bureau de vote": "Bureau A - Rez de chaussée",
-            "Nombre d'électeurs": 250,
-            "Collège concerné": "Employés et Ouvriers"
-          },
-          { 
-            "Région / Localisation": "Estuaire", 
-            "Nom Établissement / Site": "Siège Social Libreville", 
-            "Responsable Établissement": "Marc Ondo", 
-            "Contact Téléphone": "+24177123456",
-            "Nom Bureau de vote": "Bureau B - 1er étage",
-            "Nombre d'électeurs": 150,
-            "Collège concerné": "Agent de maîtrise"
-          },
-          { 
-            "Région / Localisation": "Haut-Ogooué", 
-            "Nom Établissement / Site": "Agence Franceville", 
-            "Responsable Établissement": "Lucie Mba", 
-            "Contact Téléphone": "+24166987654",
-            "Nom Bureau de vote": "Bureau Unique - Franceville",
-            "Nombre d'électeurs": 115,
-            "Collège concerné": "general"
-          }
-        ];
-
-        const candidatesData = [
-          {
-            "Sigle Syndicat": "COSYG",
-            "Nom Complet Syndicat": "Confédération Syndicale Gabonaise",
-            "Collège concerné": "ouvriers",
-            "Nom complet du Titulaire": "Pierre Mba",
-            "Nom complet du Suppléant": "Charles Obiang"
-          },
-          {
-            "Sigle Syndicat": "SYLSEEG",
-            "Nom Complet Syndicat": "Syndicat Libre des Employés de la SEEG",
-            "Collège concerné": "employes",
-            "Nom complet du Titulaire": "Marie-Claire Eyeghe",
-            "Nom complet du Suppléant": "Alain Ndong"
-          },
-          {
-            "Sigle Syndicat": "COSYG",
-            "Nom Complet Syndicat": "Confédération Syndicale Gabonaise",
-            "Collège concerné": "cadres",
-            "Nom complet du Titulaire": "Christian Bignoumba",
-            "Nom complet du Suppléant": "Sylvie Kombila"
-          }
-        ];
-
-        const wsConfig = XLSX.utils.json_to_sheet(configData);
-        const wsColleges = XLSX.utils.json_to_sheet(collegesData);
-        const wsEstablishments = XLSX.utils.json_to_sheet(establishmentsData);
-        const wsCandidates = XLSX.utils.json_to_sheet(candidatesData);
-
-        XLSX.utils.book_append_sheet(wb, wsConfig, "Configuration");
-        XLSX.utils.book_append_sheet(wb, wsColleges, "Collèges");
-        XLSX.utils.book_append_sheet(wb, wsEstablishments, "Établissements & Bureaux");
-        XLSX.utils.book_append_sheet(wb, wsCandidates, "Candidats & Syndicats");
+        // Télécharger directement le fichier de création statique
+        const link = document.createElement('a');
+        link.href = '/modele_creation.xlsx';
+        link.download = 'modele_creation.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success("Modèle de configuration Excel téléchargé !");
+        return;
       } else {
+        const XLSX = await import('xlsx');
+        const wb = XLSX.utils.book_new();
         const configData = [
           { Key: "Nom de l'élection", Value: "Législatives 2026 - Siège unique Moanda" },
           { Key: "Type d'élection", Value: "Législatives" },
@@ -195,10 +117,9 @@ const ElectionManagementUnified = () => {
 
         const wsConfig = XLSX.utils.json_to_sheet(configData);
         XLSX.utils.book_append_sheet(wb, wsConfig, "Configuration");
+        XLSX.writeFile(wb, `modele_configuration_${category}.xlsx`);
+        toast.success("Modèle de configuration Excel téléchargé !");
       }
-
-      XLSX.writeFile(wb, `modele_configuration_${category}.xlsx`);
-      toast.success("Modèle de configuration Excel téléchargé !");
     } catch (error) {
       console.error(error);
       toast.error("Erreur lors de la génération du modèle Excel.");
@@ -259,77 +180,8 @@ const ElectionManagementUnified = () => {
                 });
               }
 
-              // 1. Lire la feuille Établissements & Bureaux
-              const estSheet = workbook.Sheets["Établissements & Bureaux"] || workbook.Sheets["Etablissements & Bureaux"] || workbook.Sheets["Établissements et Bureaux"] || workbook.Sheets["Etablissements et Bureaux"];
-              const votingCenters: any[] = [];
-              if (estSheet) {
-                const estRows = XLSX.utils.sheet_to_json<any>(estSheet);
-                
-                // On va grouper par Établissement/Site pour créer un voting_center avec ses bureaux
-                const centerGroups: { [key: string]: any } = {};
-                estRows.forEach((row: any) => {
-                  const region = row["Région / Localisation"] || row["Région"] || row["Province"] || "Général";
-                  const name = row["Nom Établissement / Site"] || row["Nom Établissement"] || row["Site"] || row["Etablissement"] || "";
-                  const resp = row["Responsable Établissement"] || row["Responsable"] || "";
-                  const phone = String(row["Contact Téléphone"] || row["Téléphone"] || row["Contact"] || "");
-                  const boothName = row["Nom Bureau de vote"] || row["Nom Bureau"] || row["Bureau"] || "";
-                  const voters = Number(row["Nombre d'électeurs"] || row["Votants"] || row["Electeurs"] || 0);
-                  const college = row["Collège concerné"] || row["College"] || "general";
-                  
-                  if (!name) return; // ignore invalid rows
-
-                  const groupKey = `${region}_${name}`;
-                  if (!centerGroups[groupKey]) {
-                    centerGroups[groupKey] = {
-                      name: name,
-                      address: region,
-                      contactName: resp,
-                      contactPhone: phone,
-                      voters: 0,
-                      bureaux: 0,
-                      booths: []
-                    };
-                  }
-                  
-                  centerGroups[groupKey].voters += voters;
-                  centerGroups[groupKey].bureaux += 1;
-                  if (boothName) {
-                    centerGroups[groupKey].booths.push({
-                      name: boothName,
-                      voters: voters,
-                      collegeType: college.toLowerCase().trim()
-                    });
-                  }
-                });
-                
-                Object.values(centerGroups).forEach((c: any) => {
-                  votingCenters.push(c);
-                });
-              }
-
-              // 2. Lire la feuille Candidats & Syndicats
-              const candSheet = workbook.Sheets["Candidats & Syndicats"] || workbook.Sheets["Candidats"] || workbook.Sheets["Candidats et Syndicats"];
-              const candidates: any[] = [];
-              if (candSheet) {
-                const candRows = XLSX.utils.sheet_to_json<any>(candSheet);
-                candRows.forEach((row: any) => {
-                  const unionAcronym = row["Sigle Syndicat"] || row["Sigle"] || row["Acronyme"] || "";
-                  const unionName = row["Nom Complet Syndicat"] || row["Nom Syndicat"] || row["Syndicat"] || "";
-                  const college = row["Collège concerné"] || row["Collège"] || row["College"] || "general";
-                  const titulaireName = row["Nom complet du Titulaire"] || row["Titulaire"] || "";
-                  const suppleantName = row["Nom complet du Suppléant"] || row["Suppléant"] || row["Suppleant"] || "";
-                  
-                  if (!unionName && !unionAcronym) return;
-
-                  candidates.push({
-                    unionAcronym,
-                    unionName: unionName || unionAcronym,
-                    college: college.toLowerCase().trim(),
-                    titulaireName,
-                    suppleantName
-                  });
-                });
-              }
+              // La lecture des feuilles Etablissements et Candidats est maintenant gérée séparément
+              // dans ProfessionalElectionWizard.tsx
 
               const rawSector = String(configMap["Secteur (Privé, Parapublic, Public)"] || configMap["Secteur"] || configMap["Secteur Activité"] || "").trim().toLowerCase();
               let sector = 'prive';
@@ -344,31 +196,23 @@ const ElectionManagementUnified = () => {
               const ouvriers = String(configMap["Effectif Ouvriers"] ?? configMap["Effectif Employés et Ouvriers"] ?? '0').trim();
               const total = (Number(cadres) + Number(employes) + Number(ouvriers)).toString();
 
-              const computedBureaux = votingCenters.reduce((sum: number, vc: any) => sum + (vc.bureaux || 0), 0);
-              const totalBureaux = computedBureaux > 0 ? computedBureaux.toString() : (configMap["Nombre total de bureaux"] || configMap["Bureaux"] || "1").toString();
-
               resolve({
-                name: configMap["Nom de l'élection"] || configMap["Nom"] || "",
-                enterpriseName: configMap["Raison Sociale"] || configMap["Entreprise"] || "",
-                numEnregistrement: configMap["Numéro Enregistrement"] || configMap["N° Enregistrement"] || "",
+                name: configMap["Intitule"] || configMap["Nom de l'élection"] || configMap["Nom"] || "",
+                enterpriseName: configMap["Entreprise"] || configMap["Raison Sociale"] || "",
+                numEnregistrement: configMap["Numero_Enregistrement"] || configMap["Numéro Enregistrement"] || configMap["N° Enregistrement"] || "",
                 enterpriseSector: sector,
-                administrativeUnit: configMap["Unité Administrative (Ministère de rattachement)"] || configMap["Unité Administrative"] || "",
+                administrativeUnit: configMap["Unite_Administrative"] || configMap["Unité Administrative (Ministère de rattachement)"] || configMap["Unité Administrative"] || "",
                 employeesCadres: cadres,
                 employeesEmployes: employes,
                 employeesOuvriers: ouvriers,
                 totalEmployees: total,
-                hrName: configMap["Nom RH"] || "",
-                hrPhone: String(configMap["Téléphone RH"] || ""),
-                hrEmail: configMap["Email RH"] || "",
-                date: configMap["Date du scrutin (AAAA-MM-JJ)"] || configMap["Date scrutin"] || "",
-                listDisplayDate: configMap["Affichage listes (AAAA-MM-JJ)"] || configMap["Affichage listes"] || "",
-                campaignStart: configMap["Début campagne (AAAA-MM-JJ)"] || configMap["Début campagne"] || "",
-                campaignEnd: configMap["Fin campagne (AAAA-MM-JJ)"] || configMap["Fin campagne"] || "",
-                hasSecondRound: String(configMap["Deuxième tour (Oui/Non)"] || "").toLowerCase() === 'oui',
-                colleges: colleges.length > 0 ? colleges : undefined,
-                votingCenters: votingCenters.length > 0 ? votingCenters : undefined,
-                candidates: candidates.length > 0 ? candidates : undefined,
-                totalBureaux: totalBureaux
+                hrName: configMap["Nom_RH"] || configMap["Nom RH"] || "",
+                hrPhone: String(configMap["Telephone_RH"] || configMap["Téléphone RH"] || ""),
+                hrEmail: configMap["Email_RH"] || configMap["Email RH"] || "",
+                date: configMap["Date_scrutin"] || configMap["Date du scrutin (AAAA-MM-JJ)"] || configMap["Date scrutin"] || "",
+                listDisplayDate: configMap["Affichage_listes"] || configMap["Affichage listes (AAAA-MM-JJ)"] || configMap["Affichage listes"] || "",
+                hasSecondRound: String(configMap["Possible_2nd_tour"] || configMap["Deuxième tour (Oui/Non)"] || "").toLowerCase() === 'oui',
+                colleges: colleges.length > 0 ? colleges : undefined
               });
             } else {
               resolve({
@@ -1134,6 +978,25 @@ const ElectionManagementUnified = () => {
     } catch (error) {
       console.error('Erreur lors de la duplication:', error);
       toast.error('Erreur lors de la duplication de l\'élection');
+    }
+  };
+
+  const handleDeactivateElection = async (election: Election) => {
+    try {
+      const { error } = await supabase
+        .from('elections')
+        .update({ is_published: false, status: 'Annulée' })
+        .eq('id', election.id);
+        
+      if (error) throw error;
+      
+      // Update local state by refetching
+      await refreshElectionsData();
+      
+      toast.success('Élection désactivée avec succès');
+    } catch (error: any) {
+      console.error('Erreur lors de la désactivation:', error);
+      toast.error(`Erreur lors de la désactivation: ${error?.message || error}`);
     }
   };
 
@@ -2073,7 +1936,7 @@ const ElectionManagementUnified = () => {
                           </DropdownMenuItem>
                           )}
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeactivateElection(election); }}>
                             <span className="mr-2 opacity-70">⏸</span>
                             Désactiver
                           </DropdownMenuItem>
@@ -2243,7 +2106,7 @@ const ElectionManagementUnified = () => {
                               </DropdownMenuItem>
                               )}
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Désactiver' en cours de développement"); }}>
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeactivateElection(election); }}>
                                 <span className="mr-2 opacity-70">⏸</span>
                                 Désactiver
                               </DropdownMenuItem>
