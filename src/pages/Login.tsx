@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
+import type { UserRole } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { Loader2, Eye, EyeOff, Vote, Building, ArrowRight, Shield, CheckCircle, Users, BarChart3 } from 'lucide-react';
 import { fetchAllElections } from '../api/elections';
@@ -29,8 +30,17 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [elections, setElections] = useState<Election[]>([]);
   const [electionsLoading, setElectionsLoading] = useState(true);
-  const { login } = useAuth();
+  const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau'];
+
+  const { login, user } = useAuth();
   const navigate = useNavigate();
+
+  // Si déjà connecté, rediriger
+  React.useEffect(() => {
+    if (user) {
+      navigate(OPERATIONAL_ROLES.includes(user.role) ? '/results' : '/dashboard', { replace: true });
+    }
+  }, [user]);
 
   // Charger les élections depuis la base de données
   useEffect(() => {
@@ -62,7 +72,7 @@ const Login = () => {
           title: "Connexion réussie",
           description: "Bienvenue dans o'Hitu",
         });
-        navigate('/dashboard');
+        // La redirection est gérée par le useEffect qui surveille `user`
       } else {
         toast({
           title: "Erreur de connexion",
@@ -70,12 +80,20 @@ const Login = () => {
           variant: "destructive",
         });
       }
-    } catch (error) {
-      toast({
-        title: "Erreur",
-        description: "Une erreur s'est produite lors de la connexion",
-        variant: "destructive",
-      });
+    } catch (error: any) {
+      if (error?.message === 'EMAIL_NOT_CONFIRMED') {
+        toast({
+          title: "Email non confirmé",
+          description: "Ce compte n'a pas encore été confirmé. Contactez votre administrateur pour qu'il confirme votre compte depuis le tableau de bord Supabase.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Erreur",
+          description: "Une erreur s'est produite lors de la connexion",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoading(false);
     }

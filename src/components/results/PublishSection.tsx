@@ -28,12 +28,14 @@ import {
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
 import SimulationResultsSection from './SimulationResultsSection';
+import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 
 interface PublishSectionProps {
   selectedElection: string;
+  readOnly?: boolean;
 }
 
-const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => {
+const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readOnly = false }) => {
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [showDetailedView, setShowDetailedView] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -50,12 +52,21 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
       if (!selectedElection) return;
       try {
         setLoading(true);
+
+        // 0) Charger le type de l'élection (pour différencier pro / standard)
+        const { data: electionData } = await supabase
+          .from('elections')
+          .select('type')
+          .eq('id', selectedElection)
+          .single();
+
         // 1) Récupérer PV par statut (validés ET publiés ensemble)
         const { data: pvsValidated, error: pvValErr } = await supabase
           .from('procès_verbaux')
           .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at')
           .eq('election_id', selectedElection)
           .in('status', ['validated', 'published']); // Inclure les publiés
+
         
         const { data: pvsEntered, error: pvEntErr } = await supabase
           .from('procès_verbaux')
@@ -115,17 +126,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
 
         // On n'utilise pas la vue agrégée ici pour respecter le filtre election_centers
 
-        // 3) Récupérer la liste des candidats de l'élection (référence stricte)
-        const { data: electionCands, error: ecErr } = await supabase
-          .from('election_candidates')
-          .select('candidates!inner(id, name, party)')
-          .eq('election_id', selectedElection);
-        if (ecErr) throw ecErr;
-        const electionCandidates = (electionCands || []).map((row: any) => ({
-          id: row.candidates.id,
-          name: row.candidates.name,
-          party: row.candidates.party || 'Indépendant'
-        }));
+        // 3) Charger la liste des candidats de l'élection (supporte pro + standard)
+        const electionCandidates = await resolveCandidatesForElection(selectedElection, electionData?.type);
 
         // 4) Récupérer libellés bureaux/centres
         const bureauIds = Array.from(new Set((filteredPvsAll || []).map(p => p.bureau_id).filter(Boolean)));
@@ -239,14 +241,29 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
         const detailed = (filteredPvsAll || []).map((pv: any) => {
           const b = bureauMap.get(pv.bureau_id);
           const c = b ? centerMap.get(b.center_id) : undefined;
+          
+          const pvCandidateResults = crRows.filter((r: any) => r.pv_id === pv.id);
+          const candidateVotes: Record<string, number> = {};
+          
+          // Initialiser tous les candidats à 0
+          electionCandidates.forEach(cand => {
+             candidateVotes[cand.id] = 0;
+          });
+          
+          // Ajouter les votes du PV
+          pvCandidateResults.forEach((cr: any) => {
+             const cid = cr.candidates?.id || cr.candidate_id;
+             if (candidateVotes[cid] !== undefined) {
+               candidateVotes[cid] += cr.votes || 0;
+             }
+          });
+          
           return {
             center: c?.name || 'Centre',
             bureau: b?.name || 'Bureau',
             inscrits: pv.total_registered || 0, // Utiliser le nombre d'inscrits par défaut du bureau
             votants: pv.total_voters || 0,
-            notreCandidat: 0,
-            adversaire1: 0,
-            adversaire2: 0
+            candidateVotes
           };
         });
         setDetailedResults(detailed);
@@ -406,34 +423,36 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Centre</TableHead>
-                  <TableHead className="text-right">Votants</TableHead>
-                  <TableHead className="text-right">Nuls</TableHead>
-                  <TableHead className="text-right">Exprimés</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {nonValidatedByCenter.map((row: any, idx: number) => (
-                  <TableRow key={`nv-center-${idx}`} className="bg-yellow-50">
-                    <TableCell className="font-medium text-yellow-900">{row.center_name}</TableCell>
-                    <TableCell className="text-right text-yellow-900">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-yellow-900">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-yellow-900">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Centre</TableHead>
+                    <TableHead className="text-right">Votants</TableHead>
+                    <TableHead className="text-right">Nuls</TableHead>
+                    <TableHead className="text-right">Exprimés</TableHead>
                   </TableRow>
-                ))}
-                {centerBreakdown.map((row: any) => (
-                  <TableRow key={`${row.center_id}`}>
-                    <TableCell>{row.center_name}</TableCell>
-                    <TableCell className="text-right">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {nonValidatedByCenter.map((row: any, idx: number) => (
+                    <TableRow key={`nv-center-${idx}`} className="bg-yellow-50">
+                      <TableCell className="font-medium text-yellow-900">{row.center_name}</TableCell>
+                      <TableCell className="text-right text-yellow-900">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-yellow-900">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-yellow-900">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                  {centerBreakdown.map((row: any) => (
+                    <TableRow key={`${row.center_id}`}>
+                      <TableCell>{row.center_name}</TableCell>
+                      <TableCell className="text-right">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -449,37 +468,39 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Centre</TableHead>
-                  <TableHead>Bureau</TableHead>
-                  <TableHead className="text-right">Votants</TableHead>
-                  <TableHead className="text-right">Nuls</TableHead>
-                  <TableHead className="text-right">Exprimés</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {nonValidatedByBureau.map((row: any, idx: number) => (
-                  <TableRow key={`nv-bureau-${idx}`} className="bg-yellow-50">
-                    <TableCell className="font-medium text-yellow-900">{row.center_name}</TableCell>
-                    <TableCell className="text-yellow-900">{row.bureau_name}</TableCell>
-                    <TableCell className="text-right text-yellow-900">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-yellow-900">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-yellow-900">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Centre</TableHead>
+                    <TableHead>Bureau</TableHead>
+                    <TableHead className="text-right">Votants</TableHead>
+                    <TableHead className="text-right">Nuls</TableHead>
+                    <TableHead className="text-right">Exprimés</TableHead>
                   </TableRow>
-                ))}
-                {bureauBreakdown.map((row: any) => (
-                  <TableRow key={`${row.bureau_id}`}>
-                    <TableCell>{centerBreakdown.find((c:any)=>c.center_id===row.center_id)?.center_name || 'Centre'}</TableCell>
-                    <TableCell>{row.bureau_name}</TableCell>
-                    <TableCell className="text-right">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {nonValidatedByBureau.map((row: any, idx: number) => (
+                    <TableRow key={`nv-bureau-${idx}`} className="bg-yellow-50">
+                      <TableCell className="font-medium text-yellow-900">{row.center_name}</TableCell>
+                      <TableCell className="text-yellow-900">{row.bureau_name}</TableCell>
+                      <TableCell className="text-right text-yellow-900">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-yellow-900">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-yellow-900">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                  {bureauBreakdown.map((row: any) => (
+                    <TableRow key={`${row.bureau_id}`}>
+                      <TableCell>{centerBreakdown.find((c:any)=>c.center_id===row.center_id)?.center_name || 'Centre'}</TableCell>
+                      <TableCell>{row.bureau_name}</TableCell>
+                      <TableCell className="text-right">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -757,8 +778,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
                     onClick={() => setShowPublishConfirm(true)}
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                     size="lg"
-                    disabled={!finalResults || finalResults.validatedBureaux === 0}
-                    title={!finalResults || finalResults.validatedBureaux === 0 ? 'La publication nécessite au moins un PV validé' : undefined}
+                    disabled={readOnly || !finalResults || finalResults.validatedBureaux === 0}
+                    title={readOnly ? 'Accès en lecture seule' : (!finalResults || finalResults.validatedBureaux === 0 ? 'La publication nécessite au moins un PV validé' : undefined)}
                   >
                      Publier les résultats
                   </Button>
@@ -799,6 +820,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
             <div className="flex space-x-4">
               <Button
                 onClick={handlePublish}
+                disabled={readOnly}
                 className="bg-blue-600 hover:bg-blue-700 text-white flex-1"
               >
                 Confirmer la publication
@@ -826,34 +848,34 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection }) => 
           </DialogHeader>
           
           <div className="space-y-4">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Centre de Vote</TableHead>
-                  <TableHead>Bureau</TableHead>
-                  <TableHead>Inscrits</TableHead>
-                  <TableHead>Votants</TableHead>
-                  <TableHead>Notre Candidat</TableHead>
-                  <TableHead>Adversaire 1</TableHead>
-                  <TableHead>Adversaire 2</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {detailedResults.map((result, index) => (
-                  <TableRow key={index}>
-                    <TableCell className="font-medium">{result.center}</TableCell>
-                    <TableCell>{result.bureau}</TableCell>
-                    <TableCell>{result.inscrits}</TableCell>
-                    <TableCell>{result.votants}</TableCell>
-                    <TableCell className="font-medium text-green-600">
-                      {result.notreCandidat}
-                    </TableCell>
-                    <TableCell>{result.adversaire1}</TableCell>
-                    <TableCell>{result.adversaire2}</TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Centre de Vote</TableHead>
+                    <TableHead>Bureau</TableHead>
+                    <TableHead>Inscrits</TableHead>
+                    <TableHead>Votants</TableHead>
+                    {finalResults?.candidates.map((c) => (
+                      <TableHead key={c.id}>{c.name}</TableHead>
+                    ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {detailedResults.map((result, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-medium">{result.center}</TableCell>
+                      <TableCell>{result.bureau}</TableCell>
+                      <TableCell>{result.inscrits}</TableCell>
+                      <TableCell>{result.votants}</TableCell>
+                      {finalResults?.candidates.map((c) => (
+                        <TableCell key={c.id}>{result.candidateVotes?.[c.id] || 0}</TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

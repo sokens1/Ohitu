@@ -25,14 +25,16 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 import { useNetworkQuality } from '@/hooks/useNetworkQuality';
 
 interface PVEntrySectionProps {
   onClose: () => void;
   selectedElection: string;
+  readOnly?: boolean;
 }
 
-const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElection }) => {
+const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElection, readOnly = false }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [electionInfo, setElectionInfo] = useState<any>(null);
   const [candidatesData, setCandidatesData] = useState<any[]>([]);
@@ -201,21 +203,12 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         if (electionError) throw electionError;
         setElectionInfo(election);
         
-        // Récupérer uniquement les candidats liés à l'élection sélectionnée
-        const { data: candidatesLinked, error: candidatesError } = await supabase
-          .from('election_candidates')
-          .select(`
-            candidates!candidate_id(id, name, party)
-          `)
-          .eq('election_id', selectedElection);
-        if (candidatesError) throw candidatesError;
-
-        const mappedCandidates = (candidatesLinked || []).map((item: any) => ({
-          id: item.candidates.id,
-          name: item.candidates.name,
-          party: item.candidates.party || 'Indépendant'
-        }));
-
+        // Récupérer les candidats selon le type d'élection
+        // (élection professionnelle → union_lists, standard → election_candidates)
+        const mappedCandidates = await resolveCandidatesForElection(
+          selectedElection,
+          election?.type
+        );
         setCandidatesData(mappedCandidates);
 
         // Pré-remplissage depuis DataEntrySection si présent
@@ -786,7 +779,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <h4 className="font-semibold text-gray-900">{candidate.name}</h4>
-                        <p className="text-sm text-gray-600">{candidate.party}</p>
+                        {candidate.suppleant && (
+                          <p className="text-xs text-gray-700 mt-0.5">Suppléant : {candidate.suppleant}</p>
+                        )}
+                        <p className="text-sm font-medium text-blue-600 mt-0.5">{candidate.party}</p>
                       </div>
                       <div className="w-32">
                         <Input
@@ -848,8 +844,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               <h4 className="text-lg font-medium text-gray-900 mb-2">Téléverser le PV physique</h4>
               <p className="text-sm text-gray-600 mb-4">Formats acceptés: PDF, JPG, PNG (max. 10MB)</p>
               {!formData.uploadedFile && (
-                <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-sm">
-                  ⚠️ Aucun fichier ajouté. Le PV peut être saisi et apparaître dans l'onglet Publier, mais ne pourra pas être validé sans PV physique.
+                <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
+                  ℹ️ L'ajout d'un document physique (PV scanné) est optionnel. Vous pouvez poursuivre et enregistrer les chiffres directement.
                 </div>
               )}
               
@@ -906,7 +902,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   
                   <div>
                     <h4 className="font-medium text-gray-900 mb-2">Participation</h4>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                       <div>
                         <span className="text-gray-600">Votants:</span>
                         <span className="font-semibold ml-2">{formData.votants}</span>
@@ -1001,11 +997,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       {electionInfo && (
         <Card className="gov-card border-l-4 border-l-blue-500">
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-start space-x-4">
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900">{electionInfo.title}</h3>
-                  <div className="flex items-center space-x-4 mt-1">
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
                     <div className="flex items-center space-x-1 text-sm text-gray-600">
                       <Calendar className="w-4 h-4" />
                       <span>{new Date(electionInfo.election_date).toLocaleDateString('fr-FR', { 
@@ -1021,8 +1017,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="flex items-center space-x-1 text-sm text-gray-600">
+              <div className="text-left sm:text-right">
+                <div className="flex items-center space-x-1 text-sm text-gray-600 sm:justify-end">
                   <Users className="w-4 h-4" />
                   <span>{candidatesData.length} candidats</span>
                 </div>
@@ -1097,10 +1093,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                 <ChevronRight className="w-4 h-4 ml-2" />
               </Button>
             ) : (
-              <Button 
+              <Button
                 onClick={handleSubmitPV}
-                disabled={!canSubmit() || submitting}
+                disabled={!canSubmit() || submitting || readOnly}
                 className="bg-green-600 hover:bg-green-700"
+                title={readOnly ? 'Accès en lecture seule' : undefined}
               >
                 <CheckCircle className="w-4 h-4 mr-2" />
                 {submitting ? 'Soumission...' : 'Soumettre le PV'}

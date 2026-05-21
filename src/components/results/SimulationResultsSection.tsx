@@ -7,9 +7,10 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Trophy, Info, Users, TrendingUp, Filter, AlertTriangle, Calculator, ChevronDown, Check, Building2, MapPin, Vote, BarChart3, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { Calculator, BarChart3, TrendingUp, Users, Vote, MapPin, Building2, Trophy } from 'lucide-react';
+import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 
 interface SimulationResultsSectionProps {
   electionId: string;
@@ -82,7 +83,7 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
         // 1. Récupérer les données de l'élection pour vérifier la date de création
         const { data: electionInfo, error: electionError } = await supabase
           .from('elections')
-          .select('created_at, title, status, nb_electeurs')
+          .select('created_at, title, status, nb_electeurs, type')
           .eq('id', electionId)
           .single();
 
@@ -102,17 +103,12 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
         }
 
         // 2. Charger les candidats de l'élection
-        const { data: candidatesData, error: candidatesError } = await supabase
-          .from('election_candidates')
-          .select('candidate_id, candidates!inner(id, name, party)')
-          .eq('election_id', electionId);
+        const resolvedCandidates = await resolveCandidatesForElection(electionId, electionInfo?.type);
 
-        if (candidatesError) throw candidatesError;
-
-        const candidatesList = (candidatesData || []).map((row: any, index: number) => ({
-          id: String(row.candidates.id),
-          name: row.candidates.name,
-          party: row.candidates.party,
+        const candidatesList = resolvedCandidates.map((candidate: any, index: number) => ({
+          id: String(candidate.id),
+          name: candidate.name,
+          party: candidate.party,
           votes: 0,
           percentage: 0,
           color: COLORS[index % COLORS.length]
@@ -414,21 +410,38 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
 
     // A) Identifier les bureaux avec simulations spécifiques
     const bureauxAvecSimulationSpecifique = new Set(currentSimulatedBureaux.keys());
+    const pendingWithoutSimulation = pendingBureaux.filter(b => !bureauxAvecSimulationSpecifique.has(b.id));
     
-    // B) Bureaux à simuler avec paramètres globaux (ceux sans simulation spécifique)
-    const bureauxNonSelectionnes = pendingBureaux.filter(b => !bureauxAvecSimulationSpecifique.has(b.id));
-    
-    let totalSimulatedGlobal = 0;
+    // B) Calculer les électeurs simulés globaux
     const participationRateGlobal = 100 - simulationParams.globalAbstention;
+    let totalSimulatedGlobal = 0;
     
-    bureauxNonSelectionnes.forEach(bureau => {
-      const simulatedExpressedInBureau = Math.round(
-        (bureau.registered_voters * participationRateGlobal / 100) * 
+    const knownPendingInscrits = pendingWithoutSimulation.reduce((sum, b) => sum + (b.registered_voters || 0), 0);
+    
+    if (knownPendingInscrits > 0) {
+      // Au moins un bureau a ses inscrits renseignés, on utilise les valeurs réelles
+      pendingWithoutSimulation.forEach(bureau => {
+        totalSimulatedGlobal += Math.round(
+          ((bureau.registered_voters || 0) * participationRateGlobal / 100) * 
+          (simulationParams.suffrageExprime / 100)
+        );
+      });
+    } else {
+      // Tous les bureaux ont 0 inscrits, on essaie d'utiliser nb_electeurs global
+      const validatedInscrits = validatedBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0);
+      const simulatedBureauxInscrits = Array.from(currentSimulatedBureaux.keys()).reduce((sum, bureauId) => {
+        const b = pendingBureaux.find(p => p.id === bureauId);
+        return sum + (b?.registered_voters || 0);
+      }, 0);
+      
+      const totalKnown = validatedInscrits + simulatedBureauxInscrits;
+      const remainingInscritsToSimulate = electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - totalKnown) : 0;
+      
+      totalSimulatedGlobal = Math.round(
+        (remainingInscritsToSimulate * participationRateGlobal / 100) * 
         (simulationParams.suffrageExprime / 100)
       );
-      totalSimulatedGlobal += simulatedExpressedInBureau;
-    });
-
+    }
     // Répartir les votes des bureaux non sélectionnés
     if (totalSimulatedGlobal > 0) {
       // Si un candidat est sélectionné pour un score cible, calculer sa distribution
@@ -654,10 +667,10 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
     const totalPendingVoters = pendingBureaux.reduce((sum, bureau) => 
       sum + Math.round((bureau.registered_voters * participationRate / 100)), 0);
     
-    // Calculer les inscrits restants depuis le nb_electeurs de l'élection
-    const totalPendingInscrits = electionData?.nb_electeurs 
-      ? Math.max(0, electionData.nb_electeurs - totalValidatedInscrits)
-      : pendingBureaux.reduce((sum, bureau) => sum + (bureau.registered_voters || 0), 0);
+    const sumPendingBureaux = pendingBureaux.reduce((sum, bureau) => sum + (bureau.registered_voters || 0), 0);
+    const totalPendingInscrits = sumPendingBureaux > 0 
+      ? sumPendingBureaux
+      : (electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - totalValidatedInscrits) : 0);
     
     return {
       totalValidatedBureaux: validatedBureaux.length,
@@ -956,10 +969,12 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                 </div>
                 <div className="text-2xl font-bold text-orange-900">{pendingBureaux.length}</div>
                 <div className="text-xs text-orange-600">
-                  {(electionData?.nb_electeurs 
-                    ? Math.max(0, electionData.nb_electeurs - validatedBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0))
-                    : pendingBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0)
-                  ).toLocaleString()} inscrits
+                  {(() => {
+                    const sumPending = pendingBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0);
+                    if (sumPending > 0) return sumPending;
+                    const valInscrits = validatedBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0);
+                    return electionData?.nb_electeurs ? Math.max(0, electionData.nb_electeurs - valInscrits) : 0;
+                  })().toLocaleString()} inscrits
                 </div>
               </div>
             </div>
@@ -970,8 +985,8 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                 <TrendingUp className="h-4 w-4" />
                 Résultats simulés
               </h3>
-               <div className="h-48 flex">
-                <div className="w-1/2">
+               <div className="flex flex-col sm:flex-row sm:h-48 gap-4">
+                <div className="w-full sm:w-1/2 h-48 sm:h-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -1007,7 +1022,7 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="w-1/2 flex items-center justify-center">
+                <div className="w-full sm:w-1/2 flex items-center justify-center py-2">
                   <div className="space-y-2">
                     {chartData.map((entry, index) => (
                       <div key={index} className="flex items-center gap-2">

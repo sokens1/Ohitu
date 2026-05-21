@@ -21,10 +21,11 @@ import {
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 
-interface PVValidationSectionProps { selectedElection: string }
+interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; }
 
-const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection }) => {
+const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false }) => {
   const [selectedPV, setSelectedPV] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'entered' | 'validated' | 'anomaly' | 'published'>('all');
@@ -44,6 +45,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [usersMap, setUsersMap] = useState<Map<string, string>>(new Map());
 
   // Helpers d'upload (alignés avec PVEntrySection)
   const ensureBucketExists = async (bucket: string) => {
@@ -86,11 +88,15 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         if (!selectedElection) { setPvs([]); setBureauxMap(new Map()); setCentersMap(new Map()); setLoading(false); return; }
         const { data: pvRows, error: pvErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, pv_photo_url')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url')
           .eq('election_id', selectedElection)
           .order('created_at', { ascending: false })
           .limit(500);
         if (pvErr) throw pvErr;
+        
+        // Charger les utilisateurs
+        const { data: usersData } = await supabase.from('users').select('id, name');
+        setUsersMap(new Map(usersData?.map(u => [u.id, u.name]) || []));
         // Filtrer les PV aux centres liés à l'élection via election_centers
         const bureauIds = Array.from(new Set((pvRows || []).map(r => r.bureau_id).filter(Boolean)));
         if (bureauIds.length) {
@@ -145,6 +151,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         votes_expressed: pv.votes_expressed,
         null_votes: pv.null_votes,
         pv_photo_url: pv.pv_photo_url,
+        entered_by: pv.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : 'Inconnu',
+        entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
+        validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
+        validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
       };
     });
     if (filter === 'all') return enriched;
@@ -317,21 +327,15 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       // Vider les résultats des candidats
       setCandidateResults([]);
 
-      // Recharger les candidats pour cette élection
+      // Recharger les candidats pour cette élection (supporte élections pro)
       try {
-        const { data: candidatesData, error: candidatesError } = await supabase
-          .from('election_candidates')
-          .select('candidate_id, candidates(id, name)')
-          .eq('election_id', selectedElection);
-
-        if (!candidatesError && candidatesData) {
-          const candidates = candidatesData.map((ec: any) => ({
-            id: ec.candidates?.id || ec.candidate_id,
-            name: ec.candidates?.name || 'Candidat',
-            votes: 0
-          }));
-          setCandidateResults(candidates);
-        }
+        const { data: elecInfo } = await supabase
+          .from('elections')
+          .select('type')
+          .eq('id', selectedElection)
+          .single();
+        const candidates = await resolveCandidatesForElection(selectedElection, elecInfo?.type);
+        setCandidateResults(candidates.map(c => ({ id: c.id, name: c.name, votes: 0 })));
       } catch (error) {
         console.error('Erreur lors du rechargement des candidats:', error);
       }
@@ -352,19 +356,17 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       if (!selectedPV || !selectedElection) { setCandidateResults([]); return; }
       
       try {
-        // D'abord, charger tous les candidats de l'élection
-        const { data: candidatesData, error: candidatesError } = await supabase
-          .from('election_candidates')
-          .select('candidate_id, candidates(id, name)')
-          .eq('election_id', selectedElection);
+        // Charger le type de l'élection
+        const { data: elecInfo } = await supabase
+          .from('elections')
+          .select('type')
+          .eq('id', selectedElection)
+          .single();
 
-        if (candidatesError) {
-          console.error('Erreur chargement candidats élection:', candidatesError);
-          setCandidateResults([]);
-          return;
-        }
+        // Résoudre la liste des candidats (supporte pro + standard)
+        const resolvedCandidates = await resolveCandidatesForElection(selectedElection, elecInfo?.type);
 
-        // Ensuite, charger les résultats existants pour ce PV
+        // Charger les résultats existants pour ce PV
         const { data: resultsData, error: resultsError } = await supabase
           .from('candidate_results')
           .select('id, votes, candidate_id')
@@ -380,11 +382,11 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           resultsMap.set(r.candidate_id, r.votes || 0);
         });
 
-        // Combiner candidats et résultats
-        const mapped = (candidatesData || []).map((ec: any) => ({
-          id: ec.candidates?.id || ec.candidate_id,
-          name: ec.candidates?.name || 'Candidat',
-          votes: resultsMap.get(ec.candidates?.id || ec.candidate_id) || 0
+        // Combiner candidats résolus et résultats
+        const mapped = resolvedCandidates.map(c => ({
+          id: c.id,
+          name: c.name,
+          votes: resultsMap.get(c.id) || 0
         }));
 
         setCandidateResults(mapped);
@@ -422,7 +424,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex space-x-4 mb-4">
+          <div className="flex flex-wrap gap-2 mb-4">
             <Button variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')} size="sm">Tous</Button>
             <Button variant={filter === 'pending' ? 'default' : 'outline'} onClick={() => setFilter('pending')} size="sm">En attente</Button>
             <Button variant={filter === 'entered' ? 'default' : 'outline'} onClick={() => setFilter('entered')} size="sm">Saisis</Button>
@@ -463,6 +465,12 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       <span>{pv.timestamp}</span>
                     </div>
                   </div>
+                  
+                  {pv.status === 'validated' && (
+                    <div className="text-xs text-green-700 mt-1">
+                      Validé par {pv.validated_by} le {pv.validated_at_str}
+                    </div>
+                  )}
                   
                   <div className="mt-2 flex justify-between text-xs text-gray-500">
                     <span>Votants: {pv.total_voters}</span>
@@ -533,6 +541,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                         <div className="flex justify-between"><span>Votants:</span><span className="font-medium">{editValues.total_voters || 0}</span></div>
                         <div className="flex justify-between"><span>Bulletins nuls:</span><span className="font-medium">{editValues.null_votes || 0}</span></div>
                         <div className="flex justify-between"><span>Suffrages exprimés:</span><span className="font-medium">{editValues.votes_expressed || 0}</span></div>
+                        <div className="border-t border-gray-200 my-2 pt-2 text-xs text-gray-500">
+                          <div>Saisi par : <strong>{selectedPVData.entered_by}</strong> {selectedPVData.entered_at_str ? `le ${selectedPVData.entered_at_str}` : ''}</div>
+                          {selectedPVData.status === 'validated' && (
+                            <div className="text-green-700 font-semibold mt-1">
+                              Validé par : <strong>{selectedPVData.validated_by}</strong> {selectedPVData.validated_at_str ? `le ${selectedPVData.validated_at_str}` : ''}
+                            </div>
+                          )}
+                        </div>
                               </>
                             )}
                         </div>
@@ -609,9 +625,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 <Textarea id="comment" placeholder="Ajouter un commentaire..." value={comment} onChange={(e) => setComment(e.target.value)} rows={3} />
                 </div>
 
-              <div className="flex space-x-4 justify-end">
+              <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-6">
                 {!editMode && (
-                  <Button onClick={() => {
+                  <Button disabled={readOnly} onClick={() => {
                     setEditValues({
                       total_registered: (editValues.total_registered || 0),
                       total_voters: (selectedPVData.total_voters || 0),
@@ -695,14 +711,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
       <Button
         onClick={() => setShowResetConfirm(true)}
-        disabled={resetting}
+        disabled={resetting || readOnly}
         variant="outline"
         className="border-orange-300 text-orange-700 hover:bg-orange-50"
       >
         <RotateCcw className="w-4 h-4 mr-2" />
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
       </Button>
-                <Button onClick={async () => {
+                <Button disabled={readOnly} onClick={async () => {
                   if (!selectedPV) return;
                   if (!confirm('Supprimer ce PV ? Cette action est irréversible.')) return;
                   // Supprimer d'abord les résultats liés
@@ -723,20 +739,27 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 }} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
                   Supprimer
                   </Button>
-                <Button onClick={async () => {
+                <Button disabled={readOnly} onClick={async () => {
                   if (!selectedPV) return;
-                  if (!selectedPVData?.pv_photo_url && !newPvFile) {
-                    toast.error('Un PV physique (document scanné) est requis pour valider.');
-                    return;
-                  }
+                  const { data: { user } } = await supabase.auth.getUser();
                   const { error } = await supabase
                     .from('procès_verbaux')
-                    .update({ status: 'validated', validated_at: new Date().toISOString() })
+                    .update({ 
+                      status: 'validated', 
+                      validated_at: new Date().toISOString(),
+                      validated_by: user?.id || null
+                    })
                     .eq('id', selectedPV);
                   if (error) {
                     console.error('Erreur validation PV:', error);
                   } else {
-                    setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated' } : p));
+                    const validatedByLabel = user?.id ? (usersMap.get(user.id) || user.id) : 'Inconnu';
+                    setPvs(prev => prev.map(p => p.id === selectedPV ? { 
+                      ...p, 
+                      status: 'validated',
+                      validated_by: user?.id || null,
+                      validated_at: new Date().toISOString()
+                    } : p));
                     setDetailOpen(false);
                   }
                 }} className="bg-green-600 hover:bg-green-700 text-white">

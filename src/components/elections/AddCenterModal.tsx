@@ -288,7 +288,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
             </form>
           ) : (
             <form onSubmit={handleCreateSite} className="space-y-6">
-              <ModernFormGrid columns={2}>
+              <ModernFormGrid cols={2}>
                 <FloatingInput
                   label="Nom de l'établissement"
                   icon={<Building className="w-4 h-4" />}

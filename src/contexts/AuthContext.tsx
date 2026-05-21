@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import auditService from '@/services/auditService';
 
-export type UserRole = 'super-admin' | 'agent-saisie' | 'validateur' | 'observateur';
+export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau';
 
 export interface User {
   id: string;
@@ -11,6 +11,9 @@ export interface User {
   email: string;
   role: UserRole;
   isActive: boolean;
+  assigned_election_id?: string | null;
+  assigned_election_ids?: string[] | null;
+  created_by?: string | null;
 }
 
 interface AuthContextType {
@@ -51,14 +54,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               name: userData.name,
               email: userData.email,
               role: userData.role,
-              isActive: userData.is_active
+              isActive: userData.is_active,
+              assigned_election_id: userData.assigned_election_id,
+              assigned_election_ids: userData.assigned_election_ids ?? null,
+              created_by: userData.created_by
             };
             setUser(u);
             localStorage.setItem('ohitu-user', JSON.stringify(u));
+          } else {
+            // Session valide mais aucun profil en base → déconnexion propre
+            localStorage.removeItem('ohitu-user');
+            await supabase.auth.signOut();
           }
         } else {
-          const savedUser = localStorage.getItem('ohitu-user');
-          if (savedUser) setUser(JSON.parse(savedUser));
+          // Pas de session Supabase active → ne jamais utiliser le localStorage
+          // (il peut contenir des données d'un ancien super-admin)
+          localStorage.removeItem('ohitu-user');
+          setUser(null);
         }
       } finally {
         setAuthLoading(false);
@@ -77,6 +89,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (authError) {
         console.error('Erreur d\'authentification:', authError);
+        if (authError.message?.includes('Email not confirmed')) {
+          throw new Error('EMAIL_NOT_CONFIRMED');
+        }
         return false;
       }
 
@@ -109,7 +124,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           name: userData.name,
           email: userData.email,
           role: userData.role,
-          isActive: userData.is_active
+          isActive: userData.is_active,
+          assigned_election_id: userData.assigned_election_id,
+          created_by: userData.created_by
         };
 
         setUser(user);
@@ -148,6 +165,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     setUser(null);
     localStorage.removeItem('ohitu-user');
+    localStorage.removeItem('results_selected_election');
+    localStorage.removeItem('results_active_tab');
     await supabase.auth.signOut();
   };
 

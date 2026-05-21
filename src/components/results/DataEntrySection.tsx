@@ -30,9 +30,10 @@ interface DataEntrySectionProps {
     anomaliesDetectees: number;
   };
   selectedElection: string;
+  readOnly?: boolean;
 }
 
-const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection }) => {
+const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false }) => {
   const [expandedCenters, setExpandedCenters] = useState<string[]>([]);
   const [showAnomaliesOnly, setShowAnomaliesOnly] = useState(false);
   const [showPVEntry, setShowPVEntry] = useState(false);
@@ -62,6 +63,10 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           setVotingCenters([]);
           return;
         }
+
+        // Récupérer les utilisateurs pour afficher qui a saisi
+        const { data: usersData } = await supabase.from('users').select('id, name');
+        const usersMap = new Map(usersData?.map((u: any) => [u.id, u.name]) || []);
 
         const { data, error } = await supabase
           .from('voting_centers')
@@ -97,11 +102,12 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
               id: bureau.id.toString(),
               name: bureau.name,
               status: pv?.status || 'pending',
-              agent: pv?.entered_by || '',
+              agent: pv?.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : '',
               time: pv?.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', { 
                 hour: '2-digit', 
                 minute: '2-digit' 
               }) : '',
+              dateStr: pv?.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') : '',
               anomaly: pv?.anomalies || null
             };
           }) || [];
@@ -205,22 +211,24 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     : votingCenters;
 
   if (showPVEntry) {
-    return <PVEntrySection onClose={() => setShowPVEntry(false)} selectedElection={selectedElection} />;
+    return <PVEntrySection onClose={() => setShowPVEntry(false)} selectedElection={selectedElection} readOnly={readOnly} />;
   }
 
   return (
     <div className="space-y-6">
       {/* Bouton d'action principal */}
-      <div className="flex justify-end">
-        <Button 
-          onClick={() => setShowPVEntry(true)}
-          size="lg"
-          className="bg-gov-blue hover:bg-gov-blue-dark text-white px-8 py-3"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Saisir un PV
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end">
+          <Button
+            onClick={() => setShowPVEntry(true)}
+            size="lg"
+            className="bg-gov-blue hover:bg-gov-blue-dark text-white px-8 py-3"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Saisir un PV
+          </Button>
+        </div>
+      )}
 
       {/* KPIs retirés sur demande */}
 
@@ -328,9 +336,9 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                             <div>
                               <span className="font-medium text-sm">{bureau.name}</span>
                               {bureau.agent && (
-                                <div className="flex items-center space-x-1 text-xs text-gray-500">
+                                <div className="flex items-center space-x-1 text-xs text-gray-500 mt-1">
                                   <User className="w-3 h-3" />
-                                  <span>{bureau.agent} - {bureau.time}</span>
+                                  <span>Saisi par <strong>{bureau.agent}</strong> le {bureau.dateStr} à {bureau.time}</span>
                                 </div>
                               )}
                               {bureau.anomaly && (

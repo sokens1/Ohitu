@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect } from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { X, Save, Building, Users, Calendar, Briefcase, FileText, Check, Globe } from 'lucide-react';
 import { ModernForm, ModernFormSection, ModernFormGrid, ModernFormActions } from '@/components/ui/modern-form';
@@ -120,9 +120,10 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
            setFormData(prev => ({
             ...prev,
             colleges: [
-              { id: '1', name: 'Cadres', type: 'cadres', voters: 0, seats: 1 },
-              { id: '2', name: 'Employés', type: 'employes', voters: 0, seats: 1 },
-              { id: '3', name: 'Ouvriers', type: 'ouvriers', voters: 0, seats: 1 }
+              { id: '1', name: 'Cadre', type: 'cadres', voters: 0, seats: 1 },
+              { id: '2', name: 'Maîtrise', type: 'employes', voters: 0, seats: 1 },
+              { id: '3', name: 'Exécution', type: 'ouvriers', voters: 0, seats: 1 },
+              { id: '4', name: 'Encadrement', type: 'general', voters: 0, seats: 1 }
             ]
           }));
         }
@@ -165,45 +166,41 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
 
   if (loading) {
     return (
-      <Sheet open={true} onOpenChange={onClose}>
-        <SheetContent side="bottom" className="h-[50vh] flex items-center justify-center">
+      <Dialog open={true} onOpenChange={onClose}>
+        <DialogContent className="max-w-md h-[40vh] flex items-center justify-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gov-blue"></div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     );
   }
 
   return (
-    <Sheet open={true} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="h-[95vh] sm:h-[90vh] p-0 overflow-hidden border-t-2 border-gov-blue/20 rounded-t-3xl">
-        <div className="flex flex-col h-full">
-          <SheetHeader className="p-4 sm:p-6 bg-gradient-to-r from-gov-blue to-gov-blue-light text-white shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-white/20 rounded-lg">
-                  <Briefcase className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-                </div>
-                <div>
-                  <SheetTitle className="text-xl sm:text-2xl font-bold text-white">
-                    Modifier Élection Professionnelle
-                  </SheetTitle>
-                  <SheetDescription className="text-gov-blue-light/90 text-xs sm:text-sm mt-0.5">
-                    Gérez les détails de l'entreprise, les collèges et le chronogramme
-                  </SheetDescription>
-                </div>
-              </div>
-              <Button 
-                variant="ghost" 
-                onClick={onClose}
-                className="text-white hover:bg-white/20 -mr-2"
-              >
-                <X className="h-5 w-5" />
-              </Button>
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl xl:max-w-5xl max-h-[90vh] lg:max-h-[85vh] overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <DialogHeader className="pb-4 sm:pb-6 lg:pb-8 flex flex-row items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gov-blue/10 rounded-lg">
+              <Briefcase className="h-5 w-5 sm:h-6 sm:w-6 text-gov-blue" />
             </div>
-          </SheetHeader>
+            <div>
+              <DialogTitle className="text-xl sm:text-2xl font-bold text-gray-900">
+                Modifier Élection Professionnelle
+              </DialogTitle>
+              <DialogDescription className="text-gray-500 text-xs sm:text-sm mt-0.5">
+                Gérez les détails de l'entreprise, les collèges et le chronogramme. Les champs marqués d'un astérisque (*) sont obligatoires.
+              </DialogDescription>
+            </div>
+          </div>
+          <Button 
+            variant="ghost" 
+            onClick={onClose}
+            className="text-gray-500 hover:bg-gray-100 -mr-2"
+          >
+            <X className="h-5 w-5" />
+          </Button>
+        </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-gray-50/50">
-            <ModernForm onSubmit={handleSubmit}>
+        <ModernForm onSubmit={handleSubmit}>
               {/* Informations Générales */}
               <ModernFormSection 
                 title="Informations Générales" 
@@ -218,7 +215,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                     required
                   />
                 </ModernFormGrid>
-                <ModernFormGrid cols={3}>
+                <ModernFormGrid cols={2}>
                   <FloatingInput
                     label="Date du scrutin (1er tour)"
                     type="date"
@@ -237,11 +234,6 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                       { value: 'Annulée', label: 'Annulée' }
                     ]}
                   />
-                  <FloatingInput
-                    label="Cadre Légal"
-                    value={formData.legalFramework}
-                    disabled
-                  />
                 </ModernFormGrid>
                 <div className="mt-4">
                   <label className="text-sm font-medium text-gray-700 mb-2 block">Image de couverture</label>
@@ -249,6 +241,18 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                     onUploadSuccess={(url) => setFormData({ ...formData, coverImage: url })}
                     defaultValue={formData.coverImage}
                   />
+                </div>
+                
+                <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-1.5 text-sm text-gray-500">
+                  <span>Cadre légal de référence :</span>
+                  <a 
+                    href="https://www.droit-afrique.com/uploads/Gabon-Code-du-travail-2021.pdf" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-gov-blue hover:text-gov-blue-dark font-semibold inline-flex items-center gap-1 transition-colors hover:underline"
+                  >
+                    LOI-022-2021 + Arrêté 000147
+                  </a>
                 </div>
               </ModernFormSection>
 
@@ -260,7 +264,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
               >
                 <ModernFormGrid cols={2}>
                   <FloatingInput
-                    label="Raison Sociale"
+                    label="Organisation"
                     value={formData.enterpriseName}
                     onChange={(e) => setFormData({ ...formData, enterpriseName: e.target.value })}
                     required
@@ -278,7 +282,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                 </ModernFormGrid>
                 <ModernFormGrid cols={1}>
                   <FloatingInput
-                    label="Unité Administrative (Ministère de rattachement)"
+                    label="Tutelle"
                     value={formData.administrativeUnit}
                     onChange={(e) => setFormData({ ...formData, administrativeUnit: e.target.value })}
                   />
@@ -411,10 +415,8 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                 </Button>
               </ModernFormActions>
             </ModernForm>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
+          </DialogContent>
+        </Dialog>
   );
 };
 

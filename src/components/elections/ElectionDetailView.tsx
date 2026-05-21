@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,7 +19,13 @@ import {
   Trash2,
   LayoutGrid,
   List,
-  RefreshCcw
+  RefreshCcw,
+  BarChart3,
+  Globe,
+  Lock,
+  Globe2,
+  Upload,
+  Download
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -31,6 +37,7 @@ import EditCandidateModal from './EditCandidateModal';
 import EditBureauModal from './EditBureauModal';
 import CandidateProfileModal from './CandidateProfileModal';
 import InitialsAvatar from '@/components/ui/initials-avatar';
+import { useRBAC } from '@/hooks/useRBAC';
 
 interface Election {
   id: string; // UUID
@@ -52,6 +59,8 @@ interface Election {
   commune: string;
   arrondissement: string;
   enterpriseId?: string;
+  has_second_round?: boolean;
+  second_round_date?: string | null;
 }
 
 interface Center {
@@ -84,6 +93,10 @@ interface ElectionDetailViewProps {
 }
 
 const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBack, onDataChange }) => {
+  const { can } = useRBAC();
+  const canManage = can('elections:manage');
+  const isProfessional = election.type?.trim() === 'Élection Professionnelle' || !!(election.enterpriseId || (election as any).enterprise_id);
+
   const [showAddCenter, setShowAddCenter] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [showEditCenter, setShowEditCenter] = useState(false);
@@ -94,10 +107,15 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [selectedBureau, setSelectedBureau] = useState<any>(null);
   const [enterprise, setEnterprise] = useState<any>(null);
+  const [loadingEnterprise, setLoadingEnterprise] = useState(false);
   const [centers, setCenters] = useState<Center[]>([]);
 
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  const centersFileInputRef = useRef<HTMLInputElement>(null);
+  const candidatesFileInputRef = useRef<HTMLInputElement>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [statistics, setStatistics] = useState({
     totalVoters: 0,
     totalCenters: 0,
@@ -106,6 +124,28 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   });
   const [centersViewMode, setCentersViewMode] = useState<'grid' | 'list'>('grid');
   const [candidatesViewMode, setCandidatesViewMode] = useState<'grid' | 'list'>('grid');
+  const [isPublished, setIsPublished] = useState(election.is_published || false);
+
+  const togglePublication = async () => {
+    try {
+      const { error } = await supabase
+        .from('elections')
+        .update({ is_published: !isPublished })
+        .eq('id', election.id);
+        
+      if (error) throw error;
+      
+      setIsPublished(!isPublished);
+      toast.success(isPublished ? 'Les résultats ont été masqués du grand public.' : 'Les résultats sont désormais publics !');
+      
+      if (onDataChange) {
+        onDataChange();
+      }
+    } catch (err) {
+      console.error('Erreur lors de la mise à jour de la publication:', err);
+      toast.error('Erreur lors de la modification du statut de publication');
+    }
+  };
 
   // Fonction pour charger les centres de vote liés à cette élection
   const fetchCenters = useCallback(async () => {
@@ -235,26 +275,33 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     fetchCandidates();
   }, [fetchCandidates]);
 
-  // Charger les informations de l'entreprise si c'est une élection pro
+  // Charger les informations de l'entreprise si c'est une élection pro ou liée à une entreprise
   useEffect(() => {
     const fetchEnterprise = async () => {
-      if (election.type === 'Élection Professionnelle' && election.enterpriseId) {
+      const entId = election.enterpriseId || (election as any).enterprise_id;
+      if (entId) {
+        setLoadingEnterprise(true);
         try {
           const { data, error } = await supabase
             .from('enterprises')
             .select('*')
-            .eq('id', election.enterpriseId)
+            .eq('id', entId)
             .single();
             
           if (error) throw error;
           setEnterprise(data);
         } catch (error) {
           console.error('Erreur lors du chargement de l\'entreprise:', error);
+        } finally {
+          setLoadingEnterprise(false);
         }
+      } else {
+        setEnterprise(null);
+        setLoadingEnterprise(false);
       }
     };
     fetchEnterprise();
-  }, [election.type, election.enterpriseId]);
+  }, [election.enterpriseId, (election as any).enterprise_id]);
 
 
   // Mettre à jour les statistiques quand les données changent
@@ -319,6 +366,146 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     }
   };
 
+  const handleDownloadCentersTemplate = async () => {
+    try {
+      if (election.type === 'Élection Professionnelle') {
+        const link = document.createElement('a');
+        link.href = '/modele_etablissements.xlsx';
+        link.download = 'modele_etablissements.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success("Modèle Établissements téléchargé !");
+        return;
+      }
+      
+      const XLSX = await import('xlsx');
+      const ws_data = [
+        ["Région / Localisation", "Nom Établissement / Site", "Responsable Établissement", "Contact Téléphone", "Nom Bureau de vote", "Nombre d'électeurs", "Collège concerné"],
+        ["Libreville", "Siège Social", "Jean Dupont", "061234567", "Bureau 1", "50", "Employés"],
+        ["Libreville", "Siège Social", "Jean Dupont", "061234567", "Bureau 2", "50", "Cadres"],
+        ["Port-Gentil", "Agence Port-Gentil", "Marie Claire", "062345678", "Bureau Unique", "30", "Général"]
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Établissements & Bureaux");
+      XLSX.writeFile(wb, "Modele_Unites_De_Vote.xlsx");
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de la génération du modèle");
+    }
+  };
+
+  const handleImportCenters = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsImporting(true);
+      const XLSX = await import('xlsx');
+      const reader = new FileReader();
+      
+      reader.onload = async (evt) => {
+        try {
+          const data = evt.target?.result;
+          if (!data) throw new Error("Fichier vide");
+          const workbook = XLSX.read(data, { type: 'array' });
+          const isPro = election.type === 'Élection Professionnelle';
+          const estSheet = isPro 
+            ? (workbook.Sheets["Etablissements"] || workbook.Sheets["Établissements & Bureaux"])
+            : (workbook.Sheets["Établissements & Bureaux"] || workbook.Sheets["Etablissements & Bureaux"]);
+            
+          if (!estSheet) throw new Error("La feuille des établissements est introuvable");
+
+          const estRows = XLSX.utils.sheet_to_json<any>(estSheet);
+          const centerGroups: { [key: string]: any } = {};
+          
+          estRows.forEach((row: any) => {
+            const region = row["Region__Localisation"] || row["Région / Localisation"] || row["Région"] || "Général";
+            const name = row["Nom_Etablissement__Site"] || row["Nom Établissement / Site"] || row["Site"] || "";
+            if (!name) return;
+            const resp = row["Responsable_Etablissement"] || row["Responsable Établissement"] || "";
+            const phone = String(row["Contact_Telephone"] || row["Contact Téléphone"] || "");
+            
+            let totalVoters = 0;
+            let boothCount = 0;
+            let booths = [];
+            
+            if (isPro) {
+              const vEnc = Number(row["Nbre_electeurs_Encadrement"] || 0);
+              const vCad = Number(row["Nbre_electeurs_Cadre"] || 0);
+              const vMai = Number(row["Nbre _electeurs_Maitrise"] || row["Nbre_electeurs_Maitrise"] || 0);
+              const vExe = Number(row["Nbre _electeurs_Execution"] || row["Nbre_electeurs_Execution"] || 0);
+              totalVoters = vEnc + vCad + vMai + vExe;
+              boothCount = 1; // Un bureau par ligne d'établissement par défaut
+              if (vEnc > 0) booths.push({ name: name + " - Encadrement", registered_voters: vEnc });
+              if (vCad > 0) booths.push({ name: name + " - Cadres", registered_voters: vCad });
+              if (vMai > 0) booths.push({ name: name + " - Maîtrise", registered_voters: vMai });
+              if (vExe > 0) booths.push({ name: name + " - Exécution", registered_voters: vExe });
+              if (booths.length === 0) booths.push({ name: name + " - Bureau unique", registered_voters: totalVoters });
+            } else {
+              const boothName = row["Nom Bureau de vote"] || "";
+              totalVoters = Number(row["Nombre d'électeurs"] || 0);
+              boothCount = 1;
+              if (boothName) booths.push({ name: boothName, registered_voters: totalVoters });
+            }
+            
+            const groupKey = `${region}_${name}`;
+            if (!centerGroups[groupKey]) {
+              centerGroups[groupKey] = { name, address: region, contact_name: resp, contact_phone: phone, voters: 0, bureaux: 0, booths: [] };
+            }
+            centerGroups[groupKey].voters += totalVoters;
+            centerGroups[groupKey].bureaux += boothCount;
+            centerGroups[groupKey].booths.push(...booths);
+          });
+
+          let importedCount = 0;
+          for (const key of Object.keys(centerGroups)) {
+            const center = centerGroups[key];
+            const { data: centerData, error: centerErr } = await supabase.from('voting_centers').insert({
+              enterprise_id: enterprise?.id || election.enterpriseId || (election as any).enterprise_id,
+              name: center.name,
+              address: center.address,
+              contact_name: center.contact_name,
+              contact_phone: center.contact_phone,
+              total_voters: center.voters,
+              total_bureaux: center.bureaux
+            }).select().single();
+
+            if (centerErr || !centerData) continue;
+
+            const { error: linkErr } = await supabase.from('election_centers').insert({ election_id: election.id, center_id: centerData.id });
+            if (!linkErr) importedCount++;
+
+            if (center.booths.length > 0) {
+              const bureauxToInsert = center.booths.map((b: any) => ({
+                center_id: centerData.id,
+                name: b.name,
+                registered_voters: b.registered_voters
+              }));
+              await supabase.from('voting_bureaux').insert(bureauxToInsert);
+            }
+          }
+          
+          toast.success(`${importedCount} centres importés avec succès`);
+          fetchCenters();
+          if (onDataChange) onDataChange();
+        } catch (err: any) {
+          toast.error(err.message || "Erreur de lecture du fichier");
+        } finally {
+          setIsImporting(false);
+          if (centersFileInputRef.current) centersFileInputRef.current.value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de l'import");
+      setIsImporting(false);
+      if (centersFileInputRef.current) centersFileInputRef.current.value = '';
+    }
+  };
+
   const handleAddCandidate = async (candidatesData: Candidate[]) => {
     try {
       console.log('handleAddCandidate appelé avec:', candidatesData);
@@ -356,6 +543,197 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     } catch (error) {
       console.error('Erreur lors de l\'ajout des candidats:', error);
       toast.error('Erreur lors de l\'ajout des candidats');
+    }
+  };
+
+  const handleDownloadCandidatesTemplate = async () => {
+    try {
+      if (election.type === 'Élection Professionnelle') {
+        const link = document.createElement('a');
+        link.href = '/modele_listes.xlsx';
+        link.download = 'modele_listes.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success("Modèle Listes téléchargé !");
+        return;
+      }
+
+      const XLSX = await import('xlsx');
+      const ws_data = [
+        ["Sigle Syndicat", "Nom Complet Syndicat", "Collège concerné", "Nom complet du Titulaire", "Nom complet du Suppléant"],
+        ["SYND-A", "Syndicat A", "Maîtrise", "Paul Martin", "Sophie Legrand"],
+        ["SYND-A", "Syndicat A", "Cadre", "Lucie Durant", "Marc Dubois"],
+        ["IND", "Indépendant", "Encadrement", "Jacques Lambert", ""]
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Candidats & Syndicats");
+      XLSX.writeFile(wb, "Modele_Listes_Syndicales.xlsx");
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de la génération du modèle");
+    }
+  };
+
+  const handleImportCandidates = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsImporting(true);
+      const XLSX = await import('xlsx');
+      const reader = new FileReader();
+      
+      reader.onload = async (evt) => {
+        try {
+          const data = evt.target?.result;
+          if (!data) throw new Error("Fichier vide");
+          const isPro = election.type === 'Élection Professionnelle';
+          const candSheet = isPro
+            ? (workbook.Sheets["Listes"] || workbook.Sheets["Candidats"])
+            : (workbook.Sheets["Candidats & Syndicats"] || workbook.Sheets["Candidats"]);
+
+          if (!candSheet) throw new Error("La feuille des listes est introuvable");
+
+          const candRows = XLSX.utils.sheet_to_json<any>(candSheet);
+          const unionLists: any[] = [];
+          
+          candRows.forEach((row: any) => {
+            let unionAcronym = "";
+            let unionName = "";
+            let college = "general";
+            let etablissement = "";
+            let titulaireName = "";
+            let titulaireGenre = "";
+            let titulaireAnciennete = "";
+            let suppleantName = "";
+            let suppleantGenre = "";
+
+            if (isPro) {
+              unionAcronym = row["Acronyme_Representation"] || row["Sigle"] || "";
+              unionName = row["Representation"] || row["Nom"] || "";
+              etablissement = row["Etablissement"] || "";
+              
+              const collegeVal = String(row["College"] || "").toLowerCase();
+              if (collegeVal.includes('cadre')) college = "cadres";
+              else if (collegeVal.includes('maitrise') || collegeVal.includes('maîtrise')) college = "employes";
+              else if (collegeVal.includes('execution') || collegeVal.includes('exécution')) college = "ouvriers";
+              else if (collegeVal.includes('encadrement')) college = "general";
+              
+              titulaireName = row["Titulaire"] || "";
+              titulaireGenre = row["Genre_Titulaire"] || "";
+              titulaireAnciennete = row["Anciennete_Titulaire"] || "";
+              
+              suppleantName = row["Suppleant"] || row["Suppléant"] || "";
+              suppleantGenre = row["Genre_Suppleant"] || "";
+            } else {
+              unionAcronym = row["Sigle Syndicat"] || row["Sigle"] || row["Acronyme"] || "";
+              unionName = row["Nom Complet Syndicat"] || row["Nom Syndicat"] || row["Syndicat"] || "";
+              const rawCollege = row["Collège concerné"] || row["Collège"] || row["College"] || "general";
+              titulaireName = row["Nom complet du Titulaire"] || row["Titulaire"] || "";
+              suppleantName = row["Nom complet du Suppléant"] || row["Suppléant"] || row["Suppleant"] || "";
+              
+              let normalizedCollege = rawCollege.toLowerCase().trim();
+              if (normalizedCollege.includes('maitrise') || normalizedCollege.includes('maîtrise')) normalizedCollege = 'employes';
+              else if (normalizedCollege.includes('execution') || normalizedCollege.includes('exécution')) normalizedCollege = 'ouvriers';
+              else if (normalizedCollege.includes('cadre')) normalizedCollege = 'cadres';
+              else normalizedCollege = 'general';
+              college = normalizedCollege;
+            }
+            
+            if (!unionName && !unionAcronym) return;
+            unionLists.push({ 
+              unionAcronym, 
+              unionName: unionName || unionAcronym, 
+              college,
+              etablissement,
+              titulaireName, 
+              titulaireGenre,
+              titulaireAnciennete,
+              suppleantName,
+              suppleantGenre
+            });
+          });
+
+          let importedCount = 0;
+          for (const cand of unionLists) {
+            // Find or create union
+            let unionId = null;
+            let query = supabase.from('unions').select('id');
+            if (cand.unionAcronym && cand.unionName) {
+              query = query.or(`acronym.eq.${cand.unionAcronym},name.eq.${cand.unionName}`);
+            } else if (cand.unionAcronym) {
+              query = query.eq('acronym', cand.unionAcronym);
+            } else {
+              query = query.eq('name', cand.unionName);
+            }
+            
+            const { data: existingUnion } = await query.maybeSingle();
+
+            if (existingUnion) {
+              unionId = existingUnion.id;
+            } else {
+              const { data: newUnion, error: newUnionErr } = await supabase.from('unions').insert({
+                name: cand.unionName,
+                acronym: cand.unionAcronym
+              }).select().maybeSingle();
+              
+              if (newUnionErr) {
+                console.error("Erreur lors de la création du syndicat:", newUnionErr);
+              }
+              if (newUnion) unionId = newUnion.id;
+            }
+
+            if (!unionId) continue;
+
+            const titulaires = [];
+            if (cand.titulaireName) {
+              titulaires.push({ 
+                name: cand.titulaireName, 
+                role: 'Tête de liste',
+                genre: cand.titulaireGenre,
+                anciennete: cand.titulaireAnciennete,
+                etablissement: cand.etablissement
+              });
+            }
+            const suppleants = [];
+            if (cand.suppleantName) {
+              suppleants.push({
+                name: cand.suppleantName,
+                role: 'Suppléant',
+                genre: cand.suppleantGenre
+              });
+            }
+
+            const { error: listErr } = await supabase.from('union_lists').insert({
+              election_id: election.id,
+              union_id: unionId,
+              college: cand.college,
+              titulaires: titulaires,
+              suppleants: suppleants,
+            });
+
+            if (!listErr) importedCount++;
+            else console.error("Erreur d'insertion union_lists:", listErr);
+          }
+          
+          toast.success(`${importedCount} listes/candidats importés avec succès`);
+          fetchCandidates();
+          if (onDataChange) onDataChange();
+        } catch (err: any) {
+          toast.error(err.message || "Erreur de lecture du fichier");
+        } finally {
+          setIsImporting(false);
+          if (candidatesFileInputRef.current) candidatesFileInputRef.current.value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de l'import");
+      setIsImporting(false);
+      if (candidatesFileInputRef.current) candidatesFileInputRef.current.value = '';
     }
   };
 
@@ -398,22 +776,35 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   };
 
   const handleRemoveCandidate = async (id: string) => {
-    toast.warning('Supprimer ce candidat de cette élection ?', {
+    toast.warning('Supprimer ce candidat/cette liste de cette élection ?', {
       action: {
         label: 'Supprimer',
         onClick: async () => {
           try {
-            // Supprimer l'association candidat-élection
-            const { error: electionCandidateError } = await supabase
-              .from('election_candidates')
-              .delete()
-              .eq('election_id', election.id)
-              .eq('candidate_id', id);
+            if (election.type === 'Élection Professionnelle') {
+              const { error: unionListError } = await supabase
+                .from('union_lists')
+                .delete()
+                .eq('id', id);
 
-            if (electionCandidateError) {
-              console.error('Erreur lors de la suppression de l\'association:', electionCandidateError);
-              toast.error('Suppression impossible');
-              return;
+              if (unionListError) {
+                console.error('Erreur lors de la suppression de la liste:', unionListError);
+                toast.error('Suppression impossible');
+                return;
+              }
+            } else {
+              // Supprimer l'association candidat-élection
+              const { error: electionCandidateError } = await supabase
+                .from('election_candidates')
+                .delete()
+                .eq('election_id', election.id)
+                .eq('candidate_id', id);
+
+              if (electionCandidateError) {
+                console.error('Erreur lors de la suppression de l\'association:', electionCandidateError);
+                toast.error('Suppression impossible');
+                return;
+              }
             }
 
             // Recharger les candidats depuis la base de données
@@ -654,10 +1045,10 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         {/* Main Content avec onglets modernisés - Mobile First */}
         <div className="bg-white rounded-xl sm:rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <Tabs defaultValue="info" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 bg-gray-50 p-1 rounded-none">
+            <TabsList className="flex h-auto w-full bg-gray-50 p-1 rounded-none overflow-x-auto whitespace-nowrap scrollbar-none justify-start md:justify-around gap-1">
               <TabsTrigger 
                 value="info" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-blue-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-blue-500"
               >
                 <div className="p-1 sm:p-1.5 bg-gov-blue/10 rounded-md data-[state=active]:bg-blue-500 transition-colors duration-300">
                   <Building className="w-3 h-3 sm:w-4 sm:h-4 text-gov-blue data-[state=active]:text-white" />
@@ -672,14 +1063,18 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="centers" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-green-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-green-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-green-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-green-500"
               >
                 <div className="p-1 sm:p-1.5 bg-green-100 rounded-md data-[state=active]:bg-green-500 transition-colors duration-300">
                   <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-green-600 data-[state=active]:text-white" />
                 </div>
                 <div className="text-left hidden xs:block">
-                  <div className="font-medium text-xs sm:text-sm">Centres & Bureaux</div>
-                  <div className="text-xs text-gray-500">Organisation territoriale</div>
+                  <div className="font-medium text-xs sm:text-sm">
+                    {election.type === 'Élection Professionnelle' ? 'Établissements' : 'Centres & Bureaux'}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {election.type === 'Élection Professionnelle' ? 'Établissements' : 'Organisation territoriale'}
+                  </div>
                 </div>
                 <div className="text-left xs:hidden">
                   <div className="font-medium text-xs">Centres</div>
@@ -687,7 +1082,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </TabsTrigger>
               <TabsTrigger 
                 value="candidates" 
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-purple-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-purple-500"
+                className="flex-shrink-0 flex-1 min-w-[100px] sm:min-w-0 flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 sm:py-3 rounded-lg data-[state=active]:bg-purple-50 data-[state=active]:shadow-sm transition-all duration-300 data-[state=active]:border-l-4 data-[state=active]:border-purple-500"
               >
                 <div className="p-1 sm:p-1.5 bg-purple-100 rounded-md data-[state=active]:bg-purple-500 transition-colors duration-300">
                   <Users className="w-3 h-3 sm:w-4 sm:h-4 text-purple-600 data-[state=active]:text-white" />
@@ -757,6 +1152,33 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <p className="text-sm text-gray-700 leading-relaxed">{election.description || 'Aucune description'}</p>
                   </div>
 
+                  {election.type === 'Élection Professionnelle' && election.has_second_round && (
+                    <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-100 space-y-3">
+                      <h4 className="text-xs font-bold text-purple-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                        Calendrier des Scrutins liés (1er & 2nd Tour)
+                      </h4>
+                      <div className="relative flex items-center justify-between">
+                        <div className="flex-1 text-center p-2 bg-white rounded-lg border border-purple-100 shadow-sm z-10">
+                          <span className="text-[10px] text-gray-500 font-semibold block uppercase">1er Tour</span>
+                          <span className="text-sm font-bold text-gray-800">
+                            {new Date(election.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                          </span>
+                        </div>
+                        <div className="flex-1 flex flex-col items-center justify-center relative px-2">
+                          <span className="text-[9px] text-purple-600 font-bold mb-1 bg-purple-100 px-1.5 py-0.5 rounded-full">+7 jours</span>
+                          <div className="w-full h-0.5 bg-dashed bg-purple-300"></div>
+                        </div>
+                        <div className="flex-1 text-center p-2 bg-white rounded-lg border border-purple-100 shadow-sm z-10">
+                          <span className="text-[10px] text-gray-500 font-semibold block uppercase">2nd Tour</span>
+                          <span className="text-sm font-bold text-gray-800">
+                            {election.second_round_date ? new Date(election.second_round_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Non défini'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sièges à pourvoir</label>
                     <p className="text-xl font-bold text-gov-blue">{election.seatsAvailable}</p>
@@ -769,46 +1191,56 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <div className="p-2 bg-green-100 rounded-lg">
-                      {election.type === 'Élection Professionnelle' ? (
+                      {isProfessional ? (
                         <Building className="w-5 h-5 text-green-600" />
                       ) : (
                         <MapPin className="w-5 h-5 text-green-600" />
                       )}
                     </div>
-                    {election.type === 'Élection Professionnelle' ? 'Informations Entreprise' : 'Circonscription Électorale'}
+                    {isProfessional ? 'Informations Entreprise' : 'Circonscription Électorale'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="space-y-3">
-                    {election.type === 'Élection Professionnelle' ? (
+                    {isProfessional ? (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>
-                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Raison Sociale</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.name || 'Chargement...'}</p>
+                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Organisation</label>
+                            <p className="text-sm font-bold text-gray-900 mt-1">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.name || 'Non renseignée')}
+                            </p>
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="p-3 bg-gray-50 rounded-lg">
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Secteur</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1 capitalize">{enterprise?.sector || '-'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1 capitalize">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.sector || '-')}
+                            </p>
                           </div>
                           <div className="p-3 bg-gray-50 rounded-lg">
                             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Effectif Total</label>
-                            <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.total_employees || '-'}</p>
+                            <p className="text-sm font-bold text-gray-900 mt-1">
+                              {loadingEnterprise ? 'Chargement...' : (enterprise?.total_employees || '-')}
+                            </p>
                           </div>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg">
-                          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Unité Administrative</label>
-                          <p className="text-sm font-bold text-gray-900 mt-1">{enterprise?.administrative_unit || '-'}</p>
+                          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tutelle</label>
+                          <p className="text-sm font-bold text-gray-900 mt-1">
+                            {loadingEnterprise ? 'Chargement...' : (enterprise?.administrative_unit || '-')}
+                          </p>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg">
                           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Localisation Siège</label>
                           <p className="text-sm font-bold text-gray-900 mt-1">
-                            {enterprise?.province_name ? `${enterprise.province_name}, ${enterprise.commune_name}` : 'Non renseignée'}
+                            {loadingEnterprise 
+                              ? 'Chargement...' 
+                              : (enterprise?.province_name ? `${enterprise.province_name}, ${enterprise.commune_name}` : 'Non renseignée')}
                           </p>
                         </div>
-                        {enterprise?.hr_contact && (
+                        {!loadingEnterprise && enterprise?.hr_contact && (
                           <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
                             <label className="text-xs font-medium text-blue-600 uppercase tracking-wide">Contact RH</label>
                             <p className="text-sm font-bold text-blue-900 mt-1">{enterprise.hr_contact.name}</p>
@@ -889,14 +1321,43 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <List className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button 
-                  onClick={() => setShowAddCenter(true)}
-                  className="bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
-                >
-                  <Plus className="w-4 h-4 mr-1 sm:mr-2" />
-                  <span className="hidden xs:inline">Ajouter un centre</span>
-                  <span className="xs:hidden">Ajouter</span>
-                </Button>
+                {canManage && (
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="file" 
+                      ref={centersFileInputRef} 
+                      className="hidden" 
+                      accept=".xlsx,.xls"
+                      onChange={handleImportCenters} 
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={handleDownloadCentersTemplate}
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50 px-3 sm:px-4 py-2 rounded-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
+                      title="Télécharger le modèle Excel"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span className="hidden xs:inline ml-2">Modèle</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => centersFileInputRef.current?.click()}
+                      disabled={isImporting}
+                      className="border-green-600 text-green-600 hover:bg-green-50 px-3 sm:px-4 py-2 rounded-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
+                    >
+                      <Upload className={cn("w-4 h-4 mr-1 sm:mr-2", isImporting && "animate-bounce")} />
+                      <span className="hidden xs:inline">Importer</span>
+                    </Button>
+                    <Button
+                      onClick={() => setShowAddCenter(true)}
+                      className="bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
+                    >
+                      <Plus className="w-4 h-4 mr-1 sm:mr-2" />
+                      <span className="hidden xs:inline">Ajouter un centre</span>
+                      <span className="xs:hidden">Ajouter</span>
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -952,28 +1413,26 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         <span className="hidden xs:inline">Détails</span>
                         <span className="xs:hidden">Voir</span>
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditCenter(center);
-                        }}
+                      {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); handleEditCenter(center); }}
                         className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-all duration-300"
                       >
                         <Edit className="w-3 h-3" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemoveCenter(center.id);
-                        }}
+                      )}
+                      {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); handleRemoveCenter(center.id); }}
                         className="text-red-500 hover:text-red-700 hover:bg-red-50 transition-all duration-300"
                       >
                         <Trash2 className="w-3 h-3" />
                       </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -1023,17 +1482,16 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             <Eye className="w-4 h-4 mr-1" />
                             Détails
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditCenter(center);
-                            }}
+                          {canManage && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); handleEditCenter(center); }}
                             className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-all duration-300"
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
+                          )}
                         </div>
                       </div>
                     </CardContent>
@@ -1082,16 +1540,45 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <List className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button 
-                  onClick={() => setShowAddCandidate(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
-                >
-                  <Plus className="w-4 h-4 mr-1 sm:mr-2" />
-                  <span className="hidden xs:inline">
-                    {election.type === 'Élection Professionnelle' ? 'Ajouter une liste' : 'Ajouter un candidat'}
-                  </span>
-                  <span className="xs:hidden">Ajouter</span>
-                </Button>
+                {canManage && (
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="file" 
+                      ref={candidatesFileInputRef} 
+                      className="hidden" 
+                      accept=".xlsx,.xls"
+                      onChange={handleImportCandidates} 
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={handleDownloadCandidatesTemplate}
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50 px-3 sm:px-4 py-2 rounded-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
+                      title="Télécharger le modèle Excel"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span className="hidden xs:inline ml-2">Modèle</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => candidatesFileInputRef.current?.click()}
+                      disabled={isImporting}
+                      className="border-purple-600 text-purple-600 hover:bg-purple-50 px-3 sm:px-4 py-2 rounded-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
+                    >
+                      <Upload className={cn("w-4 h-4 mr-1 sm:mr-2", isImporting && "animate-bounce")} />
+                      <span className="hidden xs:inline">Importer</span>
+                    </Button>
+                    <Button
+                      onClick={() => setShowAddCandidate(true)}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 w-full sm:w-auto text-sm sm:text-base"
+                    >
+                      <Plus className="w-4 h-4 mr-1 sm:mr-2" />
+                      <span className="hidden xs:inline">
+                        {election.type === 'Élection Professionnelle' ? 'Ajouter une liste' : 'Ajouter un candidat'}
+                      </span>
+                      <span className="xs:hidden">Ajouter</span>
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1140,6 +1627,19 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             ? `${candidate.name} (${candidate.party})` 
                             : candidate.party}
                         </p>
+                        {election.type === 'Élection Professionnelle' && candidate.college && (
+                          <Badge variant="outline" className={`text-[10px] font-bold px-2 py-0.5 mt-1 mx-auto block w-fit ${
+                            candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                            candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                            candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                            'bg-purple-50 text-purple-700 border-purple-200'
+                          }`}>
+                            {candidate.college === 'general' ? 'Encadrement' : 
+                             candidate.college === 'cadres' ? 'Cadre' :
+                             candidate.college === 'employes' ? 'Maîtrise' :
+                             candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
+                          </Badge>
+                        )}
                       </div>
 
                       {election.type === 'Élection Professionnelle' && candidate.suppleants?.[0] && (
@@ -1158,9 +1658,10 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         </div>
                       )}
 
+                      {canManage && (
                       <div className="flex w-full gap-2 pt-2">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
                           onClick={() => handleEditCandidate(candidate)}
                           className="flex-1 bg-gray-50 hover:bg-blue-50 text-blue-600 rounded-xl h-10 font-bold transition-all"
@@ -1168,8 +1669,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           <Edit className="w-4 h-4 mr-1.5" />
                           Gérer
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="icon"
                           onClick={() => handleRemoveCandidate(candidate.id)}
                           className="w-10 h-10 bg-gray-50 hover:bg-red-50 text-red-500 rounded-xl transition-all"
@@ -1177,6 +1678,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -1197,33 +1699,66 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3 flex-1 min-w-0">
                           <div className="relative flex-shrink-0">
-                            <InitialsAvatar 
-                              name={candidate.name}
-                              size="lg"
-                              className="shadow-lg border-2 border-white"
-                              backgroundColor="#1e40af"
-                            />
+                            {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] ? (
+                              <div className="w-12 h-12 rounded-full overflow-hidden shadow-sm border-2 border-white bg-purple-50">
+                                {candidate.titulaires[0].photo ? (
+                                  <img src={candidate.titulaires[0].photo} alt="Head" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-lg font-bold text-purple-600 bg-purple-100 uppercase">
+                                    {candidate.titulaires[0].name?.charAt(0) || 'T'}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <InitialsAvatar 
+                                name={candidate.name}
+                                size="lg"
+                                className="shadow-lg border-2 border-white"
+                                backgroundColor="#1e40af"
+                              />
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-bold text-lg text-gray-900 group-hover:text-purple-600 transition-colors duration-300 line-clamp-1">
-                              {candidate.name}
+                              {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] 
+                                ? candidate.titulaires[0].name 
+                                : candidate.name}
                             </h3>
-                            <p className="text-sm text-gray-600 line-clamp-1">{candidate.party}</p>
-
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm text-gray-600 line-clamp-1">
+                                {election.type === 'Élection Professionnelle' 
+                                  ? `${candidate.name} (${candidate.party})` 
+                                  : candidate.party}
+                              </p>
+                              {election.type === 'Élection Professionnelle' && candidate.college && (
+                                <Badge variant="outline" className={`text-[10px] font-bold px-2 py-0.5 ${
+                                  candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                  candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                  candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                                  'bg-purple-50 text-purple-700 border-purple-200'
+                                }`}>
+                                  {candidate.college === 'general' ? 'Encadrement' : 
+                                   candidate.college === 'cadres' ? 'Cadre' :
+                                   candidate.college === 'employes' ? 'Maîtrise' :
+                                   candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        {canManage && (
                         <div className="flex items-center gap-2">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => handleEditCandidate(candidate)}
                             className="text-blue-600 hover:bg-blue-50 transition-all duration-300"
                           >
                             <Edit className="w-4 h-4 mr-1.5" />
                             Gérer
                           </Button>
-                          <Button 
-                            variant="ghost" 
+                          <Button
+                            variant="ghost"
                             size="icon"
                             onClick={() => handleRemoveCandidate(candidate.id)}
                             className="text-red-500 hover:bg-red-50 transition-all duration-300"
@@ -1231,6 +1766,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -1284,6 +1820,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         {showEditCandidate && selectedCandidate && (
           <EditCandidateModal
             candidate={selectedCandidate}
+            electionType={election.type}
             onClose={() => {
               setShowEditCandidate(false);
               setSelectedCandidate(null);

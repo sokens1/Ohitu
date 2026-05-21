@@ -80,47 +80,13 @@ export interface AuditLog {
  * Service pour gérer la piste d'audit
  */
 class AuditService {
-  private cachedIP: string | null = null;
-  private isFetchingIP = false;
-
-  constructor() {
-    // Tenter de pré-récupérer l'IP dès le chargement du service en arrière-plan
-    if (typeof window !== 'undefined') {
-      this.getClientIP().catch(() => {});
-    }
-  }
-
   /**
    * Récupère l'adresse IP du client (pour usage navigateur)
    */
   private async getClientIP(): Promise<string | null> {
-    if (this.cachedIP !== null) {
-      return this.cachedIP;
-    }
-
-    if (this.isFetchingIP) {
-      return null;
-    }
-
-    try {
-      this.isFetchingIP = true;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 800);
-
-      const response = await fetch('https://api.ipify.org?format=json', {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      const data = await response.json();
-      this.cachedIP = data.ip || null;
-      return this.cachedIP;
-    } catch (error) {
-      console.warn('Impossible de récupérer l\'IP:', error);
-      return null;
-    } finally {
-      this.isFetchingIP = false;
-    }
+    // L'IP client n'est pas récupérée côté navigateur (requête bloquée par les ad-blockers).
+    // Elle sera renseignée côté serveur dans un contexte production si nécessaire.
+    return null;
   }
 
   /**
