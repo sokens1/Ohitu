@@ -5,7 +5,8 @@ import { ModernForm, ModernFormSection, ModernFormGrid } from '@/components/ui/m
 import FloatingInput from '@/components/ui/floating-input';
 import FloatingSelect from '@/components/ui/floating-select';
 import { toast } from 'sonner';
-import { parseUnionListsSheet } from '@/utils/excelImport';
+import { parseUnionListsSheet, parseEstablishmentsSheet } from '@/utils/excelImport';
+// Import des utilitaires d'importation Excel pour l'élection professionnelle
 import ImageUploader from '@/components/ui/ImageUploader';
 
 interface ProfessionalElectionWizardProps {
@@ -158,106 +159,66 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
           const data = event.target?.result;
           if (!data) return;
           const workbook = XLSX.read(data, { type: 'array' });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
+          const parsedCenters = parseEstablishmentsSheet(workbook, true);
 
-          if (!jsonData || jsonData.length === 0) {
+          if (!parsedCenters || parsedCenters.length === 0) {
             toast.error("Le fichier Excel semble vide ou mal formaté.");
             return;
           }
 
-          let encadrementCount = 0;
-          let cadreCount = 0;
-          let maitriseCount = 0;
-          let executionCount = 0;
-          
           let encadrementSeats = 0;
           let cadreSeats = 0;
           let maitriseSeats = 0;
           let executionSeats = 0;
           let totalBureaux = 0;
-          
-          const votingCenters: any[] = [];
-          const centerGroups: { [key: string]: any } = {};
 
-          jsonData.forEach((row: any) => {
-            const region = row["Region__Localisation"] || row["Région"] || "Général";
-            const name = row["Nom_Etablissement__Site"] || row["Etablissement"] || "";
-            const resp = row["Responsable_Etablissement"] || "";
-            const phone = String(row["Contact_Telephone"] || "");
-            const lieuVote = row["Lieu_vote"] || "";
-            
-            const vEncadrement = Number(row["Nbre_electeurs_Encadrement"] || 0);
-            const vCadre = Number(row["Nbre_electeurs_Cadre"] || 0);
-            const vMaitrise = Number(row["Nbre _electeurs_Maitrise"] || row["Nbre_electeurs_Maitrise"] || 0);
-            const vExecution = Number(row["Nbre _electeurs_Execution"] || row["Nbre_electeurs_Execution"] || 0);
+          parsedCenters.forEach((center) => {
+            const physicalBooths = center.booths.filter((b: any) => !b.is_college);
+            totalBureaux += physicalBooths.length;
 
-            const sEncadrement = Number(row["nb_sieges_Encadrement"] || 0);
-            const sCadre = Number(row["nb_sieges_Cadre"] || 0);
-            const sMaitrise = Number(row["nb_sieges_Maitrise"] || 0);
-            const sExecution = Number(row["nb_sieges_Execution"] || 0);
-
-            encadrementCount += vEncadrement;
-            cadreCount += vCadre;
-            maitriseCount += vMaitrise;
-            executionCount += vExecution;
-            
-            encadrementSeats += sEncadrement;
-            cadreSeats += sCadre;
-            maitriseSeats += sMaitrise;
-            executionSeats += sExecution;
-            
-            if (!name) return;
-
-            const groupKey = `${region}_${name}`;
-            if (!centerGroups[groupKey]) {
-              centerGroups[groupKey] = {
-                name: name,
-                address: region,
-                contactName: resp,
-                contactPhone: phone,
-                voters: 0,
-                bureaux: 0,
-                booths: []
-              };
-            }
-            
-            const totalRowVoters = vEncadrement + vCadre + vMaitrise + vExecution;
-            centerGroups[groupKey].voters += totalRowVoters;
-            centerGroups[groupKey].bureaux += 1;
-            totalBureaux += 1;
-            
-            if (lieuVote) {
-              if (vEncadrement > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Encadrement`, voters: vEncadrement, collegeType: 'general' });
-              if (vCadre > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Cadre`, voters: vCadre, collegeType: 'cadres' });
-              if (vMaitrise > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Maîtrise`, voters: vMaitrise, collegeType: 'employes' });
-              if (vExecution > 0) centerGroups[groupKey].booths.push({ name: `${lieuVote} - Exécution`, voters: vExecution, collegeType: 'ouvriers' });
-            }
+            center.booths.forEach((booth: any) => {
+              if (booth.is_college) {
+                if (booth.name === 'College - Encadrement') encadrementSeats += booth.seats_to_fill || 0;
+                if (booth.name === 'College - Cadre') cadreSeats += booth.seats_to_fill || 0;
+                if (booth.name === 'College - Maîtrise') maitriseSeats += booth.seats_to_fill || 0;
+                if (booth.name === 'College - Exécution') executionSeats += booth.seats_to_fill || 0;
+              }
+            });
           });
-          
-          Object.values(centerGroups).forEach((c: any) => votingCenters.push(c));
 
-          const total = encadrementCount + cadreCount + maitriseCount + executionCount;
-
-          // Mettre à jour les collèges
           const updatedColleges = formData.colleges.map(c => {
-            if (c.type === 'general') return { ...c, voters: encadrementCount, seats: encadrementSeats || c.seats };
-            if (c.type === 'cadres') return { ...c, voters: cadreCount, seats: cadreSeats || c.seats };
-            if (c.type === 'employes') return { ...c, voters: maitriseCount, seats: maitriseSeats || c.seats };
-            if (c.type === 'ouvriers') return { ...c, voters: executionCount, seats: executionSeats || c.seats };
+            if (c.type === 'general') return { ...c, voters: 0, seats: encadrementSeats || c.seats };
+            if (c.type === 'cadres') return { ...c, voters: 0, seats: cadreSeats || c.seats };
+            if (c.type === 'employes') return { ...c, voters: 0, seats: maitriseSeats || c.seats };
+            if (c.type === 'ouvriers') return { ...c, voters: 0, seats: executionSeats || c.seats };
             return c;
           });
 
+          const votingCenters = parsedCenters.map((center) => ({
+            name: center.name,
+            address: center.address,
+            contactName: center.contact_name,
+            contactPhone: center.contact_phone,
+            voters: center.voters,
+            bureaux: center.bureaux,
+            booths: center.booths.map((booth: any) => ({
+              name: booth.name,
+              voters: booth.registered_voters || 0,
+              registered_voters: booth.registered_voters || 0,
+              seats_to_fill: booth.seats_to_fill || 0,
+              is_college: booth.is_college || false
+            }))
+          }));
+
           setFormData(prev => ({
             ...prev,
-            totalEmployees: total.toString(),
+            totalEmployees: '0',
             totalBureaux: totalBureaux.toString(),
             colleges: updatedColleges,
             votingCenters: votingCenters
           }));
 
-          toast.success(`Fichier "${file.name}" analysé avec succès ! ${total} électeurs répartis par collèges.`);
+          toast.success(`Fichier "${file.name}" analysé avec succès ! ${totalBureaux} bureau(x) physique(s) détecté(s).`);
         } catch (err) {
           console.error(err);
           toast.error("Erreur lors de la lecture des données Excel.");
@@ -268,7 +229,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       console.error(err);
       toast.error("Erreur d'importation du parser Excel.");
     } finally {
-      e.target.value = ''; // Reset input to allow re-upload
+      e.target.value = '';
     }
   };
 
@@ -291,25 +252,52 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
             return;
           }
 
-          const candidates = parsedLists.map((list) => ({
-            party: list.unionAcronym || list.unionName,
-            name: list.unionName,
-            collegeType: list.college,
-            etablissement: list.etablissement,
-            candidates: [
-              {
-                role: 'Titulaire',
+          // Group by union & college to combine multiple titulaires/suppleants
+          const groupedMap = new Map<string, {
+            party: string;
+            name: string;
+            collegeType: typeof parsedLists[0]['college'];
+            etablissement: string;
+            candidates: Array<{ role: string; name: string; genre?: string; anciennete?: string }>;
+          }>();
+
+          for (const list of parsedLists) {
+            const key = `${(list.unionAcronym || '').trim()}|||${(list.unionName || '').trim()}|||${list.college}`;
+            if (!groupedMap.has(key)) {
+              groupedMap.set(key, {
+                party: list.unionAcronym || list.unionName,
+                name: list.unionName,
+                collegeType: list.college,
+                etablissement: list.etablissement,
+                candidates: []
+              });
+            }
+
+            const group = groupedMap.get(key)!;
+
+            if (list.titulaireName) {
+              const rank = group.candidates.filter(c => c.role.startsWith('Titulaire') || c.role === 'Tête de liste').length + 1;
+              const role = rank === 1 ? 'Tête de liste' : `Titulaire ${rank}`;
+              group.candidates.push({
+                role,
                 name: list.titulaireName,
-                genre: list.titulaireGenre,
-                anciennete: list.titulaireAnciennete,
-              },
-              {
-                role: 'Suppléant',
+                genre: list.titulaireGenre || undefined,
+                anciennete: list.titulaireAnciennete || undefined
+              });
+            }
+
+            if (list.suppleantName) {
+              const rank = group.candidates.filter(c => c.role.startsWith('Suppléant')).length + 1;
+              const role = `Suppléant ${rank}`;
+              group.candidates.push({
+                role,
                 name: list.suppleantName,
-                genre: list.suppleantGenre,
-              },
-            ],
-          }));
+                genre: list.suppleantGenre || undefined
+              });
+            }
+          }
+
+          const candidates = Array.from(groupedMap.values());
 
           setFormData(prev => ({ ...prev, candidates }));
           toast.success(`Fichier "${file.name}" analysé : ${candidates.length} liste(s).`);

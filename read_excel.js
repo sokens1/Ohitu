@@ -1,21 +1,26 @@
-import fs from 'fs';
-import * as xlsx from 'xlsx';
+import XLSX from 'xlsx';
 
-const filePath = 'C:\\Users\\HP VICTUS AMD RYZEN5\\Downloads\\modele_configuration_professional (3).xlsx';
+const filePath = 'C:\\Users\\HP VICTUS AMD RYZEN5\\Downloads\\listes.xlsx';
 
 try {
-    const buffer = fs.readFileSync(filePath);
-    const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const result = {};
-    for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName];
-        const json = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-        result[sheetName] = {
-            columns: json[0] || [],
-            rows: json.slice(1, 10)
-        };
-    }
-    console.log(JSON.stringify(result, null, 2));
+  const workbook = XLSX.readFile(filePath);
+  
+  workbook.SheetNames.forEach(sheetName => {
+    console.log(`\n================ Sheet: ${sheetName} ================`);
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+    
+    // Find all headers across all rows
+    const allHeaders = new Set();
+    rows.forEach(r => {
+      Object.keys(r).forEach(k => allHeaders.add(k));
+    });
+    console.log('All Headers in Sheet:', Array.from(allHeaders));
+    
+    console.log(`All rows (${rows.length}):`);
+    console.log(JSON.stringify(rows.slice(0, 3), null, 2));
+  });
 } catch (error) {
-    console.error(error);
+  console.error('Error reading file:', error);
 }
+

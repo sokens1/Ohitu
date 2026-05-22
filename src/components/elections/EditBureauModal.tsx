@@ -26,6 +26,8 @@ interface Bureau {
   president_name: string;
   president_phone: string;
   urns_count: number;
+  seats_to_fill?: number;
+  lieu_vote?: string;
 }
 
 interface EditBureauModalProps {
@@ -54,6 +56,8 @@ const EditBureauModal: React.FC<EditBureauModalProps> = ({
     president_name: safeString(bureau.president_name),
     president_phone: safeString(bureau.president_phone),
     urns_count: safeNumber(bureau.urns_count),
+    seats_to_fill: safeNumber((bureau as any).seats_to_fill),
+    lieu_vote: safeString((bureau as any).lieu_vote),
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -72,6 +76,7 @@ const EditBureauModal: React.FC<EditBureauModalProps> = ({
     const name = safeString(formData.name);
     const presidentName = safeString(formData.president_name);
     const presidentPhone = safeString(formData.president_phone);
+    const lieuVote = safeString(formData.lieu_vote);
     
     if (!name) {
       toast.error('Le nom du bureau est requis');
@@ -86,19 +91,24 @@ const EditBureauModal: React.FC<EditBureauModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      // Mettre à jour le bureau dans la base de données
-      // ATTENTION: Ne pas mettre à jour registered_voters car cela cause des conflits entre élections
-      // Les inscrits sont maintenant gérés uniquement dans les PV (procès_verbaux.total_registered)
+      const isCollege = name.startsWith('College -');
+      const updateData: any = {
+        name: name,
+        president_name: presidentName,
+        president_phone: presidentPhone,
+        urns_count: formData.urns_count,
+        lieu_vote: lieuVote || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (isCollege) {
+        updateData.seats_to_fill = formData.seats_to_fill;
+      }
+      updateData.registered_voters = formData.registered_voters;
+
       const { error } = await supabase
         .from('voting_bureaux')
-        .update({
-          name: name,
-          // registered_voters: formData.registered_voters, // SUPPRIMÉ pour éviter les conflits entre élections
-          president_name: presidentName,
-          president_phone: presidentPhone,
-          urns_count: formData.urns_count,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', bureau.id);
 
       if (error) {
@@ -107,7 +117,6 @@ const EditBureauModal: React.FC<EditBureauModalProps> = ({
         return;
       }
 
-      // Mettre à jour l'objet bureau local
       const updatedBureau: Bureau = {
         ...bureau,
         name: name,
@@ -115,10 +124,12 @@ const EditBureauModal: React.FC<EditBureauModalProps> = ({
         president_name: presidentName,
         president_phone: presidentPhone,
         urns_count: formData.urns_count,
+        seats_to_fill: formData.seats_to_fill,
+        lieu_vote: lieuVote,
       };
 
       onUpdate(updatedBureau);
-      toast.success('Bureau modifié avec succès');
+      toast.success(isCollege ? 'Collège électoral modifié avec succès' : 'Bureau modifié avec succès');
     } catch (error) {
       console.error('Erreur lors de la mise à jour:', error);
       toast.error('Erreur lors de la mise à jour du bureau');
@@ -146,61 +157,117 @@ const EditBureauModal: React.FC<EditBureauModalProps> = ({
         <ModernForm onSubmit={handleSubmit}>
           {/* Informations générales */}
           <ModernFormSection
-            title="Informations du Bureau"
-            description="Modifiez les paramètres de base du bureau"
+            title={formData.name.startsWith('College -') ? "Informations du Collège" : "Informations du Bureau"}
+            description={formData.name.startsWith('College -') ? "Modifiez les paramètres du collège électoral" : "Modifiez les paramètres de base du bureau"}
             icon={<Building className="w-5 h-5" />}
           >
-            <ModernFormGrid cols={2}>
-              <FloatingInput
-                label="Nom du Bureau"
-                value={formData.name}
-                onChange={(e) => handleInputChange('name', e.target.value)}
-                placeholder="Ex: Bureau 1"
-                icon={<Building className="w-4 h-4" />}
-                required
-              />
-              
-              <FloatingInput
-                label="Nombre d'électeurs inscrits"
-                type="number"
-                min="0"
-                value={formData.registered_voters}
-                onChange={(e) => handleInputChange('registered_voters', parseInt(e.target.value) || 0)}
-                placeholder="Ex: 350"
-                icon={<Users className="w-4 h-4" />}
-                required
-              />
-            </ModernFormGrid>
+            {formData.name.startsWith('College -') ? (
+              <>
+                <ModernFormGrid cols={2}>
+                  <FloatingInput
+                    label="Nom du Collège"
+                    value={formData.name.replace('College - ', '')}
+                    disabled
+                    icon={<Building className="w-4 h-4" />}
+                    required
+                  />
+                  
+                  <FloatingInput
+                    label="Nombre d'électeurs inscrits"
+                    type="number"
+                    min="0"
+                    value={formData.registered_voters}
+                    onChange={(e) => handleInputChange('registered_voters', parseInt(e.target.value) || 0)}
+                    placeholder="Ex: 350"
+                    icon={<Users className="w-4 h-4" />}
+                    required
+                  />
+                </ModernFormGrid>
+                
+                <ModernFormGrid cols={2}>
+                  <FloatingInput
+                    label="Nombre de sièges à pourvoir"
+                    type="number"
+                    min="0"
+                    value={formData.seats_to_fill || 0}
+                    onChange={(e) => handleInputChange('seats_to_fill', parseInt(e.target.value) || 0)}
+                    placeholder="Ex: 2"
+                    icon={<Building className="w-4 h-4" />}
+                    required
+                  />
+                  
+                  <FloatingInput
+                    label="Lieu de Vote"
+                    value={formData.lieu_vote}
+                    onChange={(e) => handleInputChange('lieu_vote', e.target.value)}
+                    placeholder="Ex: Bureau de Direction"
+                    icon={<Building className="w-4 h-4" />}
+                  />
+                </ModernFormGrid>
+              </>
+            ) : (
+              <>
+                <ModernFormGrid cols={2}>
+                  <FloatingInput
+                    label="Nom du Bureau"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange('name', e.target.value)}
+                    placeholder="Ex: Bureau 1"
+                    icon={<Building className="w-4 h-4" />}
+                    required
+                  />
+                  
+                  <FloatingInput
+                    label="Nombre d'électeurs inscrits"
+                    type="number"
+                    min="0"
+                    value={formData.registered_voters}
+                    onChange={(e) => handleInputChange('registered_voters', parseInt(e.target.value) || 0)}
+                    placeholder="Ex: 350"
+                    icon={<Users className="w-4 h-4" />}
+                    required
+                  />
+                </ModernFormGrid>
 
-            <ModernFormGrid cols={2}>
-              <FloatingInput
-                label="Nombre d'urnes"
-                type="number"
-                min="0"
-                value={formData.urns_count}
-                onChange={(e) => handleInputChange('urns_count', parseInt(e.target.value) || 0)}
-                placeholder="Ex: 2"
-                icon={<Building className="w-4 h-4" />}
-              />
-              
-              <FloatingInput
-                label="Nom du Président"
-                value={formData.president_name}
-                onChange={(e) => handleInputChange('president_name', e.target.value)}
-                placeholder="Ex: Marie Martin"
-                icon={<Users className="w-4 h-4" />}
-              />
-            </ModernFormGrid>
+                <ModernFormGrid cols={2}>
+                  <FloatingInput
+                    label="Nombre d'urnes"
+                    type="number"
+                    min="0"
+                    value={formData.urns_count}
+                    onChange={(e) => handleInputChange('urns_count', parseInt(e.target.value) || 0)}
+                    placeholder="Ex: 2"
+                    icon={<Building className="w-4 h-4" />}
+                  />
+                  
+                  <FloatingInput
+                    label="Nom du Président"
+                    value={formData.president_name}
+                    onChange={(e) => handleInputChange('president_name', e.target.value)}
+                    placeholder="Ex: Marie Martin"
+                    icon={<Users className="w-4 h-4" />}
+                  />
+                </ModernFormGrid>
 
-            <ModernFormGrid cols={1}>
-              <FloatingInput
-                label="Téléphone du Président"
-                value={formData.president_phone}
-                onChange={(e) => handleInputChange('president_phone', e.target.value)}
-                placeholder="Ex: +241 01 23 45 67"
-                icon={<Phone className="w-4 h-4" />}
-              />
-            </ModernFormGrid>
+                <ModernFormGrid cols={2}>
+                  <FloatingInput
+                    label="Téléphone du Président"
+                    value={formData.president_phone}
+                    onChange={(e) => handleInputChange('president_phone', e.target.value)}
+                    placeholder="Ex: +241 01 23 45 67"
+                    icon={<Phone className="w-4 h-4" />}
+                  />
+                  
+                  <FloatingInput
+                    label="Lieu de Vote"
+                    value={formData.lieu_vote}
+                    onChange={(e) => handleInputChange('lieu_vote', e.target.value)}
+                    placeholder="Ex: Salle Polyvalente"
+                    icon={<Building className="w-4 h-4" />}
+                  />
+                </ModernFormGrid>
+              </>
+            )}
           </ModernFormSection>
 
           {/* Actions - Mobile First */}

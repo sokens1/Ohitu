@@ -301,7 +301,8 @@ const ElectionManagementUnified = () => {
             id,
             total_voters,
             voting_bureaux (
-              registered_voters
+              registered_voters,
+              election_id
             )
           )
         `)
@@ -314,7 +315,9 @@ const ElectionManagementUnified = () => {
           if (center.voting_centers) {
             hasCenters = true;
             const vc = center.voting_centers as any;
-            const bureaux = Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [];
+            // Filtrer STRICTEMENT les bureaux de vote par l'election_id de l'élection en cours
+            const bureaux = (Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [])
+              .filter((b: any) => b.election_id === electionId || String(b.election_id) === String(electionId));
               
             const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) => 
               sum + (Number(bureau.registered_voters) || 0), 0);
@@ -418,7 +421,7 @@ const ElectionManagementUnified = () => {
                 id,
                 total_voters,
                 total_bureaux,
-                voting_bureaux!center_id(id, registered_voters)
+                voting_bureaux!center_id(id, registered_voters, election_id)
               )
             `)
             .eq('election_id', election.id);
@@ -432,7 +435,8 @@ const ElectionManagementUnified = () => {
               if (center.voting_centers) {
                 const vc = center.voting_centers as any;
                 // Compter les bureaux : soit depuis la liste, soit depuis la colonne total_bureaux
-                const bureaux = Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [];
+                const bureaux = (Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [])
+                  .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
                 const bureauxCount = bureaux.length > 0 ? bureaux.length : (Number(vc.total_bureaux) || 0);
                 totalBureaux += bureauxCount;
                 
@@ -957,11 +961,30 @@ const ElectionManagementUnified = () => {
         console.warn("Échec de la suppression dans election_candidates:", e);
       }
 
-      // 4. Supprimer les centres liés à l'élection
+      // 4. Supprimer les centres liés à l'élection et les centres orphelins
       try {
+        const { data: linkedCenters } = await supabase
+          .from('election_centers')
+          .select('center_id')
+          .eq('election_id', electionId);
+
         await supabase.from('election_centers').delete().eq('election_id', electionId);
+
+        if (linkedCenters && linkedCenters.length > 0) {
+          const centerIds = linkedCenters.map(lc => lc.center_id);
+          for (const centerId of centerIds) {
+            const { count } = await supabase
+              .from('election_centers')
+              .select('id', { count: 'exact', head: true })
+              .eq('center_id', centerId);
+
+            if (count === 0) {
+              await supabase.from('voting_centers').delete().eq('id', centerId);
+            }
+          }
+        }
       } catch (e) {
-        console.warn("Échec de la suppression dans election_centers:", e);
+        console.warn("Échec de la suppression dans election_centers ou des centres orphelins:", e);
       }
 
       // 5. Supprimer les collèges électoraux (élections pro)
@@ -976,6 +999,20 @@ const ElectionManagementUnified = () => {
         await supabase.from('election_steps').delete().eq('election_id', electionId);
       } catch (e) {
         console.warn("Échec de la suppression dans election_steps:", e);
+      }
+
+      // 6b. Supprimer les bureaux de vote physiques / collèges liés à cette élection
+      try {
+        await supabase.from('voting_bureaux').delete().eq('election_id', electionId);
+      } catch (e) {
+        console.warn("Échec de la suppression dans voting_bureaux:", e);
+      }
+
+      // 6c. Supprimer les listes syndicales liées à cette élection
+      try {
+        await supabase.from('union_lists').delete().eq('election_id', electionId);
+      } catch (e) {
+        console.warn("Échec de la suppression dans union_lists:", e);
       }
 
       // 7. Supprimer l'élection de la base de données
@@ -1494,6 +1531,8 @@ const ElectionManagementUnified = () => {
           booths: (center.booths || []).map((booth: any) => ({
             name: booth.name,
             registered_voters: booth.voters ?? booth.registered_voters ?? 0,
+            seats_to_fill: booth.seats_to_fill || 0,
+            is_college: booth.is_college || false
           })),
         }));
         const importResult = await importEstablishmentsToElection(
@@ -1502,9 +1541,7 @@ const ElectionManagementUnified = () => {
           enterprise.id,
           centersPayload
         );
-        if (importResult.errors.length > 0) {
-          console.warn('Import établissements (création élection):', importResult.errors);
-        }
+        console.warn('Import établissements (création élection):', importResult.errors);
       }
 
       // Insérer les listes syndicales importées (format wizard ou Excel plat)
