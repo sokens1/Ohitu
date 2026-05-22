@@ -1,32 +1,146 @@
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { 
-  FileCheck, 
-  Eye, 
-  CheckCircle, 
-  XCircle, 
+import {
+  FileCheck,
+  Eye,
+  CheckCircle,
+  XCircle,
   AlertTriangle,
   Clock,
   FileText,
-  User,
-  MessageSquare,
-  RotateCcw
+  RotateCcw,
+  PenLine
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
+import { useRBAC } from '@/hooks/useRBAC';
+import { useAuth } from '@/contexts/AuthContext';
+
+// ── Composant Timeline circuit de validation ──────────────────────────────────
+interface PVTimelineProps {
+  pv: {
+    status: string;
+    entered_by?: string;
+    entered_at_str?: string;
+    validated_by?: string;
+    validated_at_str?: string;
+    observer_name?: string | null;
+    observer_annotation?: string | null;
+    observer_conformity?: 'conforme' | 'non_conforme' | null;
+    observer_annotated_at_str?: string;
+  };
+}
+
+const STEP_COLORS = {
+  done:    { dot: 'bg-[#1B2E5A] border-[#1B2E5A]', line: 'bg-[#1B2E5A]', text: 'text-[#1B2E5A]' },
+  active:  { dot: 'bg-amber-500 border-amber-500',  line: 'bg-gray-200',  text: 'text-amber-600'  },
+  pending: { dot: 'bg-white border-gray-300',        line: 'bg-gray-200',  text: 'text-gray-400'  },
+  error:   { dot: 'bg-red-500 border-red-500',       line: 'bg-gray-200',  text: 'text-red-600'   },
+  info:    { dot: 'bg-purple-500 border-purple-500', line: 'bg-gray-200',  text: 'text-purple-700'},
+};
+
+const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
+  const entryDone = ['entered', 'validated', 'published', 'anomaly'].includes(pv.status);
+  const validDone  = ['validated', 'published'].includes(pv.status);
+  const isAnomaly  = pv.status === 'anomaly';
+  const hasAnnotation = !!pv.observer_annotation || !!pv.observer_conformity;
+  const conformityLabel = pv.observer_conformity === 'conforme' ? 'Conforme' : pv.observer_conformity === 'non_conforme' ? 'Non conforme' : null;
+
+  const steps = [
+    {
+      label: 'Saisie du PV',
+      sublabel: entryDone ? pv.entered_by : 'En attente de saisie',
+      date: pv.entered_at_str,
+      icon: entryDone ? <CheckCircle className="w-3.5 h-3.5 text-white" /> : <Clock className="w-3.5 h-3.5 text-gray-400" />,
+      color: entryDone ? STEP_COLORS.done : STEP_COLORS.pending,
+      description: 'Agent de saisie',
+    },
+    {
+      label: isAnomaly ? 'Anomalie signalée' : (validDone ? 'PV validé' : 'En attente de validation'),
+      sublabel: validDone ? pv.validated_by : (isAnomaly ? pv.validated_by : 'Validateur'),
+      date: (validDone || isAnomaly) ? pv.validated_at_str : undefined,
+      icon: isAnomaly
+        ? <AlertTriangle className="w-3.5 h-3.5 text-white" />
+        : validDone
+          ? <CheckCircle className="w-3.5 h-3.5 text-white" />
+          : <Clock className="w-3.5 h-3.5 text-gray-400" />,
+      color: isAnomaly ? STEP_COLORS.error : validDone ? STEP_COLORS.done : (entryDone ? STEP_COLORS.active : STEP_COLORS.pending),
+      description: 'Validateur',
+    },
+    {
+      label: conformityLabel ?? (hasAnnotation ? 'Annoté' : 'Observation'),
+      sublabel: hasAnnotation ? pv.observer_name : 'Observateur',
+      date: pv.observer_annotated_at_str,
+      icon: hasAnnotation
+        ? <PenLine className="w-3.5 h-3.5 text-white" />
+        : <Eye className="w-3.5 h-3.5 text-gray-400" />,
+      color: pv.observer_conformity === 'conforme'
+        ? STEP_COLORS.done
+        : pv.observer_conformity === 'non_conforme'
+          ? STEP_COLORS.error
+          : hasAnnotation ? STEP_COLORS.info : STEP_COLORS.pending,
+      description: pv.observer_annotation ?? '',
+      isInfo: true
+    },
+  ];
+
+  return (
+    <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border border-slate-200 p-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">
+        Circuit de validation
+      </p>
+      <div className="flex items-start gap-0">
+        {steps.map((step, i) => (
+          <div key={i} className="flex-1 flex flex-col items-center relative">
+            {/* Ligne de connexion gauche */}
+            {i > 0 && (
+              <div className={`absolute top-3.5 right-1/2 w-full h-0.5 ${steps[i - 1].color.line} -z-0`} />
+            )}
+
+            {/* Point */}
+            <div className={`relative z-10 w-7 h-7 rounded-full border-2 flex items-center justify-center ${step.color.dot} shadow-sm`}>
+              {step.icon}
+            </div>
+
+            {/* Texte */}
+            <div className="mt-2 text-center px-1 w-full">
+              <p className={`text-xs font-semibold leading-tight ${step.color.text}`}>
+                {step.label}
+              </p>
+              <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">{step.description}</p>
+              {step.sublabel && (
+                <p className="text-[10px] font-medium text-gray-700 mt-0.5 truncate">{step.sublabel}</p>
+              )}
+              {step.date && (
+                <p className="text-[10px] text-gray-400 mt-0.5">{step.date}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; }
 
 const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false }) => {
+  const { role } = useRBAC();
+  const { user } = useAuth();
+  const isObserver = role === 'observateur';
+
   const [selectedPV, setSelectedPV] = useState<string | null>(null);
+  const [observerAnnotation, setObserverAnnotation] = useState('');
+  const [observerConformity, setObserverConformity] = useState<'conforme' | 'non_conforme' | null>(null);
+  const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [comment, setComment] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'entered' | 'validated' | 'anomaly' | 'published'>('all');
   const [loading, setLoading] = useState(false);
@@ -88,7 +202,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         if (!selectedElection) { setPvs([]); setBureauxMap(new Map()); setCentersMap(new Map()); setLoading(false); return; }
         const { data: pvRows, error: pvErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url, observer_annotation, observer_conformity, observer_id, observer_annotated_at')
           .eq('election_id', selectedElection)
           .order('created_at', { ascending: false })
           .limit(500);
@@ -155,6 +269,12 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
         validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
+        // Données observateur
+        observer_annotation: pv.observer_annotation ?? null,
+        observer_conformity: (pv.observer_conformity ?? null) as 'conforme' | 'non_conforme' | null,
+        observer_name: pv.observer_id ? (usersMap.get(pv.observer_id) || pv.observer_id) : null,
+        observer_annotated_at_str: pv.observer_annotated_at ? new Date(pv.observer_annotated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.observer_annotated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
+        bureau_id: pv.bureau_id,
       };
     });
     if (filter === 'all') return enriched;
@@ -204,14 +324,48 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
   const filteredPVs = displayedPVs;
 
-  const handleValidation = (action: 'approve' | 'reject' | 'correction') => {
-    // Handle validation action
-    console.log(`Action: ${action}, PV: ${selectedPV}, Comment: ${comment}`);
-    setSelectedPV(null);
-    setComment('');
-  };
 
   const selectedPVData = useMemo(() => filteredPVs.find(pv => pv.id === selectedPV), [filteredPVs, selectedPV]);
+
+  // Synchroniser l'annotation et la conformité avec le PV sélectionné
+  useEffect(() => {
+    setObserverAnnotation(selectedPVData?.observer_annotation ?? '');
+    setObserverConformity(selectedPVData?.observer_conformity ?? null);
+  }, [selectedPVData?.id]);
+
+  // Conformité observateur — enregistre uniquement l'avis, sans modifier le statut du PV
+  const submitObserverConformity = async (conformity: 'conforme' | 'non_conforme') => {
+    if (!selectedPV || !user) return;
+    setSavingAnnotation(true);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('procès_verbaux')
+        .update({
+          observer_annotation: observerAnnotation.trim() || null,
+          observer_conformity: conformity,
+          observer_id: user.id,
+          observer_annotated_at: now,
+        })
+        .eq('id', selectedPV);
+      if (error) { toast.error("Échec de l'enregistrement"); return; }
+
+      setObserverConformity(conformity);
+      setPvs(prev => prev.map(p => p.id === selectedPV ? {
+        ...p,
+        observer_annotation: observerAnnotation.trim() || null,
+        observer_conformity: conformity,
+        observer_id: user.id,
+        observer_annotated_at: now,
+      } : p));
+
+      toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Non conforme');
+      setDetailOpen(false);
+    } finally {
+      setSavingAnnotation(false);
+    }
+  };
+
 
   const validateEditValues = () => {
     const errors: Record<string, string> = {};
@@ -493,6 +647,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           </DialogHeader>
             {selectedPVData ? (
               <div className="space-y-6">
+
+              {/* ── Timeline circuit de validation ──────────────────────────── */}
+              <PVTimeline pv={selectedPVData} />
+
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   {getStatusIcon(selectedPVData.status)}
@@ -501,9 +659,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     const center = bureau ? centersMap.get(bureau.center_id) : undefined;
                     return `${center?.name || 'Centre'} - ${bureau?.name || 'Bureau'}`;
                   })()}</span>
-                          </div>
+                </div>
                 {getPriorityBadge(selectedPVData.status)}
-                      </div>
+              </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -620,14 +778,17 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
                 </div>
 
-                <div>
-                  <Label htmlFor="comment">Commentaire de validation</Label>
-                <Textarea id="comment" placeholder="Ajouter un commentaire..." value={comment} onChange={(e) => setComment(e.target.value)} rows={3} />
-                </div>
+                {/* Commentaire de validation — masqué pour l'observateur */}
+                {!isObserver && (
+                  <div>
+                    <Label htmlFor="comment">Commentaire de validation</Label>
+                    <Textarea id="comment" placeholder="Ajouter un commentaire..." value={comment} onChange={(e) => setComment(e.target.value)} rows={3} />
+                  </div>
+                )}
 
               <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-6">
-                {!editMode && (
-                  <Button disabled={readOnly} onClick={() => {
+                {!editMode && !readOnly && (
+                  <Button onClick={() => {
                     setEditValues({
                       total_registered: (editValues.total_registered || 0),
                       total_voters: (selectedPVData.total_voters || 0),
@@ -709,62 +870,127 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     {saving ? 'Enregistrement…' : 'Enregistrer'}
                   </Button>
                 )}
-      <Button
+      {!readOnly && <Button
         onClick={() => setShowResetConfirm(true)}
-        disabled={resetting || readOnly}
+        disabled={resetting}
         variant="outline"
         className="border-orange-300 text-orange-700 hover:bg-orange-50"
       >
         <RotateCcw className="w-4 h-4 mr-2" />
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
-      </Button>
-                <Button disabled={readOnly} onClick={async () => {
+      </Button>}
+                {/* ── Annotation observateur ──────────────────────────────── */}
+                {isObserver ? (
+                  /* ── Formulaire d'annotation observateur — ligne unique ── */
+                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3">
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2 px-1">
+                      Annotation observateur
+                    </p>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      {/* Annotation texte */}
+                      <input
+                        type="text"
+                        placeholder="Remarque ou observation (optionnel)…"
+                        value={observerAnnotation}
+                        onChange={e => setObserverAnnotation(e.target.value)}
+                        className="flex-1 min-w-0 h-10 px-3 text-sm rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:border-slate-400 focus:bg-white transition"
+                      />
+                      {/* Conforme */}
+                      <button
+                        type="button"
+                        disabled={savingAnnotation}
+                        onClick={() => submitObserverConformity('conforme')}
+                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
+                          observerConformity === 'conforme'
+                            ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                            : 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                        }`}
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Conforme
+                      </button>
+                      {/* Non conforme */}
+                      <button
+                        type="button"
+                        disabled={savingAnnotation}
+                        onClick={() => submitObserverConformity('non_conforme')}
+                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
+                          observerConformity === 'non_conforme'
+                            ? 'border-red-600 bg-red-600 text-white shadow-sm'
+                            : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
+                        }`}
+                      >
+                        <XCircle className="w-4 h-4" />
+                        Non conforme
+                      </button>
+                    </div>
+                    {savingAnnotation && (
+                      <p className="text-xs text-slate-400 mt-2 px-1 animate-pulse">Enregistrement…</p>
+                    )}
+                  </div>
+                ) : (
+                  /* Autres rôles : afficher l'annotation si elle existe */
+                  (selectedPVData?.observer_annotation || selectedPVData?.observer_conformity) ? (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-3 bg-slate-100 border-b border-slate-200">
+                        <PenLine className="w-4 h-4 text-slate-500" />
+                        <span className="text-sm font-medium text-slate-700">
+                          Annotation de {selectedPVData.observer_name ?? 'l\'observateur'}
+                        </span>
+                        {selectedPVData.observer_annotated_at_str && (
+                          <span className="ml-auto text-xs text-slate-400">{selectedPVData.observer_annotated_at_str}</span>
+                        )}
+                      </div>
+                      <div className="px-4 py-3 space-y-2">
+                        {selectedPVData.observer_conformity && (
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+                            selectedPVData.observer_conformity === 'conforme'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {selectedPVData.observer_conformity === 'conforme'
+                              ? <><CheckCircle className="w-3.5 h-3.5" /> Conforme</>
+                              : <><XCircle className="w-3.5 h-3.5" /> Non conforme</>
+                            }
+                          </span>
+                        )}
+                        {selectedPVData.observer_annotation && (
+                          <p className="text-sm text-slate-700 italic">"{selectedPVData.observer_annotation}"</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : null
+                )}
+
+                {/* Boutons d'action — masqués pour l'observateur */}
+                {!readOnly && <>
+                <Button onClick={async () => {
                   if (!selectedPV) return;
                   if (!confirm('Supprimer ce PV ? Cette action est irréversible.')) return;
-                  // Supprimer d'abord les résultats liés
-                  const { error: crErr } = await supabase
-                    .from('candidate_results')
-                    .delete()
-                    .eq('pv_id', selectedPV);
-                  if (crErr) { console.error('Erreur suppression résultats:', crErr); return; }
-                  // Supprimer le PV
-                  const { error: pvErr } = await supabase
-                    .from('procès_verbaux')
-                    .delete()
-                    .eq('id', selectedPV);
-                  if (pvErr) { console.error('Erreur suppression PV:', pvErr); return; }
-                  // Mettre à jour l'état local
+                  const { error: crErr } = await supabase.from('candidate_results').delete().eq('pv_id', selectedPV);
+                  if (crErr) { console.error(crErr); return; }
+                  const { error: pvErr } = await supabase.from('procès_verbaux').delete().eq('id', selectedPV);
+                  if (pvErr) { console.error(pvErr); return; }
                   setPvs(prev => prev.filter(p => p.id !== selectedPV));
                   setDetailOpen(false);
                 }} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
                   Supprimer
-                  </Button>
-                <Button disabled={readOnly} onClick={async () => {
+                </Button>
+                <Button onClick={async () => {
                   if (!selectedPV) return;
                   const { data: { user } } = await supabase.auth.getUser();
                   const { error } = await supabase
                     .from('procès_verbaux')
-                    .update({ 
-                      status: 'validated', 
-                      validated_at: new Date().toISOString(),
-                      validated_by: user?.id || null
-                    })
+                    .update({ status: 'validated', validated_at: new Date().toISOString(), validated_by: user?.id || null })
                     .eq('id', selectedPV);
-                  if (error) {
-                    console.error('Erreur validation PV:', error);
-                  } else {
-                    const validatedByLabel = user?.id ? (usersMap.get(user.id) || user.id) : 'Inconnu';
-                    setPvs(prev => prev.map(p => p.id === selectedPV ? { 
-                      ...p, 
-                      status: 'validated',
-                      validated_by: user?.id || null,
-                      validated_at: new Date().toISOString()
-                    } : p));
+                  if (!error) {
+                    setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: user?.id || null, validated_at: new Date().toISOString() } : p));
                     setDetailOpen(false);
                   }
                 }} className="bg-green-600 hover:bg-green-700 text-white">
                   <CheckCircle className="w-4 h-4 mr-2" /> Valider
-                  </Button>
+                </Button>
+                </>}
                 </div>
               </div>
           ) : null}

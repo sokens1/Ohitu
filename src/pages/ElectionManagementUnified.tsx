@@ -1959,8 +1959,8 @@ const ElectionManagementUnified = () => {
                             Supprimer
                           </DropdownMenuItem>
                           )}
-                          <DropdownMenuSeparator />
-                          {election.hiddenFromPublic ? (
+                          {can('elections:manage') && <DropdownMenuSeparator />}
+                          {can('elections:manage') && (election.hiddenFromPublic ? (
                           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleReactivateElection(election); }}>
                             <span className="mr-2 opacity-70">▶</span>
                             Réactiver (vue publique)
@@ -1970,11 +1970,13 @@ const ElectionManagementUnified = () => {
                             <span className="mr-2 opacity-70">⏸</span>
                             Masquer du public
                           </DropdownMenuItem>
-                          )}
+                          ))}
+                          {can('elections:manage') && (
                           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
                             <span className="mr-2 opacity-70">📦</span>
                             Archiver
                           </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -2136,8 +2138,8 @@ const ElectionManagementUnified = () => {
                                 Supprimer
                               </DropdownMenuItem>
                               )}
-                              <DropdownMenuSeparator />
-                              {election.hiddenFromPublic ? (
+                              {can('elections:manage') && <DropdownMenuSeparator />}
+                              {can('elections:manage') && (election.hiddenFromPublic ? (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleReactivateElection(election); }}>
                                 <span className="mr-2 opacity-70">▶</span>
                                 Réactiver (vue publique)
@@ -2147,11 +2149,13 @@ const ElectionManagementUnified = () => {
                                 <span className="mr-2 opacity-70">⏸</span>
                                 Masquer du public
                               </DropdownMenuItem>
-                              )}
+                              ))}
+                              {can('elections:manage') && (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Fonctionnalité 'Archiver' en cours de développement"); }}>
                                 <span className="mr-2 opacity-70">📦</span>
                                 Archiver
                               </DropdownMenuItem>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
