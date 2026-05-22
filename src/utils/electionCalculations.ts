@@ -79,7 +79,8 @@ export async function calculateElectionTotalVoters(electionId: string): Promise<
       .select(`
         voting_centers(
           id,
-          voting_bureaux(id, registered_voters)
+          total_voters,
+          voting_bureaux(id, registered_voters, election_id)
         )
       `)
       .eq('election_id', electionId);
@@ -94,11 +95,11 @@ export async function calculateElectionTotalVoters(electionId: string): Promise<
 
     electionCenters?.forEach((link: any) => {
       const center = link.voting_centers;
-      if (center?.voting_bureaux) {
-        // Somme des électeurs de tous les bureaux de ce centre
-        const centerVoters = center.voting_bureaux.reduce((sum: number, bureau: any) => 
-          sum + (bureau.registered_voters || 0), 0);
-        totalVoters += centerVoters;
+      if (center) {
+        const bureaux = Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [];
+        const centerVoters = bureaux.reduce((sum: number, bureau: any) => 
+          sum + ((bureau.election_id === electionId || String(bureau.election_id) === String(electionId)) ? (bureau.registered_voters || 0) : 0), 0);
+        totalVoters += centerVoters > 0 ? centerVoters : (Number(center.total_voters) || 0);
       }
     });
 

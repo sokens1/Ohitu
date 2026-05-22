@@ -74,6 +74,7 @@ interface ElectionDetailViewProps {
 const ElectionDetailViewImproved: React.FC<ElectionDetailViewProps> = ({ election, onBack }) => {
   const { can } = useRBAC();
   const canManage = can('elections:manage');
+  const isProfessional = election.type?.trim() === 'Élection Professionnelle';
 
   const [showAddCenter, setShowAddCenter] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
@@ -89,57 +90,63 @@ const ElectionDetailViewImproved: React.FC<ElectionDetailViewProps> = ({ electio
   });
 
   // Charger les centres de vote associés à cette élection via la table de liaison
-  useEffect(() => {
-    const fetchCenters = async () => {
-      try {
-        setLoading(true);
-        
-        // Requête avec jointure sur la table de liaison election_centers
-        const { data, error } = await supabase
-          .from('election_centers')
-          .select(`
-            voting_centers!center_id (
-              *,
-              voting_bureaux!center_id(id, name)
-            )
-          `)
-          .eq('election_id', election.id)
-          .order('voting_centers(name)', { ascending: true });
+  const fetchCenters = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      // Requête avec jointure sur la table de liaison election_centers
+      const { data, error } = await supabase
+        .from('election_centers')
+        .select(`
+          voting_centers!center_id (
+            *,
+            voting_bureaux!center_id(id, name, registered_voters, election_id, seats_to_fill, lieu_vote, college)
+          )
+        `)
+        .eq('election_id', election.id)
+        .order('voting_centers(name)', { ascending: true });
 
-        if (error) {
-          console.error('Erreur lors du chargement des centres:', error);
-          setCenters([]);
-          setLoading(false);
-          return;
-        }
-
-        // Transformer les données Supabase en format Center
-        const transformedCenters: Center[] = data?.map(item => {
-          const center = item.voting_centers;
-          const totalVoters = center.voting_bureaux?.reduce((sum: number, bureau: any) => 
-            sum + (bureau.registered_voters || 0), 0) || 0;
-          
-          return {
-            id: center.id.toString(),
-            name: center.name,
-            address: center.address || '',
-            responsable: center.contact_name || '',
-            contact: center.contact_phone || '',
-            bureaux: center.voting_bureaux?.length || 0,
-            voters: totalVoters
-          };
-        }) || [];
-
-        setCenters(transformedCenters);
-      } catch (error) {
+      if (error) {
         console.error('Erreur lors du chargement des centres:', error);
-      } finally {
+        setCenters([]);
         setLoading(false);
+        return;
       }
-    };
 
-    fetchCenters();
+      // Transformer les données Supabase en format Center
+      const transformedCenters: Center[] = data?.map(item => {
+        const center = item.voting_centers as any;
+        if (!center) return null as any;
+
+        // Filtrer STRICTEMENT les bureaux par l'id de l'élection en cours
+        const bureaux = (Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [])
+          .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
+
+        const totalVoters = bureaux.reduce((sum: number, bureau: any) => 
+          sum + (bureau.registered_voters || 0), 0) || 0;
+        
+        return {
+          id: center.id.toString(),
+          name: center.name,
+          address: center.address || '',
+          responsable: center.contact_name || '',
+          contact: center.contact_phone || '',
+          bureaux: bureaux.length,
+          voters: totalVoters
+        };
+      }).filter(Boolean) || [];
+
+      setCenters(transformedCenters);
+    } catch (error) {
+      console.error('Erreur lors du chargement des centres:', error);
+    } finally {
+      setLoading(false);
+    }
   }, [election.id]);
+
+  useEffect(() => {
+    fetchCenters();
+  }, [fetchCenters]);
 
   // Charger les candidats pour cette élection
   useEffect(() => {
@@ -463,6 +470,9 @@ const ElectionDetailViewImproved: React.FC<ElectionDetailViewProps> = ({ electio
           <CenterDetailModal
             center={selectedCenter}
             onClose={() => setSelectedCenter(null)}
+            isProfessional={isProfessional}
+            onDataChange={fetchCenters}
+            electionId={election.id.toString()}
           />
         )}
       </div>

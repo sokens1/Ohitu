@@ -25,7 +25,10 @@ import {
   Lock,
   Globe2,
   Upload,
-  Download
+  Download,
+  ChevronDown,
+  ChevronUp,
+  Search
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -67,6 +70,8 @@ interface Election {
   enterpriseId?: string;
   has_second_round?: boolean;
   second_round_date?: string | null;
+  hiddenFromPublic?: boolean;
+  is_published?: boolean;
 }
 
 interface Center {
@@ -77,6 +82,7 @@ interface Center {
   contact: string;
   bureaux: number;
   voters: number;
+  seats?: number;
 }
 
 interface Candidate {
@@ -131,6 +137,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const [centersViewMode, setCentersViewMode] = useState<'grid' | 'list'>('grid');
   const [candidatesViewMode, setCandidatesViewMode] = useState<'grid' | 'list'>('grid');
   const [isPublished, setIsPublished] = useState(election.is_published || false);
+  const [expandedListId, setExpandedListId] = useState<string | null>(null);
+  const [candidateSearchQuery, setCandidateSearchQuery] = useState<string>('');
 
   const togglePublication = async () => {
     try {
@@ -165,7 +173,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             voting_centers(
               id, name, address, contact_name, contact_phone, enterprise_id,
               total_voters, total_bureaux,
-              voting_bureaux!center_id(id, name, registered_voters)
+              voting_bureaux!center_id(id, name, registered_voters, election_id, seats_to_fill, lieu_vote, college)
             )
           `)
           .eq('election_id', election.id);
@@ -182,15 +190,21 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           const center = link.voting_centers as any;
           if (!center) return null;
 
-          const bureaux = Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [];
+          // Filtrer STRICTEMENT les bureaux par l'id de l'élection en cours
+          const bureaux = (Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [])
+            .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
           
           // Calculer les électeurs réels à partir des bureaux, ou fallback sur la colonne total_voters
           const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) => 
             sum + (bureau.registered_voters || 0), 0);
           const finalVoters = votersFromBureaux > 0 ? votersFromBureaux : (Number(center.total_voters) || 0);
 
-          // Nombre de bureaux
-          const finalBureaux = bureaux.length > 0 ? bureaux.length : (Number(center.total_bureaux) || 0);
+          // Nombre de bureaux physiques (ignorer les collèges)
+          const physicalBureauxCount = bureaux.filter((b: any) => !b.college && !b.name?.startsWith('College -')).length;
+          const finalBureaux = physicalBureauxCount > 0 ? physicalBureauxCount : (Number(center.total_bureaux) || 0);
+          
+          // Nombre de sièges (somme des sièges des collèges)
+          const totalSeats = bureaux.reduce((sum: number, b: any) => sum + (Number(b.seats_to_fill) || 0), 0);
           
           return {
             id: center.id.toString(),
@@ -199,7 +213,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             responsable: center.contact_name || '',
             contact: center.contact_phone || '',
             bureaux: finalBureaux,
-            voters: finalVoters
+            voters: finalVoters,
+            seats: totalSeats
           };
         }).filter(Boolean) || [];
 
@@ -759,6 +774,21 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     setShowCandidateProfile(true);
   };
 
+  const getFilteredRepresentatives = (cand: Candidate) => {
+    const tList = (cand.titulaires || []).map((t: any) => ({ ...t, type: 'Titulaire' }));
+    const sList = (cand.suppleants || []).map((s: any) => ({ ...s, type: 'Suppléant' }));
+    const all = [...tList, ...sList];
+    
+    if (!candidateSearchQuery) return all;
+    
+    const query = candidateSearchQuery.toLowerCase();
+    return all.filter((r: any) => 
+      r.name?.toLowerCase().includes(query) || 
+      r.etablissement?.toLowerCase().includes(query) ||
+      (r.type && r.type.toLowerCase().includes(query))
+    );
+  };
+
   if (loading) {
     return (
       <Layout>
@@ -1245,8 +1275,12 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     
                     <div className="grid grid-cols-2 gap-2 sm:gap-3">
                       <div className="text-center p-2 sm:p-3 bg-orange-50 rounded-lg border border-orange-200">
-                        <div className="text-sm sm:text-lg font-bold text-orange-600">{center.bureaux}</div>
-                        <div className="text-xs text-orange-600 font-medium uppercase tracking-wide">Bureaux</div>
+                        <div className="text-sm sm:text-lg font-bold text-orange-600">
+                          {election.type === 'Élection Professionnelle' ? (center.seats || 0) : center.bureaux}
+                        </div>
+                        <div className="text-xs text-orange-600 font-medium uppercase tracking-wide">
+                          {election.type === 'Élection Professionnelle' ? 'Sièges' : 'Bureaux'}
+                        </div>
                       </div>
                       <div className="text-center p-2 sm:p-3 bg-gov-blue/5 rounded-lg border border-gov-blue/20">
                         <div className="text-sm sm:text-lg font-bold text-gov-blue">{center.voters.toLocaleString('fr-FR')}</div>
@@ -1315,7 +1349,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             <div className="flex items-center gap-4 mt-2">
                               <div className="flex items-center gap-1">
                                 <Building className="w-4 h-4 text-orange-500" />
-                                <span className="text-sm font-medium text-gray-700">{center.bureaux} bureaux</span>
+                                <span className="text-sm font-medium text-gray-700">
+                                  {election.type === 'Élection Professionnelle' ? `${center.seats || 0} sièges` : `${center.bureaux} bureaux`}
+                                </span>
                               </div>
                               <div className="flex items-center gap-1">
                                 <Users className="w-4 h-4 text-blue-500" />
@@ -1495,6 +1531,11 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                              candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
                           </Badge>
                         )}
+                        {election.type === 'Élection Professionnelle' && (
+                          <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 mt-1 mx-auto block w-fit bg-purple-50 text-purple-700 border-purple-200">
+                            👥 {((candidate.titulaires?.length || 0) + (candidate.suppleants?.length || 0))} candidats
+                          </Badge>
+                        )}
                       </div>
 
                       {election.type === 'Élection Professionnelle' && candidate.suppleants?.[0] && (
@@ -1533,6 +1574,90 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
+                      )}
+
+                      {election.type === 'Élection Professionnelle' && (
+                        <div className="w-full pt-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (expandedListId === candidate.id) {
+                                setExpandedListId(null);
+                                setCandidateSearchQuery('');
+                              } else {
+                                setExpandedListId(candidate.id);
+                                setCandidateSearchQuery('');
+                              }
+                            }}
+                            className="w-full bg-purple-50/50 hover:bg-purple-50 text-purple-600 rounded-xl h-9 font-bold transition-all text-xs flex items-center justify-center gap-1.5"
+                          >
+                            {expandedListId === candidate.id ? (
+                              <>
+                                Masquer la liste
+                                <ChevronUp className="w-3.5 h-3.5" />
+                              </>
+                            ) : (
+                              <>
+                                Voir les {((candidate.titulaires?.length || 0) + (candidate.suppleants?.length || 0))} candidats
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              </>
+                            )}
+                          </Button>
+
+                          {expandedListId === candidate.id && (
+                            <div className="w-full mt-3 pt-3 border-t border-gray-100 text-left space-y-2">
+                              <div className="relative">
+                                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Rechercher par nom ou site..."
+                                  value={candidateSearchQuery}
+                                  onChange={(e) => setCandidateSearchQuery(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                                />
+                              </div>
+                              
+                              <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+                                {getFilteredRepresentatives(candidate).length === 0 ? (
+                                  <p className="text-[10px] text-gray-400 text-center py-2">Aucun candidat trouvé</p>
+                                ) : (
+                                  getFilteredRepresentatives(candidate).map((rep: any, idx: number) => (
+                                    <div key={idx} className="p-2 rounded-lg bg-gray-50 border border-gray-100 flex items-start gap-2 hover:bg-gray-100 transition-colors">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1 flex-wrap">
+                                          <span className="font-bold text-xs text-gray-800 leading-tight truncate">
+                                            {rep.name}
+                                          </span>
+                                          <Badge className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.2 rounded-md ${
+                                            rep.type === 'Titulaire' 
+                                              ? 'bg-purple-100 text-purple-700 border-none' 
+                                              : 'bg-blue-100 text-blue-700 border-none'
+                                          }`}>
+                                            {rep.type}
+                                          </Badge>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 font-medium truncate mt-0.5">
+                                          📍 {rep.etablissement || 'Non renseigné'}
+                                        </p>
+                                        {(rep.genre || rep.seniority) && (
+                                          <div className="flex items-center gap-1 mt-0.5 text-[9px] text-gray-400">
+                                            {rep.genre && <span>{rep.genre === 'H' ? 'Homme' : rep.genre === 'F' ? 'Femme' : rep.genre}</span>}
+                                            {rep.genre && rep.seniority && <span>•</span>}
+                                            {rep.seniority && <span>{rep.seniority} ans d'anc.</span>}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </CardContent>
@@ -1598,31 +1723,119 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                                    candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
                                 </Badge>
                               )}
+                              {election.type === 'Élection Professionnelle' && (
+                                <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 bg-purple-50 text-purple-700 border-purple-200">
+                                  👥 {((candidate.titulaires?.length || 0) + (candidate.suppleants?.length || 0))} candidats
+                                </Badge>
+                              )}
                             </div>
                           </div>
                         </div>
-                        {canManage && (
                         <div className="flex items-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditCandidate(candidate)}
-                            className="text-blue-600 hover:bg-blue-50 transition-all duration-300"
-                          >
-                            <Edit className="w-4 h-4 mr-1.5" />
-                            Gérer
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleRemoveCandidate(candidate.id)}
-                            className="text-red-500 hover:bg-red-50 transition-all duration-300"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {election.type === 'Élection Professionnelle' && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (expandedListId === candidate.id) {
+                                  setExpandedListId(null);
+                                  setCandidateSearchQuery('');
+                                } else {
+                                  setExpandedListId(candidate.id);
+                                  setCandidateSearchQuery('');
+                                }
+                              }}
+                              className="bg-purple-50/50 hover:bg-purple-50 text-purple-600 rounded-xl h-9 px-3 font-bold transition-all text-xs flex items-center justify-center gap-1.5"
+                            >
+                              {expandedListId === candidate.id ? (
+                                <>
+                                  Masquer
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                </>
+                              ) : (
+                                <>
+                                  Voir les candidats ({((candidate.titulaires?.length || 0) + (candidate.suppleants?.length || 0))})
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </>
+                              )}
+                            </Button>
+                          )}
+                          {canManage && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditCandidate(candidate)}
+                              className="text-blue-600 hover:bg-blue-50 transition-all duration-300 h-9 font-bold rounded-xl"
+                            >
+                              <Edit className="w-4 h-4 mr-1.5" />
+                              Gérer
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemoveCandidate(candidate.id)}
+                              className="text-red-500 hover:bg-red-50 transition-all duration-300 h-9 w-9 rounded-xl"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          )}
                         </div>
-                        )}
                       </div>
+                      
+                      {election.type === 'Élection Professionnelle' && expandedListId === candidate.id && (
+                        <div className="w-full mt-3 pt-3 border-t border-gray-100 text-left space-y-2">
+                          <div className="relative max-w-xs sm:max-w-md">
+                            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                            <input
+                              type="text"
+                              placeholder="Rechercher par nom ou site..."
+                              value={candidateSearchQuery}
+                              onChange={(e) => setCandidateSearchQuery(e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                            />
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 pr-1 max-h-72 overflow-y-auto custom-scrollbar">
+                            {getFilteredRepresentatives(candidate).length === 0 ? (
+                              <p className="text-xs text-gray-400 text-center py-2 col-span-full">Aucun candidat trouvé</p>
+                            ) : (
+                              getFilteredRepresentatives(candidate).map((rep: any, idx: number) => (
+                                <div key={idx} className="p-3 rounded-lg bg-gray-50 border border-gray-100 flex items-start gap-2 hover:bg-gray-100 transition-colors">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-xs text-gray-800 leading-tight truncate">
+                                        {rep.name}
+                                      </span>
+                                      <Badge className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.2 rounded-md ${
+                                        rep.type === 'Titulaire' 
+                                          ? 'bg-purple-100 text-purple-700 border-none' 
+                                          : 'bg-blue-100 text-blue-700 border-none'
+                                      }`}>
+                                        {rep.type}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 font-medium truncate mt-0.5">
+                                      📍 {rep.etablissement || 'Non renseigné'}
+                                    </p>
+                                    {(rep.genre || rep.seniority) && (
+                                      <div className="flex items-center gap-1.5 mt-0.5 text-[9px] text-gray-400">
+                                        {rep.genre && <span>{rep.genre === 'H' ? 'Homme' : rep.genre === 'F' ? 'Femme' : rep.genre}</span>}
+                                        {rep.genre && rep.seniority && <span>•</span>}
+                                        {rep.seniority && <span>{rep.seniority} ans d'anc.</span>}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -1657,6 +1870,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           <CenterDetailModal
             center={selectedCenter}
             onClose={() => setSelectedCenter(null)}
+            isProfessional={isProfessional}
+            onDataChange={fetchCenters}
+            electionId={election.id}
           />
         )}
 
@@ -1676,6 +1892,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           <EditCandidateModal
             candidate={selectedCandidate}
             electionType={election.type}
+            electionId={election.id}
             onClose={() => {
               setShowEditCandidate(false);
               setSelectedCandidate(null);
