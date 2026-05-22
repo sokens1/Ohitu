@@ -28,14 +28,19 @@ interface Bureau {
   president_name: string;
   president_phone: string;
   urns_count: number;
+  seats_to_fill?: number;
+  lieu_vote?: string;
 }
 
 interface CenterDetailModalProps {
   center: Center;
   onClose: () => void;
+  isProfessional?: boolean;
+  onDataChange?: () => void;
+  electionId?: string;
 }
 
-const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }) => {
+const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose, isProfessional = false, onDataChange, electionId }) => {
   const { can } = useRBAC();
   const canManage = can('elections:manage');
 
@@ -47,7 +52,8 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
 
   const [newBureau, setNewBureau] = useState({
     name: '',
-    registered_voters: 0
+    registered_voters: 0,
+    lieu_vote: ''
   });
 
   // Charger les bureaux depuis Supabase
@@ -55,11 +61,16 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
     const fetchBureaux = async () => {
       try {
         setLoading(true);
-        const { data, error } = await supabase
+        let query = supabase
           .from('voting_bureaux')
-          .select('id, name, center_id, registered_voters, president_name, president_phone, urns_count')
-          .eq('center_id', center.id)
-          .order('name', { ascending: true });
+          .select('id, name, center_id, registered_voters, president_name, president_phone, urns_count, seats_to_fill, lieu_vote, election_id')
+          .eq('center_id', center.id);
+
+        if (electionId) {
+          query = query.eq('election_id', electionId);
+        }
+
+        const { data, error } = await query.order('name', { ascending: true });
 
         if (error) {
           console.error('Erreur lors du chargement des bureaux:', error);
@@ -77,7 +88,7 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
     };
 
     fetchBureaux();
-  }, [center.id]);
+  }, [center.id, electionId]);
 
   const handleAddBureau = async () => {
     if (!newBureau.name.trim()) {
@@ -91,10 +102,12 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
         .insert({
           name: newBureau.name.trim(),
           center_id: center.id,
-          registered_voters: 0, // Initialisé à 0, les vrais inscrits sont gérés dans les PV
+          registered_voters: newBureau.registered_voters || 0,
           president_name: 'N/A',
           president_phone: '000000000',
-          urns_count: 0
+          urns_count: 0,
+          lieu_vote: newBureau.lieu_vote.trim() || null,
+          election_id: electionId || null
         })
         .select()
         .single();
@@ -106,9 +119,10 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
       }
 
       setBureaux([...bureaux, data]);
-      setNewBureau({ name: '', registered_voters: 0 });
+      setNewBureau({ name: '', registered_voters: 0, lieu_vote: '' });
       setShowAddBureau(false);
       toast.success('Bureau ajouté avec succès');
+      onDataChange?.();
     } catch (error) {
       console.error('Erreur lors de l\'ajout du bureau:', error);
       toast.error('Erreur lors de l\'ajout du bureau');
@@ -125,6 +139,7 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
     setBureaux(bureaux.map(b => b.id === updatedBureau.id ? updatedBureau : b));
     setShowEditBureau(false);
     setSelectedBureau(null);
+    onDataChange?.();
   };
 
   const handleDeleteBureau = async (bureauId: string) => {
@@ -143,6 +158,7 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
 
         setBureaux(bureaux.filter(b => b.id !== bureauId));
         toast.success('Bureau supprimé avec succès');
+        onDataChange?.();
       } catch (error) {
         console.error('Erreur lors de la suppression du bureau:', error);
         toast.error('Erreur lors de la suppression du bureau');
@@ -165,11 +181,15 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
 
       setBureaux(bureaux.filter(b => b.id !== id));
       toast.success('Bureau supprimé avec succès');
+      onDataChange?.();
     } catch (error) {
       console.error('Erreur lors de la suppression du bureau:', error);
       toast.error('Erreur lors de la suppression du bureau');
     }
   };
+
+  const colleges = isProfessional ? bureaux.filter(b => b.name.startsWith('College -')) : [];
+  const physicalBureaux = isProfessional ? bureaux.filter(b => !b.name.startsWith('College -')) : bureaux;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
@@ -212,7 +232,7 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                   <div className="p-1.5 bg-green-100 rounded-md">
                     <Building className="w-3 h-3 text-green-600" />
                   </div>
-                  <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Adresse</span>
+                  <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Lieu de vote</span>
                 </div>
                 <p className="text-gray-900 text-sm font-medium break-words">{center.address}</p>
               </div>
@@ -249,6 +269,90 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
             </div>
           </div>
 
+          {/* Section 1: Collèges Électoraux (Uniquement pour les élections professionnelles) */}
+          {isProfessional && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+              {/* Header de la section */}
+              <div className="bg-gradient-to-r from-orange-50 to-orange-100 px-4 sm:px-6 py-4 border-b border-orange-200">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-orange-600 rounded-lg">
+                    <Users className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">Collèges Électoraux</h3>
+                    <p className="text-orange-700 text-sm">
+                      {colleges.length} collège{colleges.length > 1 ? 's' : ''} configuré{colleges.length > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tableau des collèges */}
+              <div className="overflow-hidden">
+                {colleges.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center text-gray-500">
+                    Aucun collège électoral configuré pour cet établissement.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-gray-50">
+                          <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6">Nom du Collège</TableHead>
+                          <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6">Électeurs Inscrits</TableHead>
+                          <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6">Nombre de Sièges</TableHead>
+                          {canManage && <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6 text-center">Actions</TableHead>}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {colleges.map((college, index) => (
+                          <TableRow 
+                            key={college.id} 
+                            className={`hover:bg-gray-50 transition-colors ${
+                              index % 2 === 0 ? 'bg-white' : 'bg-gray-25'
+                            }`}
+                          >
+                            <TableCell className="py-4 px-6">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-orange-100 rounded-lg">
+                                  <Users className="w-4 h-4 text-orange-600" />
+                                </div>
+                                <span className="font-medium text-gray-900">
+                                  {college.name.replace('College - ', '')}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-4 px-6">
+                              <span className="font-semibold text-gray-900">
+                                {(college.registered_voters || 0).toLocaleString('fr-FR')}
+                              </span>
+                            </TableCell>
+                            <TableCell className="py-4 px-6 font-semibold text-orange-600">
+                              {college.seats_to_fill || 0}
+                            </TableCell>
+                            {canManage && (
+                              <TableCell className="py-4 px-6 text-center">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleEditBureau(college)}
+                                  className="p-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50 border-orange-200 hover:border-orange-300 transition-all duration-200"
+                                  title="Modifier ce collège"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Section Bureaux de Vote - Design moderne */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             {/* Header de la section */}
@@ -260,7 +364,9 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                   </div>
                   <div>
                     <h3 className="text-lg sm:text-xl font-bold text-gray-900">Bureaux de Vote</h3>
-                    <p className="text-green-700 text-sm">{bureaux.length} bureau{bureaux.length > 1 ? 'x' : ''} configuré{bureaux.length > 1 ? 's' : ''}</p>
+                    <p className="text-green-700 text-sm">
+                      {physicalBureaux.length} bureau{physicalBureaux.length > 1 ? 'x' : ''} {isProfessional ? 'physique' : ''}{physicalBureaux.length > 1 ? 's' : ''} configuré{physicalBureaux.length > 1 ? 's' : ''}
+                    </p>
                   </div>
                 </div>
                 {canManage && (
@@ -285,7 +391,7 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                   <h4 className="text-lg font-bold text-gray-900">Nouveau Bureau de Vote</h4>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
                   <div className="space-y-2">
                     <Label htmlFor="bureauName" className="text-sm font-medium text-gray-700">
                       Nom du Bureau *
@@ -295,6 +401,18 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                       value={newBureau.name}
                       onChange={(e) => setNewBureau({ ...newBureau, name: e.target.value })}
                       placeholder="Ex: Bureau 05"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="bureauLieuVote" className="text-sm font-medium text-gray-700">
+                      Lieu de Vote
+                    </Label>
+                    <Input
+                      id="bureauLieuVote"
+                      value={newBureau.lieu_vote}
+                      onChange={(e) => setNewBureau({ ...newBureau, lieu_vote: e.target.value })}
+                      placeholder="Ex: Salle Polyvalente"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                     />
                   </div>
@@ -342,7 +460,7 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mb-4"></div>
                   <p className="text-gray-600 font-medium">Chargement des bureaux...</p>
                 </div>
-              ) : bureaux.length === 0 ? (
+              ) : physicalBureaux.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="p-4 bg-gray-100 rounded-full mb-4">
                     <Building className="w-8 h-8 text-gray-400" />
@@ -365,12 +483,12 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                     <TableHeader>
                       <TableRow className="bg-gray-50">
                         <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6">Nom du Bureau</TableHead>
-                        <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6">Électeurs Inscrits</TableHead>
+                        <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6">Lieu</TableHead>
                         <TableHead className="text-sm font-semibold text-gray-700 py-4 px-6 text-center">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {bureaux.map((bureau, index) => (
+                      {physicalBureaux.map((bureau, index) => (
                         <TableRow 
                           key={bureau.id} 
                           className={`hover:bg-gray-50 transition-colors ${
@@ -385,15 +503,8 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                               <span className="font-medium text-gray-900">{bureau.name}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="py-4 px-6">
-                            <div className="flex items-center gap-2">
-                              <div className="p-1.5 bg-blue-100 rounded-md">
-                                <Users className="w-3 h-3 text-blue-600" />
-                              </div>
-                              <span className="font-semibold text-[#1e40af]">
-                                {(bureau.registered_voters || 0).toLocaleString('fr-FR')}
-                              </span>
-                            </div>
+                          <TableCell className="py-4 px-6 text-gray-600 text-sm font-medium">
+                            {bureau.lieu_vote || 'Non renseigné'}
                           </TableCell>
                           <TableCell className="py-4 px-6">
                             <div className="flex items-center justify-center gap-2">
@@ -437,14 +548,19 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose }
                     <Users className="w-4 h-4 text-white" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-gray-900">Résumé des Bureaux</h4>
+                    <h4 className="font-semibold text-gray-900">
+                      {isProfessional ? 'Résumé de l\'Établissement' : 'Résumé des Bureaux'}
+                    </h4>
                     <p className="text-sm text-gray-600">Total des électeurs inscrits</p>
                   </div>
                 </div>
                 <div className="text-right">
-                <div className="text-2xl sm:text-3xl font-bold text-[#1e40af]">
-                  {bureaux.reduce((sum, bureau) => sum + (bureau.registered_voters || 0), 0).toLocaleString('fr-FR')}
-                </div>
+                  <div className="text-2xl sm:text-3xl font-bold text-[#1e40af]">
+                    {(isProfessional 
+                      ? colleges.reduce((sum, c) => sum + (c.registered_voters || 0), 0)
+                      : physicalBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0)
+                    ).toLocaleString('fr-FR')}
+                  </div>
                   <p className="text-sm text-gray-600">électeurs inscrits</p>
                 </div>
               </div>

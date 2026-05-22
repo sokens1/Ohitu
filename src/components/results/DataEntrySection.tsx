@@ -75,6 +75,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
             voting_bureaux(
               id,
               name,
+              election_id,
               procès_verbaux(
                 id,
                 status,
@@ -95,7 +96,8 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
 
         // Transformer les données Supabase
         const transformedCenters = data?.map(center => {
-          const bureaux = center.voting_bureaux?.map((bureau: any) => {
+          const filteredBureaux = (center.voting_bureaux || []).filter((b: any) => b.election_id === selectedElection);
+          const bureaux = filteredBureaux.map((bureau: any) => {
             const pvsForElection = (bureau.procès_verbaux || []).filter((pv: any) => pv.election_id === selectedElection);
             const pv = pvsForElection.sort((a: any, b: any) => new Date(b.entered_at || 0).getTime() - new Date(a.entered_at || 0).getTime())[0];
             return {
@@ -119,9 +121,9 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return {
             id: center.id.toString(),
             name: center.name,
-            totalBureaux: center.voting_bureaux?.length || 0,
+            totalBureaux: filteredBureaux.length,
             bureauxSaisis,
-            status: bureauxSaisis === center.voting_bureaux?.length ? 'completed' : 
+            status: filteredBureaux.length > 0 && bureauxSaisis === filteredBureaux.length ? 'completed' : 
                    bureauxSaisis > 0 ? 'in-progress' : 'pending',
             bureaux
           };

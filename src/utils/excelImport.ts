@@ -23,8 +23,8 @@ export function parseEstablishmentsSheet(
   isProfessional: boolean
 ): ParsedVotingCenter[] {
   const estSheet = isProfessional
-    ? workbook.Sheets['Etablissements'] || workbook.Sheets['Établissements & Bureaux']
-    : workbook.Sheets['Établissements & Bureaux'] || workbook.Sheets['Etablissements'];
+    ? workbook.Sheets['Etablissements'] || workbook.Sheets['Établissements & Bureaux'] || workbook.Sheets[workbook.SheetNames[0]]
+    : workbook.Sheets['Établissements & Bureaux'] || workbook.Sheets['Etablissements'] || workbook.Sheets[workbook.SheetNames[0]];
 
   if (!estSheet) {
     throw new Error('La feuille des établissements est introuvable (attendu : « Etablissements »).');
@@ -33,6 +33,15 @@ export function parseEstablishmentsSheet(
   const estRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(estSheet);
   const centerGroups: Record<string, ParsedVotingCenter> = {};
 
+  let bureauxRows: Record<string, unknown>[] = [];
+  if (isProfessional) {
+    const bureauxSheet = workbook.Sheets['Bureaux'] || workbook.Sheets[workbook.SheetNames[1]];
+    if (bureauxSheet) {
+      bureauxRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(bureauxSheet);
+    }
+  }
+
+  // 1. D'abord, on parcourt la feuille 1 (Etablissements) pour enregistrer les établissements, adresses et collèges
   estRows.forEach((row) => {
     const region =
       String(row['Region__Localisation'] || row['Région / Localisation'] || row['Région'] || 'Général').trim();
@@ -45,60 +54,16 @@ export function parseEstablishmentsSheet(
     const phoneRaw = row['Contact_Telephone'] ?? row['Contact Téléphone'];
     const phone = phoneRaw != null && String(phoneRaw).trim() !== '' ? String(phoneRaw).trim() : null;
 
-    const booths: ParsedBooth[] = [];
-    let totalVoters = 0;
-    let boothCount = 0;
+    const lieuVote = String(row['Lieu_vote'] || row['Lieu de vote'] || row['Lieu de Vote'] || '').trim();
+    const address = isProfessional
+      ? [lieuVote, region].filter(Boolean).join(', ')
+      : region;
 
-    if (isProfessional) {
-      const lieuVote = String(row['Lieu_vote'] || '').trim();
-      const vEnc = Number(row['Nbre_electeurs_Encadrement'] || 0);
-      const vCad = Number(row['Nbre_electeurs_Cadre'] || 0);
-      const vMai = Number(row['Nbre _electeurs_Maitrise'] || row['Nbre_electeurs_Maitrise'] || 0);
-      const vExe = Number(row['Nbre _electeurs_Execution'] || row['Nbre_electeurs_Execution'] || 0);
-      const sEnc = Number(row['nb_sieges_Encadrement'] || 0);
-      const sCad = Number(row['nb_sieges_Cadre'] || 0);
-      const sMai = Number(row['nb_sieges_Maitrise'] || 0);
-      const sExe = Number(row['nb_sieges_Execution'] || 0);
-
-      totalVoters = vEnc + vCad + vMai + vExe;
-      boothCount = 1;
-
-      const baseName = lieuVote || name;
-      const addBooth = (suffix: string, voters: number, seats: number) => {
-        if (voters > 0 || seats > 0) {
-          booths.push({
-            name: `${baseName} - ${suffix}`,
-            registered_voters: voters > 0 ? voters : seats,
-          });
-        }
-      };
-
-      addBooth('Encadrement', vEnc, sEnc);
-      addBooth('Cadres', vCad, sCad);
-      addBooth('Maîtrise', vMai, sMai);
-      addBooth('Exécution', vExe, sExe);
-
-      if (booths.length === 0) {
-        const totalSeats = sEnc + sCad + sMai + sExe;
-        booths.push({
-          name: `${baseName} - Bureau unique`,
-          registered_voters: totalVoters > 0 ? totalVoters : totalSeats,
-        });
-      }
-    } else {
-      const boothName = String(row['Nom Bureau de vote'] || '').trim();
-      totalVoters = Number(row["Nombre d'électeurs"] || 0);
-      boothCount = 1;
-      if (boothName) {
-        booths.push({ name: boothName, registered_voters: totalVoters });
-      }
-    }
-
-    const groupKey = `${region}_${name}`;
+    const groupKey = name.toLowerCase();
     if (!centerGroups[groupKey]) {
       centerGroups[groupKey] = {
-        name,
-        address: region,
+        name, // On garde la casse d'origine
+        address,
         contact_name: resp || 'N/A',
         contact_phone: phone,
         voters: 0,
@@ -106,9 +71,126 @@ export function parseEstablishmentsSheet(
         booths: [],
       };
     }
-    centerGroups[groupKey].voters += totalVoters;
-    centerGroups[groupKey].bureaux += boothCount;
-    centerGroups[groupKey].booths.push(...booths);
+
+    if (isProfessional) {
+      const sEnc = Number(row['nb_sieges_Encadrement'] || row['nb_sieges_encadrement'] || row['Nbre_sieges_Encadrement'] || 0);
+      const sCad = Number(row['nb_sieges_Cadre'] || row['nb_sieges_cadre'] || row['Nbre_sieges_Cadre'] || 0);
+      const sMai = Number(row['nb_sieges_Maitrise'] || row['nb_sieges_maitrise'] || row['nb_sieges_Maîtrise'] || row['nb_sieges_maîtrise'] || row['Nbre_sieges_Maitrise'] || 0);
+      const sExe = Number(row['nb_sieges_Execution'] || row['nb_sieges_execution'] || row['nb_sieges_Exécution'] || row['nb_sieges_exécution'] || row['Nbre_sieges_Execution'] || 0);
+
+      // Section 1: Collèges (Encadrement, Cadre, Maîtrise, Exécution)
+      const addCollegeBooth = (collegeSuffix: string, seats: number) => {
+        if (seats > 0) {
+          const collegeBoothName = `College - ${collegeSuffix}`;
+          const exists = centerGroups[groupKey].booths.some(
+            (b) => b.name.toLowerCase() === collegeBoothName.toLowerCase()
+          );
+          if (!exists) {
+            centerGroups[groupKey].booths.push({
+              name: collegeBoothName,
+              registered_voters: 0,
+              seats_to_fill: seats,
+              is_college: true,
+              college: collegeSuffix,
+              lieu_vote: lieuVote
+            } as any);
+          }
+        }
+      };
+
+      addCollegeBooth('Encadrement', sEnc);
+      addCollegeBooth('Cadre', sCad);
+      addCollegeBooth('Maîtrise', sMai);
+      addCollegeBooth('Exécution', sExe);
+    } else {
+      const boothName = String(row['Nom Bureau de vote'] || '').trim();
+      const totalVoters = Number(row["Nombre d'électeurs"] || 0);
+      if (boothName) {
+        const exists = centerGroups[groupKey].booths.some(
+          (b) => b.name.toLowerCase() === boothName.toLowerCase()
+        );
+        if (!exists) {
+          centerGroups[groupKey].booths.push({ name: boothName, registered_voters: totalVoters });
+        }
+      }
+      centerGroups[groupKey].voters += totalVoters;
+    }
+  });
+
+  // 2. Ensuite, s'il s'agit d'une élection professionnelle, on parcourt la deuxième feuille (Bureaux) pour les bureaux de vote physiques
+  if (isProfessional && bureauxRows.length > 0) {
+    bureauxRows.forEach((bRow) => {
+      const estName = String(
+        bRow['Nom_Etablissement__Site'] ||
+        bRow['Nom Établissement / Site'] ||
+        bRow['Site'] ||
+        bRow['Etablissement'] ||
+        ''
+      ).trim();
+
+      if (!estName) return;
+
+      const groupKey = estName.toLowerCase();
+
+      // Si l'établissement existe déjà, on ne cherche pas à le dupliquer (on garde la structure déjà créée)
+      // S'il n'existe pas encore, on l'initialise
+      if (!centerGroups[groupKey]) {
+        const region = String(bRow['Region__Localisation'] || bRow['Région / Localisation'] || bRow['Région'] || 'Général').trim();
+        const lieuVote = String(bRow['Lieu_vote'] || bRow['Lieu de vote'] || bRow['Lieu de Vote'] || '').trim();
+        const address = [lieuVote, region].filter(Boolean).join(', ');
+
+        centerGroups[groupKey] = {
+          name: estName,
+          address,
+          contact_name: 'N/A',
+          contact_phone: null,
+          voters: 0,
+          bureaux: 0,
+          booths: [],
+        };
+      }
+
+      // On récupère le bureau de vote qui est sur la ligne de cet établissement
+      const bName = String(bRow['Bureau'] || bRow['Nom Bureau'] || bRow['Nom du Bureau'] || '').trim();
+      if (bName) {
+        const exists = centerGroups[groupKey].booths.some(
+          (b) => b.name.toLowerCase() === bName.toLowerCase()
+        );
+        if (!exists) {
+          const lieuVote = String(bRow['Lieu_vote'] || bRow['Lieu de vote'] || bRow['Lieu de Vote'] || '').trim();
+          centerGroups[groupKey].booths.push({
+            name: bName,
+            registered_voters: 0,
+            seats_to_fill: 0,
+            is_college: false,
+            college: null,
+            lieu_vote: lieuVote || (centerGroups[groupKey].booths.find((b: any) => b.lieu_vote)?.lieu_vote) || ''
+          } as any);
+        }
+      }
+    });
+  }
+
+  // 3. Post-traitement : s'assurer d'avoir au moins un bureau physique et mettre à jour le compteur 'bureaux'
+  Object.values(centerGroups).forEach((center) => {
+    if (isProfessional) {
+      const hasPhysical = center.booths.some((b: any) => !b.is_college);
+      if (!hasPhysical) {
+        const firstBooth = center.booths[0] as any;
+        const lieuVote = firstBooth?.lieu_vote || '';
+        center.booths.push({
+          name: 'Bureau unique',
+          registered_voters: 0,
+          seats_to_fill: 0,
+          is_college: false,
+          college: null,
+          lieu_vote: lieuVote
+        } as any);
+      }
+      center.bureaux = center.booths.filter((b: any) => !b.is_college).length;
+    } else {
+      center.bureaux = center.booths.length;
+    }
   });
 
   return Object.values(centerGroups);
@@ -130,15 +212,54 @@ export async function importEstablishmentsToElection(
 ): Promise<ImportEstablishmentsResult> {
   const result: ImportEstablishmentsResult = { linked: 0, created: 0, skipped: 0, errors: [] };
 
+  // =======================================================================
+  // NETTOYAGE PREALABLE : Écraser les données précédentes pour cette élection
+  // =======================================================================
+  try {
+    // 1. Supprimer tous les bureaux de vote / collèges rattachés à cette élection
+    await supabase.from('voting_bureaux').delete().eq('election_id', electionId);
+    
+    // 2. Trouver les centres qui étaient liés à cette élection pour nettoyage éventuel
+    const { data: linkedCenters } = await supabase
+      .from('election_centers')
+      .select('center_id')
+      .eq('election_id', electionId);
+      
+    // 3. Supprimer les liens de l'élection avec les centres
+    await supabase.from('election_centers').delete().eq('election_id', electionId);
+    
+    // 4. Nettoyer les centres devenus orphelins
+    if (linkedCenters && linkedCenters.length > 0) {
+      const centerIds = linkedCenters.map(lc => lc.center_id);
+      for (const centerId of centerIds) {
+        const { count } = await supabase
+          .from('election_centers')
+          .select('id', { count: 'exact', head: true })
+          .eq('center_id', centerId);
+
+        if (count === 0) {
+          await supabase.from('voting_centers').delete().eq('id', centerId);
+        }
+      }
+    }
+  } catch (cleanError) {
+    console.warn("Erreur lors du nettoyage préalable à l'import des établissements:", cleanError);
+  }
+  // =======================================================================
+
   for (const center of centers) {
     try {
-      const { data: existing } = await supabase
+      // Pour éviter les conflits 409, on fait une recherche insensible à la casse sur le nom
+      const { data: existingList } = await supabase
         .from('voting_centers')
         .select('id')
-        .eq('name', center.name)
-        .maybeSingle();
+        .ilike('name', center.name.trim())
+        .limit(1);
+
+      const existing = existingList && existingList.length > 0 ? existingList[0] : null;
 
       let centerId: string;
+      const totalSeats = center.booths.reduce((sum, b: any) => sum + (b.is_college ? (b.seats_to_fill || 0) : 0), 0);
 
       if (existing?.id) {
         centerId = existing.id;
@@ -147,8 +268,10 @@ export async function importEstablishmentsToElection(
           contact_name: center.contact_name,
           contact_phone: center.contact_phone,
           total_voters: center.voters,
-          total_bureaux: Math.max(center.bureaux, center.booths.length),
+          total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
+          total_seats: totalSeats
         };
+        // Associer à l'entreprise si nécessaire
         if (enterpriseId) updatePayload.enterprise_id = enterpriseId;
 
         await supabase.from('voting_centers').update(updatePayload).eq('id', centerId);
@@ -157,31 +280,61 @@ export async function importEstablishmentsToElection(
           .from('voting_centers')
           .insert({
             enterprise_id: enterpriseId || null,
-            name: center.name,
+            name: center.name.trim(),
             address: center.address,
             contact_name: center.contact_name,
             contact_phone: center.contact_phone,
             total_voters: center.voters,
-            total_bureaux: Math.max(center.bureaux, center.booths.length),
+            total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
+            total_seats: totalSeats
           })
           .select('id')
           .single();
 
         if (insertErr || !created) {
-          result.errors.push(`${center.name}: ${insertErr?.message || 'insertion impossible'}`);
-          result.skipped++;
-          continue;
+          // Gestion des cas de conflit d'unicité (code 23505 ou message contenant duplicate)
+          if (insertErr?.code === '23505' || insertErr?.message?.includes('duplicate') || insertErr?.message?.includes('already exists')) {
+            const { data: retryList } = await supabase
+              .from('voting_centers')
+              .select('id')
+              .ilike('name', center.name.trim())
+              .limit(1);
+            
+            if (retryList && retryList.length > 0) {
+              centerId = retryList[0].id;
+              const updatePayload: Record<string, unknown> = {
+                address: center.address,
+                contact_name: center.contact_name,
+                contact_phone: center.contact_phone,
+                total_voters: center.voters,
+                total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
+                total_seats: totalSeats
+              };
+              if (enterpriseId) updatePayload.enterprise_id = enterpriseId;
+              await supabase.from('voting_centers').update(updatePayload).eq('id', centerId);
+              result.created++;
+            } else {
+              result.errors.push(`${center.name}: ${insertErr.message}`);
+              result.skipped++;
+              continue;
+            }
+          } else {
+            result.errors.push(`${center.name}: ${insertErr?.message || 'insertion impossible'}`);
+            result.skipped++;
+            continue;
+          }
+        } else {
+          centerId = created.id;
+          result.created++;
         }
-        centerId = created.id;
-        result.created++;
       }
 
       const { data: existingLink } = await supabase
-        .from('election_centers')
-        .select('id')
-        .eq('election_id', electionId)
-        .eq('center_id', centerId)
-        .maybeSingle();
+          .from('election_centers')
+          .select('id')
+          .eq('election_id', electionId)
+          .eq('center_id', centerId)
+          .maybeSingle();
 
       if (!existingLink) {
         const { error: linkErr } = await supabase.from('election_centers').insert({
@@ -198,27 +351,39 @@ export async function importEstablishmentsToElection(
       result.linked++;
 
       if (center.booths.length > 0) {
-        const { data: existingBureaux } = await supabase
-          .from('voting_bureaux')
-          .select('name')
-          .eq('center_id', centerId);
+        for (const booth of center.booths) {
+          const { data: existingBooth } = await supabase
+            .from('voting_bureaux')
+            .select('id')
+            .eq('center_id', centerId)
+            .eq('name', booth.name)
+            .eq('election_id', electionId)
+            .maybeSingle();
 
-        const existingNames = new Set((existingBureaux || []).map((b) => b.name));
-        const toInsert = center.booths
-          .filter((b) => !existingNames.has(b.name))
-          .map((b) => ({
-            center_id: centerId,
-            name: b.name,
-            registered_voters: b.registered_voters,
-            president_name: 'N/A',
-            president_phone: '000000000',
-            urns_count: 0,
-          }));
+          const updatePayload: Record<string, any> = {
+            seats_to_fill: (booth as any).seats_to_fill || 0,
+            registered_voters: booth.registered_voters || 0,
+            election_id: electionId,
+            lieu_vote: (booth as any).lieu_vote || null,
+            college: (booth as any).college || null
+          };
 
-        if (toInsert.length > 0) {
-          const { error: boothErr } = await supabase.from('voting_bureaux').insert(toInsert);
-          if (boothErr) {
-            result.errors.push(`${center.name} (bureaux): ${boothErr.message}`);
+          if (existingBooth) {
+            await supabase
+              .from('voting_bureaux')
+              .update(updatePayload)
+              .eq('id', existingBooth.id);
+          } else {
+            await supabase
+              .from('voting_bureaux')
+              .insert({
+                center_id: centerId,
+                name: booth.name,
+                president_name: 'N/A',
+                president_phone: '000000000',
+                urns_count: 0,
+                ...updatePayload
+              });
           }
         }
       }
@@ -327,40 +492,61 @@ export function parseUnionListsSheet(workbook: WorkBook, isProfessional: boolean
 export function normalizeWizardCandidates(candidates: unknown[]): ParsedUnionList[] {
   if (!Array.isArray(candidates)) return [];
 
-  return candidates
-    .map((raw): ParsedUnionList | null => {
-      const cand = raw as Record<string, unknown>;
-      if (Array.isArray(cand.candidates)) {
-        const entries = cand.candidates as Array<Record<string, unknown>>;
-        const tit = entries.find((c) => String(c.role || '').toLowerCase().includes('titulaire'));
-        const sup = entries.find((c) => String(c.role || '').toLowerCase().includes('suppl'));
-        const party = String(cand.party || '').trim();
-        const name = String(cand.name || '').trim();
-        return {
-          unionAcronym: party,
-          unionName: name || party,
-          college: normalizeCollegeValue(cand.collegeType || cand.college || 'general'),
-          etablissement: String(cand.etablissement || '').trim(),
-          titulaireName: String(tit?.name || '').trim(),
-          titulaireGenre: String(tit?.genre || '').trim(),
-          titulaireAnciennete: String(tit?.anciennete || '').trim(),
-          suppleantName: String(sup?.name || '').trim(),
-          suppleantGenre: String(sup?.genre || '').trim(),
-        };
+  const results: ParsedUnionList[] = [];
+
+  for (const raw of candidates) {
+    const cand = raw as Record<string, unknown>;
+    if (Array.isArray(cand.candidates)) {
+      const entries = cand.candidates as Array<Record<string, unknown>>;
+      const party = String(cand.party || '').trim();
+      const name = String(cand.name || '').trim();
+      const college = normalizeCollegeValue(cand.collegeType || cand.college || 'general');
+      const etablissement = String(cand.etablissement || '').trim();
+
+      const tits = entries.filter((c) => {
+        const r = String(c.role || '').toLowerCase();
+        return r.includes('titulaire') || r.includes('tête') || r.includes('tete');
+      });
+      const sups = entries.filter((c) => {
+        const r = String(c.role || '').toLowerCase();
+        return r.includes('suppl');
+      });
+
+      const maxLen = Math.max(tits.length, sups.length, 1);
+      for (let i = 0; i < maxLen; i++) {
+        const tit = tits[i];
+        const sup = sups[i];
+        if (tit || sup) {
+          results.push({
+            unionAcronym: party,
+            unionName: name || party,
+            college,
+            etablissement,
+            titulaireName: String(tit?.name || '').trim(),
+            titulaireGenre: String(tit?.genre || '').trim(),
+            titulaireAnciennete: String(tit?.anciennete || '').trim(),
+            suppleantName: String(sup?.name || '').trim(),
+            suppleantGenre: String(sup?.genre || '').trim(),
+          });
+        }
       }
-      return {
+    } else {
+      const college = normalizeCollegeValue(cand.college || 'general');
+      results.push({
         unionAcronym: String(cand.unionAcronym || '').trim(),
         unionName: String(cand.unionName || cand.unionAcronym || '').trim(),
-        college: normalizeCollegeValue(cand.college || 'general'),
+        college,
         etablissement: String(cand.etablissement || '').trim(),
         titulaireName: String(cand.titulaireName || '').trim(),
         titulaireGenre: String(cand.titulaireGenre || '').trim(),
         titulaireAnciennete: String(cand.titulaireAnciennete || '').trim(),
         suppleantName: String(cand.suppleantName || '').trim(),
         suppleantGenre: String(cand.suppleantGenre || '').trim(),
-      };
-    })
-    .filter((l): l is ParsedUnionList => !!l && !!(l.unionName || l.unionAcronym || l.titulaireName));
+      });
+    }
+  }
+
+  return results.filter((l) => !!(l.unionName || l.unionAcronym || l.titulaireName));
 }
 
 export interface ImportUnionListsResult {
@@ -404,64 +590,93 @@ export async function importUnionListsToElection(
 ): Promise<ImportUnionListsResult> {
   const result: ImportUnionListsResult = { imported: 0, skipped: 0, errors: [] };
 
+  // =======================================================================
+  // NETTOYAGE PREALABLE : Écraser les listes précédentes pour cette élection
+  // =======================================================================
+  try {
+    // Supprimer l'association de tous les candidats de cette élection
+    await supabase.from('election_candidates').delete().eq('election_id', electionId);
+    // Supprimer les listes de cette élection
+    await supabase.from('union_lists').delete().eq('election_id', electionId);
+  } catch (cleanError) {
+    console.warn("Erreur lors du nettoyage préalable à l'import des listes:", cleanError);
+  }
+  // =======================================================================
+
+  // Group by union & college to combine multiple titulaires/suppleants
+  const groupedListsMap = new Map<string, {
+    unionAcronym: string;
+    unionName: string;
+    college: ParsedUnionList['college'];
+    titulaires: any[];
+    suppleants: any[];
+  }>();
+
   for (const list of lists) {
+    const key = `${(list.unionAcronym || '').trim()}|||${(list.unionName || '').trim()}|||${list.college}`;
+    if (!groupedListsMap.has(key)) {
+      groupedListsMap.set(key, {
+        unionAcronym: list.unionAcronym,
+        unionName: list.unionName,
+        college: list.college,
+        titulaires: [],
+        suppleants: []
+      });
+    }
+
+    const group = groupedListsMap.get(key)!;
+
+    if (list.titulaireName) {
+      const rank = group.titulaires.length + 1;
+      const role = rank === 1 ? 'Tête de liste' : `Titulaire ${rank}`;
+      group.titulaires.push({
+        name: list.titulaireName,
+        role: role,
+        genre: list.titulaireGenre || undefined,
+        anciennete: list.titulaireAnciennete || undefined,
+        etablissement: list.etablissement || undefined,
+      });
+    }
+
+    if (list.suppleantName) {
+      const rank = group.suppleants.length + 1;
+      const role = `Suppléant ${rank}`;
+      group.suppleants.push({
+        name: list.suppleantName,
+        role: role,
+        genre: list.suppleantGenre || undefined,
+      });
+    }
+  }
+
+  for (const group of groupedListsMap.values()) {
     try {
-      const unionId = await resolveUnionId(supabase, list.unionAcronym, list.unionName);
+      const unionId = await resolveUnionId(supabase, group.unionAcronym, group.unionName);
       if (!unionId) {
-        result.errors.push(`${list.unionName || list.unionAcronym}: syndicat introuvable`);
+        result.errors.push(`${group.unionName || group.unionAcronym}: syndicat introuvable`);
         result.skipped++;
         continue;
       }
 
-      const { data: existingList } = await supabase
-        .from('union_lists')
-        .select('id')
-        .eq('election_id', electionId)
-        .eq('union_id', unionId)
-        .eq('college', list.college)
-        .maybeSingle();
-
-      if (existingList?.id) {
-        result.skipped++;
-        continue;
-      }
-
-      const titulaires = [];
-      if (list.titulaireName) {
-        titulaires.push({
-          name: list.titulaireName,
-          role: 'Tête de liste',
-          genre: list.titulaireGenre || undefined,
-          anciennete: list.titulaireAnciennete || undefined,
-          etablissement: list.etablissement || undefined,
-        });
-      }
-      const suppleants = [];
-      if (list.suppleantName) {
-        suppleants.push({
-          name: list.suppleantName,
-          role: 'Suppléant',
-          genre: list.suppleantGenre || undefined,
-        });
-      }
-
+      // Puisqu'on a nettoyé la base de données au début, il n'y a plus de liste existante pour cette élection.
+      // On insère donc directement.
       const { error: listErr } = await supabase.from('union_lists').insert({
         election_id: electionId,
         union_id: unionId,
-        college: list.college,
-        titulaires,
-        suppleants,
+        college: group.college,
+        titulaires: group.titulaires,
+        suppleants: group.suppleants,
       });
 
       if (listErr) {
-        result.errors.push(`${list.unionName}: ${listErr.message}`);
+        result.errors.push(`${group.unionName}: ${listErr.message}`);
         result.skipped++;
       } else {
         result.imported++;
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      result.errors.push(`${list.unionName}: ${msg}`);
+      result.errors.push(`${group.unionName}: ${msg}`);
       result.skipped++;
     }
   }
