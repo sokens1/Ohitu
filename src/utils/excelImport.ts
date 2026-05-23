@@ -79,8 +79,14 @@ export async function parseEstablishmentsSheet(
       const sMai = Number(row['nb_sieges_Maitrise'] || row['nb_sieges_maitrise'] || row['nb_sieges_Maîtrise'] || row['nb_sieges_maîtrise'] || row['Nbre_sieges_Maitrise'] || 0);
       const sExe = Number(row['nb_sieges_Execution'] || row['nb_sieges_execution'] || row['nb_sieges_Exécution'] || row['nb_sieges_exécution'] || row['Nbre_sieges_Execution'] || 0);
 
+      // Récupérer les électeurs par collège
+      const vEnc = Number(row['Nbre_electeurs_Encadrement'] || row['nbre_electeurs_encadrement'] || 0);
+      const vCad = Number(row['Nbre_electeurs_Cadre'] || row['nbre_electeurs_cadre'] || 0);
+      const vMai = Number(row['Nbre _electeurs_Maitrise'] || row['Nbre_electeurs_Maitrise'] || row['nbre_electeurs_maitrise'] || 0);
+      const vExe = Number(row['Nbre _electeurs_Execution'] || row['Nbre_electeurs_Execution'] || row['nbre_electeurs_execution'] || 0);
+
       // Section 1: Collèges (Encadrement, Cadre, Maîtrise, Exécution)
-      const addCollegeBooth = (collegeSuffix: string, seats: number) => {
+      const addCollegeBooth = (collegeSuffix: string, seats: number, voters: number) => {
         if (seats > 0) {
           const collegeBoothName = `College - ${collegeSuffix}`;
           const exists = centerGroups[groupKey].booths.some(
@@ -89,20 +95,20 @@ export async function parseEstablishmentsSheet(
           if (!exists) {
             centerGroups[groupKey].booths.push({
               name: collegeBoothName,
-              registered_voters: 0,
+              registered_voters: voters,
               seats_to_fill: seats,
               is_college: true,
               college: collegeSuffix,
-              lieu_vote: lieuVote
+              lieu_vote: lieuVote,
             } as any);
           }
         }
       };
 
-      addCollegeBooth('Encadrement', sEnc);
-      addCollegeBooth('Cadre', sCad);
-      addCollegeBooth('Maîtrise', sMai);
-      addCollegeBooth('Exécution', sExe);
+      addCollegeBooth('Encadrement', sEnc, vEnc);
+      addCollegeBooth('Cadre', sCad, vCad);
+      addCollegeBooth('Maîtrise', sMai, vMai);
+      addCollegeBooth('Exécution', sExe, vExe);
     } else {
       const boothName = String(row['Nom Bureau de vote'] || '').trim();
       const totalVoters = Number(row["Nombre d'électeurs"] || 0);
@@ -606,80 +612,48 @@ export async function importUnionListsToElection(
   }
   // =======================================================================
 
-  // Group by union & college to combine multiple titulaires/suppleants
-  const groupedListsMap = new Map<string, {
-    unionAcronym: string;
-    unionName: string;
-    college: ParsedUnionList['college'];
-    titulaires: any[];
-    suppleants: any[];
-  }>();
-
+  // Créer une liste distincte par titulaire (candidat)
   for (const list of lists) {
-    const key = `${(list.unionAcronym || '').trim()}|||${(list.unionName || '').trim()}|||${list.college}`;
-    if (!groupedListsMap.has(key)) {
-      groupedListsMap.set(key, {
-        unionAcronym: list.unionAcronym,
-        unionName: list.unionName,
-        college: list.college,
-        titulaires: [],
-        suppleants: []
-      });
-    }
-
-    const group = groupedListsMap.get(key)!;
-
-    if (list.titulaireName) {
-      const rank = group.titulaires.length + 1;
-      const role = rank === 1 ? 'Tête de liste' : `Titulaire ${rank}`;
-      group.titulaires.push({
-        name: list.titulaireName,
-        role: role,
-        genre: list.titulaireGenre || undefined,
-        anciennete: list.titulaireAnciennete || undefined,
-        etablissement: list.etablissement || undefined,
-      });
-    }
-
-    if (list.suppleantName) {
-      const rank = group.suppleants.length + 1;
-      const role = `Suppléant ${rank}`;
-      group.suppleants.push({
-        name: list.suppleantName,
-        role: role,
-        genre: list.suppleantGenre || undefined,
-      });
-    }
-  }
-
-  for (const group of groupedListsMap.values()) {
     try {
-      const unionId = await resolveUnionId(supabase, group.unionAcronym, group.unionName);
+      const unionId = await resolveUnionId(supabase, list.unionAcronym, list.unionName);
       if (!unionId) {
-        result.errors.push(`${group.unionName || group.unionAcronym}: syndicat introuvable`);
+        result.errors.push(`${list.unionName || list.unionAcronym}: syndicat introuvable`);
         result.skipped++;
         continue;
       }
 
-      // Puisqu'on a nettoyé la base de données au début, il n'y a plus de liste existante pour cette élection.
-      // On insère donc directement.
+      // Créer une liste par titulaire
+      const titulaires = list.titulaireName ? [{
+        name: list.titulaireName,
+        role: 'Tête de liste',
+        genre: list.titulaireGenre || undefined,
+        anciennete: list.titulaireAnciennete || undefined,
+        etablissement: list.etablissement || undefined,
+      }] : [];
+
+      const suppleants = list.suppleantName ? [{
+        name: list.suppleantName,
+        role: 'Suppléant',
+        genre: list.suppleantGenre || undefined,
+      }] : [];
+
       const { error: listErr } = await supabase.from('union_lists').insert({
         election_id: electionId,
         union_id: unionId,
-        college: group.college,
-        titulaires: group.titulaires,
-        suppleants: group.suppleants,
+        college: list.college,
+        titulaires: titulaires,
+        suppleants: suppleants,
       });
 
       if (listErr) {
-        result.errors.push(`${group.unionName}: ${listErr.message}`);
+        result.errors.push(`${list.unionName}: ${listErr.message}`);
         result.skipped++;
       } else {
         result.imported++;
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      result.errors.push(`${group.unionName}: ${msg}`);
+      result.errors.push(`${list.unionName}: ${msg}`);
       result.skipped++;
     }
   }

@@ -153,8 +153,33 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
     setIsSubmitting(true);
 
     try {
-      // On passe tout l'objet formData au parent qui gérera l'update complexe
+      // 1. Sauvegarder les données entreprise si présentes
+      if (formData.enterpriseId) {
+        const { error: updateError } = await supabase
+          .from('enterprises')
+          .update({
+            name: formData.enterpriseName,
+            sector: formData.enterpriseSector,
+            administrative_unit: formData.administrativeUnit,
+            total_employees: parseInt(formData.totalEmployees) || 0,
+            employees_by_category: {
+              cadres: parseInt(formData.employeesCadres) || 0,
+              employes: parseInt(formData.employeesEmployes) || 0,
+              ouvriers: parseInt(formData.employeesOuvriers) || 0,
+            },
+          })
+          .eq('id', formData.enterpriseId);
+
+        if (updateError) {
+          console.error('Erreur lors de la mise à jour de l\'entreprise:', updateError);
+          toast.error('Erreur lors de la sauvegarde des données entreprise');
+          return;
+        }
+      }
+
+      // 2. Sauvegarder l'élection
       await onUpdate(formData);
+      toast.success('Élection et entreprise mises à jour avec succès');
       onClose();
     } catch (error) {
       console.error('Erreur lors de la mise à jour:', error);
