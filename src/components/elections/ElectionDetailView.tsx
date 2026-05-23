@@ -1956,7 +1956,23 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         )}
 
         {/* Modales d'édition */}
-        {showEditCenter && selectedCenter && (
+        {showEditCenter && selectedCenter && isProfessional ? (
+          <AddCenterModal
+            editingCenter={selectedCenter}
+            onClose={() => {
+              setShowEditCenter(false);
+              setSelectedCenter(null);
+            }}
+            onEditSubmit={(updatedCenter) => {
+              handleUpdateCenter(updatedCenter);
+              setShowEditCenter(false);
+              setSelectedCenter(null);
+            }}
+            electionId={election.id}
+            enterpriseId={election.enterpriseId}
+            electionType={election.type}
+          />
+        ) : showEditCenter && selectedCenter ? (
           <EditCenterModal
             center={selectedCenter}
             onClose={() => {
@@ -1965,7 +1981,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             }}
             onUpdate={handleUpdateCenter}
           />
-        )}
+        ) : null}
 
         {showEditCandidate && selectedCandidate && (
           <EditCandidateModal

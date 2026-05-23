@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { X, Building, Plus, Search, MapPin, Users } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { ModernForm, ModernFormSection, ModernFormActions, ModernFormGrid } from '@/components/ui/modern-form';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ModernFormGrid } from '@/components/ui/modern-form';
 import { Card } from '@/components/ui/card';
 import MultiSelect from '@/components/ui/multi-select';
 import FloatingInput from '@/components/ui/floating-input';
@@ -26,6 +26,12 @@ interface CollegeData {
   electeurs: number;
 }
 
+interface Bureau {
+  id: string;
+  name: string;
+  college: 'general' | 'cadres' | 'employes' | 'ouvriers';
+}
+
 interface ProSiteFormData {
   region: string;
   name: string;
@@ -44,15 +50,18 @@ interface ProSiteFormData {
 interface AddCenterModalProps {
   onClose: () => void;
   onSubmit: (centers: Center[]) => void;
+  onEditSubmit?: (center: Center) => void;
+  editingCenter?: Center;
   electionId?: string;
   enterpriseId?: string;
   electionType?: string;
 }
 
-const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, electionId, enterpriseId, electionType }) => {
+const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEditSubmit, editingCenter, electionId, enterpriseId, electionType }) => {
   console.log('AddCenterModal - electionType:', electionType);
   const isPro = electionType?.trim() === 'Élection Professionnelle';
-  const [mode, setMode] = useState<'select' | 'create'>('select');
+  const isEditing = !!editingCenter;
+  const [mode, setMode] = useState<'select' | 'create'>(isEditing ? 'create' : 'select');
   const [selectedCenters, setSelectedCenters] = useState<string[]>([]);
   const [centers, setCenters] = useState<Array<{id: string, name: string, address: string, total_voters: number, total_bureaux: number}>>([]);
   const [loading, setLoading] = useState(true);
@@ -156,6 +165,35 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
     loadCenters();
   }, [isPro, enterpriseId]);
 
+  // Charger les données du centre à éditer
+  useEffect(() => {
+    if (isEditing && editingCenter && isPro) {
+      setNewProSite({
+        region: editingCenter.address || '',
+        name: editingCenter.name || '',
+        responsable: editingCenter.responsable || '',
+        contact_phone: editingCenter.contact || '',
+        lieu_vote: '',
+        colleges: {
+          encadrement: { siege: 0, electeurs: 0 },
+          cadre: { siege: 0, electeurs: 0 },
+          maitrise: { siege: 0, electeurs: 0 },
+          execution: { siege: 0, electeurs: 0 }
+        },
+        bureaux: []
+      });
+    } else if (isEditing && editingCenter && !isPro) {
+      setNewSiteSimple({
+        name: editingCenter.name || '',
+        address: editingCenter.address || '',
+        contact_name: editingCenter.responsable || '',
+        contact_phone: editingCenter.contact || '',
+        total_voters: editingCenter.voters || 0,
+        total_bureaux: editingCenter.bureaux || 1
+      });
+    }
+  }, [isEditing, editingCenter, isPro]);
+
   const handleSubmitSelect = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedCenters.length > 0) {
@@ -185,53 +223,85 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
 
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('voting_centers')
-        .insert({
+
+      if (isEditing && editingCenter) {
+        // Mode édition
+        const { error } = await supabase
+          .from('voting_centers')
+          .update({
+            name: newSiteSimple.name,
+            address: newSiteSimple.address,
+            contact_name: newSiteSimple.contact_name,
+            contact_phone: newSiteSimple.contact_phone,
+            total_voters: newSiteSimple.total_voters,
+            total_bureaux: newSiteSimple.total_bureaux
+          })
+          .eq('id', editingCenter.id);
+
+        if (error) throw error;
+
+        const updatedCenter: Center = {
+          ...editingCenter,
           name: newSiteSimple.name,
           address: newSiteSimple.address,
-          contact_name: newSiteSimple.contact_name,
-          contact_phone: newSiteSimple.contact_phone,
-          total_voters: newSiteSimple.total_voters,
-          total_bureaux: newSiteSimple.total_bureaux,
-          enterprise_id: enterpriseId
-        })
-        .select()
-        .single();
+          responsable: newSiteSimple.contact_name,
+          contact: newSiteSimple.contact_phone,
+          voters: newSiteSimple.total_voters,
+          bureaux: newSiteSimple.total_bureaux
+        };
 
-      if (error) throw error;
+        onEditSubmit?.(updatedCenter);
+        toast.success('Centre modifié avec succès');
+      } else {
+        // Mode création
+        const { data: newCenter, error } = await supabase
+          .from('voting_centers')
+          .insert({
+            name: newSiteSimple.name,
+            address: newSiteSimple.address,
+            contact_name: newSiteSimple.contact_name,
+            contact_phone: newSiteSimple.contact_phone,
+            total_voters: newSiteSimple.total_voters,
+            total_bureaux: newSiteSimple.total_bureaux,
+            enterprise_id: enterpriseId
+          })
+          .select()
+          .single();
 
-      if (electionId) {
-        await supabase.from('election_centers').insert({
-          election_id: electionId,
-          center_id: data.id
+        if (error) throw error;
+
+        if (electionId) {
+          await supabase.from('election_centers').insert({
+            election_id: electionId,
+            center_id: newCenter.id
+          });
+        }
+
+        const query = supabase.from('voting_centers').select('*');
+        const { data: updatedCenters } = await query.order('name');
+
+        const transformed = (updatedCenters || []).map((c: any) => ({
+          id: c.id,
+          name: c.name || '',
+          address: c.address || '',
+          totalVoters: c.total_voters || 0,
+          totalBureaux: c.total_bureaux || 0
+        }));
+        setCenters(transformed);
+        setSelectedCenters(prev => [...prev, newCenter.id]);
+
+        setNewSiteSimple({
+          name: '',
+          address: '',
+          contact_name: '',
+          contact_phone: '',
+          total_voters: 0,
+          total_bureaux: 1
         });
+        setMode('select');
+
+        toast.success('Centre créé avec succès');
       }
-
-      const query = supabase.from('voting_centers').select('*');
-      const { data: updatedCenters } = await query.order('name');
-
-      const transformed = (updatedCenters || []).map((c: any) => ({
-        id: c.id,
-        name: c.name || '',
-        address: c.address || '',
-        totalVoters: c.total_voters || 0,
-        totalBureaux: c.total_bureaux || 0
-      }));
-      setCenters(transformed);
-      setSelectedCenters(prev => [...prev, data.id]);
-
-      setNewSiteSimple({
-        name: '',
-        address: '',
-        contact_name: '',
-        contact_phone: '',
-        total_voters: 0,
-        total_bureaux: 1
-      });
-      setMode('select');
-
-      toast.success('Centre créé avec succès');
     } catch (error: any) {
       console.error(error);
       toast.error(`Erreur: ${error.message}`);
@@ -251,7 +321,6 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
       setLoading(true);
 
       // Calculer totaux
-      const totalSeats = Object.values(newProSite.colleges).reduce((sum, c) => sum + c.siege, 0);
       const totalVoters = Object.values(newProSite.colleges).reduce((sum, c) => sum + c.electeurs, 0);
 
       // Calculer le nombre réel de bureaux (collèges avec sièges + bureaux manuels)
@@ -259,28 +328,55 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
       const manualCount = (newProSite.bureaux && newProSite.bureaux.length) || 0;
       const totalBureaux = collegeCount + manualCount;
 
-      const { data, error } = await supabase
-        .from('voting_centers')
-        .insert({
-          name: newProSite.name,
-          address: newProSite.region,
-          contact_name: newProSite.responsable,
-          contact_phone: newProSite.contact_phone,
-          total_voters: totalVoters,
-          total_bureaux: totalBureaux,
-          enterprise_id: enterpriseId
-        })
-        .select()
-        .single();
+      let centerId: string;
 
-      if (error) throw error;
+      if (isEditing && editingCenter) {
+        // Mode édition
+        const { error } = await supabase
+          .from('voting_centers')
+          .update({
+            name: newProSite.name,
+            address: newProSite.region,
+            contact_name: newProSite.responsable,
+            contact_phone: newProSite.contact_phone,
+            total_voters: totalVoters,
+            total_bureaux: totalBureaux
+          })
+          .eq('id', editingCenter.id);
+
+        if (error) throw error;
+        centerId = editingCenter.id;
+
+        // Supprimer les anciens bureaux
+        await supabase.from('voting_bureaux').delete().eq('center_id', centerId);
+      } else {
+        // Mode création
+        const { data, error } = await supabase
+          .from('voting_centers')
+          .insert({
+            name: newProSite.name,
+            address: newProSite.region,
+            contact_name: newProSite.responsable,
+            contact_phone: newProSite.contact_phone,
+            total_voters: totalVoters,
+            total_bureaux: totalBureaux,
+            enterprise_id: enterpriseId
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        centerId = data.id;
+
+        if (electionId) {
+          await supabase.from('election_centers').insert({
+            election_id: electionId,
+            center_id: centerId
+          });
+        }
+      }
 
       if (electionId) {
-        await supabase.from('election_centers').insert({
-          election_id: electionId,
-          center_id: data.id
-        });
-
         // Créer les bureaux des collèges + bureaux manuels
         let bureauxToCreate: any[] = [];
 
@@ -295,7 +391,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
         bureauxToCreate = colleges
           .filter(college => college.siege > 0)
           .map(college => ({
-            center_id: data.id,
+            center_id: centerId,
             election_id: electionId,
             name: college.name,
             registered_voters: college.electeurs,
@@ -308,7 +404,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
         // Ajouter les bureaux manuels supplémentaires
         if (newProSite.bureaux && newProSite.bureaux.length > 0) {
           const manualBureaux = newProSite.bureaux.map(bureau => ({
-            center_id: data.id,
+            center_id: centerId,
             election_id: electionId,
             name: bureau.name,
             registered_voters: 0,
@@ -326,36 +422,52 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
         }
       }
 
-      const query = supabase.from('voting_centers').select('*');
-      const { data: updatedCenters } = await query.order('name');
+      if (isEditing && editingCenter) {
+        // Édition: mettre à jour le centre et fermer
+        const updatedCenter: Center = {
+          ...editingCenter,
+          name: newProSite.name,
+          address: newProSite.region,
+          responsable: newProSite.responsable,
+          contact: newProSite.contact_phone,
+          voters: totalVoters,
+          bureaux: totalBureaux
+        };
+        onEditSubmit?.(updatedCenter);
+        toast.success('Établissement modifié avec succès');
+      } else {
+        // Création: ajouter aux listes et revenir à la sélection
+        const query = supabase.from('voting_centers').select('*');
+        const { data: updatedCenters } = await query.order('name');
 
-      const transformed = (updatedCenters || []).map((c: any) => ({
-        id: c.id,
-        name: c.name || '',
-        address: c.address || '',
-        totalVoters: c.total_voters || 0,
-        totalBureaux: c.total_bureaux || 0
-      }));
-      setCenters(transformed);
-      setSelectedCenters(prev => [...prev, data.id]);
+        const transformed = (updatedCenters || []).map((c: any) => ({
+          id: c.id,
+          name: c.name || '',
+          address: c.address || '',
+          totalVoters: c.total_voters || 0,
+          totalBureaux: c.total_bureaux || 0
+        }));
+        setCenters(transformed);
+        setSelectedCenters(prev => [...prev, centerId]);
 
-      setNewProSite({
-        region: '',
-        name: '',
-        responsable: '',
-        contact_phone: '',
-        lieu_vote: '',
-        colleges: {
-          encadrement: { siege: 0, electeurs: 0 },
-          cadre: { siege: 0, electeurs: 0 },
-          maitrise: { siege: 0, electeurs: 0 },
-          execution: { siege: 0, electeurs: 0 }
-        },
-        bureaux: []
-      });
-      setMode('select');
+        setNewProSite({
+          region: '',
+          name: '',
+          responsable: '',
+          contact_phone: '',
+          lieu_vote: '',
+          colleges: {
+            encadrement: { siege: 0, electeurs: 0 },
+            cadre: { siege: 0, electeurs: 0 },
+            maitrise: { siege: 0, electeurs: 0 },
+            execution: { siege: 0, electeurs: 0 }
+          },
+          bureaux: []
+        });
+        setMode('select');
 
-      toast.success('Établissement créé avec succès');
+        toast.success('Établissement créé avec succès');
+      }
     } catch (error: any) {
       console.error(error);
       toast.error(`Erreur: ${error.message}`);
