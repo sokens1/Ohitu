@@ -38,6 +38,7 @@ interface ProSiteFormData {
     maitrise: CollegeData;
     execution: CollegeData;
   };
+  bureaux: Bureau[];
 }
 
 interface AddCenterModalProps {
