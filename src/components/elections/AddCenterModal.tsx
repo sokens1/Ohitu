@@ -78,8 +78,12 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
       cadre: { siege: 0, electeurs: 0 },
       maitrise: { siege: 0, electeurs: 0 },
       execution: { siege: 0, electeurs: 0 }
-    }
+    },
+    bureaux: []
   });
+
+  // State for adding new bureaux
+  const [newBureau, setNewBureau] = useState({ name: '', college: 'general' as const });
 
   // Charger les centres disponibles
   useEffect(() => {
@@ -274,7 +278,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
         // Créer les bureaux: soit les bureaux manuels, soit les bureaux générés des collèges
         let bureauxToCreate: any[] = [];
 
-        if (newProSite.bureaux.length > 0) {
+        if (newProSite.bureaux && newProSite.bureaux.length > 0) {
           // Utiliser les bureaux manuels
           bureauxToCreate = newProSite.bureaux.map(bureau => ({
             center_id: data.id,
@@ -342,7 +346,6 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
         },
         bureaux: []
       });
-      setNewBureau({ name: '', college: 'general' });
       setMode('select');
 
       toast.success('Établissement créé avec succès');
@@ -506,6 +509,71 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
                     </ModernFormGrid>
                   </Card>
                 ))}
+              </div>
+
+              {/* Bureaux Physiques */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                    <Building className="w-4 h-4" /> Bureaux Physiques
+                  </h4>
+                  <span className="text-sm text-gray-600">{(newProSite.bureaux || []).length} bureau{(newProSite.bureaux || []).length !== 1 ? 'x' : ''}</span>
+                </div>
+
+                {(newProSite.bureaux || []).length > 0 && (
+                  <div className="space-y-2">
+                    {(newProSite.bureaux || []).map((bureau, index) => (
+                      <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">{bureau.name}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setNewProSite({
+                              ...newProSite,
+                              bureaux: newProSite.bureaux.filter((_, i) => i !== index)
+                            });
+                          }}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <Card className="p-4 border border-gray-200">
+                  <h5 className="font-medium text-gray-800 mb-3">Ajouter un bureau</h5>
+                  <div className="space-y-3">
+                    <FloatingInput
+                      label="Nom du bureau"
+                      value={newBureau.name}
+                      onChange={(e) => setNewBureau({...newBureau, name: e.target.value})}
+                      placeholder="Bureau n°1, Bureau A, etc."
+                    />
+                    <Button
+                      type="button"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                      onClick={() => {
+                        if (newBureau.name.trim()) {
+                          setNewProSite({
+                            ...newProSite,
+                            bureaux: [...newProSite.bureaux, { id: Math.random().toString(), name: newBureau.name, college: 'general' }]
+                          });
+                          setNewBureau({ name: '', college: 'general' });
+                        } else {
+                          toast.error('Le nom du bureau est requis');
+                        }
+                      }}
+                    >
+                      <Plus className="w-4 h-4 mr-2" /> Ajouter le bureau
+                    </Button>
+                  </div>
+                </Card>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
