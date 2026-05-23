@@ -254,6 +254,11 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
       const totalSeats = Object.values(newProSite.colleges).reduce((sum, c) => sum + c.siege, 0);
       const totalVoters = Object.values(newProSite.colleges).reduce((sum, c) => sum + c.electeurs, 0);
 
+      // Calculer le nombre réel de bureaux (collèges avec sièges + bureaux manuels)
+      const collegeCount = Object.values(newProSite.colleges).filter(c => c.siege > 0).length;
+      const manualCount = (newProSite.bureaux && newProSite.bureaux.length) || 0;
+      const totalBureaux = collegeCount + manualCount;
+
       const { data, error } = await supabase
         .from('voting_centers')
         .insert({
@@ -262,7 +267,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
           contact_name: newProSite.responsable,
           contact_phone: newProSite.contact_phone,
           total_voters: totalVoters,
-          total_bureaux: 4, // 4 collèges
+          total_bureaux: totalBureaux,
           enterprise_id: enterpriseId
         })
         .select()
@@ -276,12 +281,33 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
           center_id: data.id
         });
 
-        // Créer les bureaux: soit les bureaux manuels, soit les bureaux générés des collèges
+        // Créer les bureaux des collèges + bureaux manuels
         let bureauxToCreate: any[] = [];
 
+        // Générer les bureaux à partir des collèges
+        const colleges = [
+          { name: 'College - Encadrement', college: 'general', ...newProSite.colleges.encadrement },
+          { name: 'College - Cadre', college: 'cadres', ...newProSite.colleges.cadre },
+          { name: 'College - Maîtrise', college: 'employes', ...newProSite.colleges.maitrise },
+          { name: 'College - Exécution', college: 'ouvriers', ...newProSite.colleges.execution }
+        ];
+
+        bureauxToCreate = colleges
+          .filter(college => college.siege > 0)
+          .map(college => ({
+            center_id: data.id,
+            election_id: electionId,
+            name: college.name,
+            registered_voters: college.electeurs,
+            seats_to_fill: college.siege,
+            college: college.college,
+            president_name: 'N/A',
+            president_phone: '000000000'
+          }));
+
+        // Ajouter les bureaux manuels supplémentaires
         if (newProSite.bureaux && newProSite.bureaux.length > 0) {
-          // Utiliser les bureaux manuels
-          bureauxToCreate = newProSite.bureaux.map(bureau => ({
+          const manualBureaux = newProSite.bureaux.map(bureau => ({
             center_id: data.id,
             election_id: electionId,
             name: bureau.name,
@@ -291,27 +317,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
             president_name: 'N/A',
             president_phone: '000000000'
           }));
-        } else {
-          // Auto-générer les bureaux à partir des collèges
-          const colleges = [
-            { name: 'College - Encadrement', college: 'general', ...newProSite.colleges.encadrement },
-            { name: 'College - Cadre', college: 'cadres', ...newProSite.colleges.cadre },
-            { name: 'College - Maîtrise', college: 'employes', ...newProSite.colleges.maitrise },
-            { name: 'College - Exécution', college: 'ouvriers', ...newProSite.colleges.execution }
-          ];
-
-          bureauxToCreate = colleges
-            .filter(college => college.siege > 0)
-            .map(college => ({
-              center_id: data.id,
-              election_id: electionId,
-              name: college.name,
-              registered_voters: college.electeurs,
-              seats_to_fill: college.siege,
-              college: college.college,
-              president_name: 'N/A',
-              president_phone: '000000000'
-            }));
+          bureauxToCreate = [...bureauxToCreate, ...manualBureaux];
         }
 
         // Insérer tous les bureaux
