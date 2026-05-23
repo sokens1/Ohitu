@@ -215,7 +215,10 @@ export default defineConfig(({ mode }) => {
           router: ['react-router-dom'],
           ui: ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-tabs'],
           charts: ['recharts'],
-          utils: ['date-fns', 'clsx', 'tailwind-merge']
+          utils: ['date-fns', 'clsx', 'tailwind-merge'],
+          xlsx: ['xlsx'],
+          supabase: ['@supabase/supabase-js'],
+          query: ['@tanstack/react-query'],
         }
       }
     },

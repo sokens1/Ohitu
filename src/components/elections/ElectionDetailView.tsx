@@ -432,7 +432,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           if (!data) throw new Error("Fichier vide");
           const workbook = XLSX.read(data, { type: 'array' });
           const isPro = election.type === 'Élection Professionnelle';
-          const parsedCenters = parseEstablishmentsSheet(workbook, isPro);
+          const parsedCenters = await parseEstablishmentsSheet(workbook, isPro);
           if (parsedCenters.length === 0) {
             throw new Error('Aucun établissement valide trouvé dans le fichier.');
           }
@@ -560,7 +560,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           if (!data) throw new Error("Fichier vide");
           const workbook = XLSX.read(data, { type: 'array' });
           const isPro = election.type === 'Élection Professionnelle';
-          const parsedLists = parseUnionListsSheet(workbook, isPro);
+          const parsedLists = await parseUnionListsSheet(workbook, isPro);
 
           if (parsedLists.length === 0) {
             throw new Error(
