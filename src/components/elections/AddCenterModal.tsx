@@ -49,7 +49,7 @@ interface ProSiteFormData {
 
 interface AddCenterModalProps {
   onClose: () => void;
-  onSubmit: (centers: Center[]) => void;
+  onSubmit?: (centers: Center[]) => void;
   onEditSubmit?: (center: Center) => void;
   editingCenter?: Center;
   electionId?: string;
@@ -94,6 +94,106 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
 
   // State for adding new bureaux
   const [newBureau, setNewBureau] = useState({ name: '', college: 'general' as const });
+
+  // Mettre à jour le mode quand on passe en édition
+  useEffect(() => {
+    if (isEditing && editingCenter) {
+      setMode('create');
+      // Pré-remplir les champs avec les données existantes
+      if (isPro) {
+        setNewProSite(prev => ({
+          ...prev,
+          region: editingCenter.address || '',
+          name: editingCenter.name || '',
+          responsable: editingCenter.responsable || '',
+          contact_phone: editingCenter.contact || ''
+        }));
+      } else {
+        setNewSiteSimple({
+          name: editingCenter.name || '',
+          address: editingCenter.address || '',
+          contact_name: editingCenter.responsable || '',
+          contact_phone: editingCenter.contact || '',
+          total_voters: editingCenter.voters || 0,
+          total_bureaux: editingCenter.bureaux || 1
+        });
+      }
+    } else if (!isEditing) {
+      setMode('select');
+    }
+  }, [isEditing, editingCenter]);
+
+  // Charger les bureaux existants en mode édition
+  useEffect(() => {
+    if (isEditing && editingCenter && isPro && electionId) {
+      const loadBureaux = async () => {
+        try {
+          console.log('🔍 Chargement des bureaux pour:', editingCenter.id, electionId);
+          const { data: bureaux, error } = await supabase
+            .from('voting_bureaux')
+            .select('*')
+            .eq('center_id', editingCenter.id)
+            .eq('election_id', electionId);
+
+          console.log('📊 Bureaux chargés:', bureaux);
+
+          if (error) {
+            console.error('Erreur Supabase:', error);
+            return;
+          }
+
+          if (bureaux && bureaux.length > 0) {
+            // Extraire les collèges et les bureaux manuels
+            let encadrementData: CollegeData = { siege: 0, electeurs: 0 };
+            let cadreData: CollegeData = { siege: 0, electeurs: 0 };
+            let maitiseData: CollegeData = { siege: 0, electeurs: 0 };
+            let executionData: CollegeData = { siege: 0, electeurs: 0 };
+            const manualBureaux: Bureau[] = [];
+
+            bureaux.forEach((bureau: any) => {
+              // Identifier si c'est un bureau de collège ou manuel par le field 'college'
+              if (bureau.college === 'general' && !bureau.name.includes('College -')) {
+                // C'est un bureau manuel
+                manualBureaux.push({
+                  id: bureau.id,
+                  name: bureau.name,
+                  college: 'general'
+                });
+              } else {
+                // C'est un bureau de collège
+                if (bureau.college === 'general') {
+                  encadrementData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
+                } else if (bureau.college === 'cadres') {
+                  cadreData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
+                } else if (bureau.college === 'employes') {
+                  maitiseData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
+                } else if (bureau.college === 'ouvriers') {
+                  executionData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
+                }
+              }
+            });
+
+            console.log('✅ Collèges et bureaux extraits:', { encadrementData, cadreData, maitiseData, executionData, manualBureaux });
+
+            setNewProSite(prev => ({
+              ...prev,
+              colleges: {
+                encadrement: encadrementData,
+                cadre: cadreData,
+                maitrise: maitiseData,
+                execution: executionData
+              },
+              bureaux: manualBureaux
+            }));
+          }
+        } catch (error) {
+          console.error('Erreur lors du chargement des bureaux:', error);
+        }
+      };
+
+      loadBureaux();
+    }
+  }, [isEditing, editingCenter, electionId, isPro]);
 
   // Charger les centres disponibles
   useEffect(() => {
@@ -486,28 +586,28 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-base sm:text-lg lg:text-xl font-bold text-gray-900 leading-tight">
-                {isPro ? 'Gestion des Établissements' : 'Sélection des Centres de Vote'}
+                {isEditing ? 'Modifier l\'établissement' : (isPro ? 'Gestion des Établissements' : 'Sélection des Centres de Vote')}
               </div>
               <div className="text-xs sm:text-sm text-gray-600 mt-1">
-                {isPro ? 'Gérez les sites physiques de l\'entreprise' : 'Choisissez les centres de vote pour cette élection'}
+                {isEditing ? 'Modifiez les informations de l\'établissement' : (isPro ? 'Gérez les sites physiques de l\'entreprise' : 'Choisissez les centres de vote pour cette élection')}
               </div>
             </div>
           </DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {isPro && (
+          {isPro && !isEditing && (
             <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-lg w-fit mx-auto">
-              <Button 
-                variant={mode === 'select' ? 'default' : 'ghost'} 
+              <Button
+                variant={mode === 'select' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setMode('select')}
                 className="text-xs"
               >
                 <Search className="w-3 h-3 mr-1" /> Sélectionner
               </Button>
-              <Button 
-                variant={mode === 'create' ? 'default' : 'ghost'} 
+              <Button
+                variant={mode === 'create' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setMode('create')}
                 className="text-xs"
@@ -517,7 +617,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
             </div>
           )}
 
-          {mode === 'select' ? (
+          {mode === 'select' && !isEditing ? (
             <form onSubmit={handleSubmitSelect} className="space-y-6">
               <MultiSelect
                 options={(centers || []).map(c => ({
@@ -698,7 +798,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
                 <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
                 <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white" disabled={loading}>
-                  {loading ? 'Création...' : 'Créer et Ajouter'}
+                  {loading ? (isEditing ? 'Modification...' : 'Création...') : (isEditing ? 'Modifier' : 'Créer et Ajouter')}
                 </Button>
               </div>
             </form>
@@ -746,7 +846,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
                 <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
                 <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white" disabled={loading}>
-                  {loading ? 'Création...' : 'Créer et Ajouter'}
+                  {loading ? (isEditing ? 'Modification...' : 'Création...') : (isEditing ? 'Modifier' : 'Créer et Ajouter')}
                 </Button>
               </div>
             </form>

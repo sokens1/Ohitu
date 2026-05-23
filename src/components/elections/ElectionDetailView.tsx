@@ -210,9 +210,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
           console.log(`📍 Centre: ${center.name} | Bureaux: ${bureaux.length} | Électeurs bureaux: ${votersFromBureaux} | Total voters colonne: ${center.total_voters} | Final: ${finalVoters}`);
 
-          // Nombre de bureaux physiques (ignorer les collèges)
-          const physicalBureauxCount = bureaux.filter((b: any) => !b.college && !b.name?.startsWith('College -')).length;
-          const finalBureaux = physicalBureauxCount > 0 ? physicalBureauxCount : (Number(center.total_bureaux) || 0);
+          // Nombre total de bureaux (collèges + manuels)
+          const totalBureauxCount = bureaux.length;
+          const finalBureaux = totalBureauxCount > 0 ? totalBureauxCount : (Number(center.total_bureaux) || 0);
           
           // Nombre de sièges (somme des sièges des collèges)
           const totalSeats = bureaux.reduce((sum: number, b: any) => sum + (Number(b.seats_to_fill) || 0), 0);
@@ -1967,6 +1967,10 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               handleUpdateCenter(updatedCenter);
               setShowEditCenter(false);
               setSelectedCenter(null);
+              // Rafraîchir les données après modification
+              if (onDataChange) {
+                onDataChange();
+              }
             }}
             electionId={election.id}
             enterpriseId={election.enterpriseId}
