@@ -432,7 +432,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, elec
             // Formulaire professionnel avec collèges
             <form onSubmit={handleCreateProSite} className="space-y-6">
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 mb-4">
-                <p className="text-sm text-blue-800">📋 Remplissez les informations de l'établissement et les données par collège</p>
+                <p className="text-sm text-blue-800">Remplissez les informations de l'établissement et les données par collège</p>
               </div>
 
               <ModernFormGrid cols={2}>
