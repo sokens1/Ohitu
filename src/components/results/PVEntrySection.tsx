@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -27,6 +27,7 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 import { getRegisteredVotersLabel, isProfessionalElection } from '@/utils/electionCalculations';
+
 import { useNetworkQuality } from '@/hooks/useNetworkQuality';
 
 interface PVEntrySectionProps {
@@ -39,8 +40,12 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   const [currentStep, setCurrentStep] = useState(1);
   const [electionInfo, setElectionInfo] = useState<any>(null);
   const [candidatesData, setCandidatesData] = useState<any[]>([]);
+  const [electoralColleges, setElectoralColleges] = useState<any[]>([]);
   const [votingCenters, setVotingCenters] = useState<any[]>([]);
   const [votingBureaux, setVotingBureaux] = useState<any[]>([]);
+  // Collèges rattachés à chaque établissement (pseudo-entrées de voting_bureaux avec college non null)
+  // Clé : center_id | Valeur : tableau de { college, seats_to_fill, ... }
+  const [centerCollegesMap, setCenterCollegesMap] = useState<Map<string, any[]>>(new Map());
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -122,67 +127,88 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     toast.info('Brouillon supprimé.');
   };
 
-  // Charger les centres et bureaux de vote depuis Supabase
+  // Charger les établissements/centres et leurs bureaux rattachés à cette élection.
+  // Approche JOIN en une seule requête (inspirée de ElectionDetailView) :
+  //   election_centers → voting_centers → voting_bureaux
+  // Filtre STRICT sur election_id : seuls les bureaux explicitement liés à cette
+  // élection sont chargés, évitant tout mélange avec d'autres scrutins.
   useEffect(() => {
     const loadVotingCenters = async () => {
       if (!selectedElection) return;
-      
+
       try {
-        // Filtrer STRICTEMENT par centres liés à l'élection via table de liaison election_centers
-        const { data: ecRows, error: ecError } = await supabase
+        // Requête JOIN enrichie : college + seats_to_fill permettent de distinguer
+        // les pseudo-entrées "Collège" (métadonnées) des bureaux physiques sélectionnables.
+        const { data, error } = await supabase
           .from('election_centers')
-          .select('center_id')
+          .select(`
+            voting_centers(
+              id, name,
+              voting_bureaux!center_id(id, name, center_id, registered_voters, college_type, election_id, college, seats_to_fill)
+            )
+          `)
           .eq('election_id', selectedElection);
 
-        if (ecError) {
-          console.error('Erreur lors du chargement des election_centers:', ecError);
+        if (error) {
+          console.error('Erreur chargement établissements/bureaux:', error);
           setVotingCenters([]);
           setVotingBureaux([]);
+          setCenterCollegesMap(new Map());
           return;
         }
 
-        const centerIds = (ecRows || []).map((r: any) => r.center_id).filter(Boolean);
-
-        if (centerIds.length === 0) {
+        if (!data || data.length === 0) {
           setVotingCenters([]);
           setVotingBureaux([]);
+          setCenterCollegesMap(new Map());
           return;
         }
 
-        const { data: centers, error: centersError } = await supabase
-          .from('voting_centers')
-          .select('id, name')
-          .in('id', centerIds);
+        const centers: Array<{ id: string; name: string }> = [];
+        const physicalBureaux: Array<any> = [];
+        const collegesMap = new Map<string, any[]>();
 
-        if (centersError) {
-          console.error('Erreur lors du chargement des centres:', centersError);
-          setVotingCenters([]);
-          setVotingBureaux([]);
-          return;
+        // Identifie une pseudo-entrée "Collège" : nom commençant par "College -"
+        // OU colonne `college` renseignée avec seats > 0 (créée à l'import Excel)
+        const isCollegeEntry = (b: any) =>
+          b.name?.startsWith?.('College -') ||
+          (b.college != null && (b.seats_to_fill ?? 0) > 0);
+
+        for (const link of data) {
+          const center = (link as any).voting_centers;
+          if (!center) continue;
+
+          centers.push({ id: center.id, name: center.name });
+
+          // Filtre STRICT sur election_id (même logique que ElectionDetailView)
+          const centerBureaux = (Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [])
+            .filter((b: any) =>
+              b.election_id === selectedElection ||
+              String(b.election_id) === String(selectedElection)
+            );
+
+          // Séparer : pseudo-collèges (métadonnées, affichage uniquement)
+          //          vs bureaux physiques (sélectionnables pour saisie de PV)
+          const collegePseudos = centerBureaux.filter(isCollegeEntry);
+          const physical       = centerBureaux.filter((b: any) => !isCollegeEntry(b));
+
+          physicalBureaux.push(...physical);
+          if (collegePseudos.length > 0) {
+            collegesMap.set(center.id, collegePseudos);
+          }
         }
 
-        setVotingCenters(centers || []);
+        setVotingCenters(centers);
+        setVotingBureaux(physicalBureaux);
+        setCenterCollegesMap(collegesMap);
 
-        const { data: bureaux, error: bureauxError } = await supabase
-          .from('voting_bureaux')
-          .select('id, name, center_id, registered_voters')
-          .in('center_id', centerIds);
-
-        if (bureauxError) {
-          console.error('Erreur lors du chargement des bureaux:', bureauxError);
-          setVotingBureaux([]);
-          return;
-        }
-
-        setVotingBureaux(bureaux || []);
-        
       } catch (error) {
-        console.error('Erreur lors du chargement des centres/bureaux:', error);
+        console.error('Erreur lors du chargement des établissements/bureaux:', error);
         setVotingCenters([]);
         setVotingBureaux([]);
       }
     };
-    
+
     loadVotingCenters();
   }, [selectedElection]);
 
@@ -203,9 +229,17 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         
         if (electionError) throw electionError;
         setElectionInfo(election);
-        
+
+        // Élections pro : charger les collèges électoraux pour connaître les inscrits par collège
+        if (isProfessionalElection(election?.type)) {
+          const { data: colleges } = await supabase
+            .from('electoral_colleges')
+            .select('id, name, college_type, total_voters, seats_to_fill')
+            .eq('election_id', selectedElection);
+          setElectoralColleges(colleges || []);
+        }
+
         // Récupérer les candidats selon le type d'élection
-        // (élection professionnelle → union_lists, standard → election_candidates)
         const mappedCandidates = await resolveCandidatesForElection(
           selectedElection,
           election?.type
@@ -513,6 +547,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         .maybeSingle();
       if (findPvErr) throw findPvErr;
 
+      // Récupérer le college_type du bureau sélectionné (pour élections pro)
+      const bureauInfo = votingBureaux.find(b => b.id === bureauId);
+      const collegeType = bureauInfo?.college_type ?? null;
+
       let pv;
       if (existingPv?.id) {
         const { data: updated, error: updateErr } = await supabase
@@ -524,7 +562,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             votes_expressed,
             status: 'entered',
             entered_at: new Date().toISOString(),
-            pv_photo_url: pvPhotoUrl || undefined
+            pv_photo_url: pvPhotoUrl || undefined,
+            college_type: collegeType,
           })
           .eq('id', existingPv.id)
           .select()
@@ -543,7 +582,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             votes_expressed,
             status: 'entered',
             entered_at: new Date().toISOString(),
-            pv_photo_url: pvPhotoUrl
+            pv_photo_url: pvPhotoUrl,
+            college_type: collegeType,
           })
           .select()
           .single();
@@ -596,7 +636,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       case 1:
         return (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Identification du Bureau de Vote</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              {isProfessionalElection(electionInfo?.type)
+                ? "Identification de l'Établissement et du Bureau"
+                : 'Identification du Bureau de Vote'}
+            </h3>
             
             {loading ? (
               <div className="flex items-center justify-center py-8">
@@ -611,26 +655,38 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   <span className="text-yellow-600 text-xl">⚠️</span>
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  Aucun centre de vote trouvé
+                  {isProfessionalElection(electionInfo?.type)
+                    ? 'Aucun établissement trouvé'
+                    : 'Aucun centre de vote trouvé'}
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  Aucun centre de vote n'est configuré pour cette élection dans la zone géographique correspondante.
+                  {isProfessionalElection(electionInfo?.type)
+                    ? "Aucun établissement n'est rattaché à cette élection professionnelle."
+                    : "Aucun centre de vote n'est configuré pour cette élection dans la zone géographique correspondante."}
                 </p>
                 <p className="text-sm text-gray-500">
-                  Veuillez d'abord configurer les centres de vote dans la section "Gestion des Élections".
+                  {isProfessionalElection(electionInfo?.type)
+                    ? 'Veuillez d\'abord configurer les établissements depuis la section "Gestion des Élections".'
+                    : 'Veuillez d\'abord configurer les centres de vote dans la section "Gestion des Élections".'}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="centre">Centre de Vote</Label>
-                  <Select 
-                    value={formData.centre} 
+                  <Label htmlFor="centre">
+                    {isProfessionalElection(electionInfo?.type) ? 'Établissement' : 'Centre de Vote'}
+                  </Label>
+                  <Select
+                    value={formData.centre}
                     onValueChange={(value) => setFormData({ ...formData, centre: value, bureau: '' })}
                     disabled={loading}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un centre" />
+                      <SelectValue placeholder={
+                        isProfessionalElection(electionInfo?.type)
+                          ? 'Sélectionner un établissement'
+                          : 'Sélectionner un centre'
+                      } />
                     </SelectTrigger>
                     <SelectContent>
                       {votingCenters.map((center) => (
@@ -642,10 +698,17 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
 
                 <div>
                   <Label htmlFor="bureau">Bureau de Vote</Label>
-                  <Select 
-                    value={formData.bureau} 
+                  <Select
+                    value={formData.bureau}
                     onValueChange={async (value) => {
-                      const rv = await fetchRegisteredVotersForBureau(value);
+                      const bureau = votingBureaux.find(b => b.id === value);
+                      // Pour les élections pro, utiliser les inscrits du collège correspondant
+                      let rv = 0;
+                      if (isProfessionalElection(electionInfo?.type) && bureau?.college_type && electoralColleges.length > 0) {
+                        const college = electoralColleges.find(c => c.college_type === bureau.college_type);
+                        rv = college?.total_voters ?? 0;
+                      }
+                      if (!rv) rv = await fetchRegisteredVotersForBureau(value);
                       setFormData({ ...formData, bureau: value, inscrits: String(rv) });
                     }}
                     disabled={!formData.centre || loading}
@@ -654,10 +717,12 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                       <SelectValue placeholder="Sélectionner un bureau" />
                     </SelectTrigger>
                     <SelectContent>
-                      {formData.centre && votingBureaux
+                      {votingBureaux
                         .filter(bureau => bureau.center_id === formData.centre)
                         .map((bureau) => (
-                          <SelectItem key={bureau.id} value={bureau.id}>{bureau.name}</SelectItem>
+                          <SelectItem key={bureau.id} value={bureau.id}>
+                            {bureau.name}
+                          </SelectItem>
                         ))}
                     </SelectContent>
                   </Select>
@@ -668,19 +733,40 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             {formData.bureau && (() => {
               const selectedBureau = votingBureaux.find(b => b.id === formData.bureau);
               const selectedCenter = votingCenters.find(c => c.id === formData.centre);
-              
+              const college = selectedBureau?.college_type
+                ? electoralColleges.find(c => c.college_type === selectedBureau.college_type)
+                : null;
+              const collegeLabel = selectedBureau?.college_type === 'cadres' ? 'Cadres' :
+                                   selectedBureau?.college_type === 'employes' ? 'Maîtrise' :
+                                   selectedBureau?.college_type === 'ouvriers' ? 'Exécution' :
+                                   selectedBureau?.college_type === 'general' ? 'Collège général' : null;
+
               return (
-                <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                  <h4 className="font-medium text-blue-900 mb-2">Information du Bureau</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
+                  <h4 className="font-semibold text-blue-900 text-sm">Récapitulatif du bureau</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                     <div>
-                      <span className="text-blue-700">Centre:</span>
-                      <span className="font-semibold ml-2">{selectedCenter?.name || 'N/A'}</span>
+                      <p className="text-xs text-blue-500 font-medium">
+                        {isProfessionalElection(electionInfo?.type) ? 'Établissement' : 'Centre'}
+                      </p>
+                      <p className="font-semibold text-blue-900">{selectedCenter?.name || '—'}</p>
                     </div>
                     <div>
-                      <span className="text-blue-700">Bureau:</span>
-                      <span className="font-semibold ml-2">{selectedBureau?.name || 'N/A'}</span>
+                      <p className="text-xs text-blue-500 font-medium">Bureau</p>
+                      <p className="font-semibold text-blue-900">{selectedBureau?.name || '—'}</p>
                     </div>
+                    {collegeLabel && (
+                      <div>
+                        <p className="text-xs text-blue-500 font-medium">Collège</p>
+                        <p className="font-semibold text-blue-900">{collegeLabel}</p>
+                      </div>
+                    )}
+                    {college?.seats_to_fill > 0 && (
+                      <div>
+                        <p className="text-xs text-blue-500 font-medium">Sièges à pourvoir</p>
+                        <p className="font-semibold text-blue-900">{college.seats_to_fill}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -764,42 +850,88 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
           </div>
         );
 
-      case 3:
+      case 3: {
+        const isPro = isProfessionalElection(electionInfo?.type);
+        const selectedBureau = votingBureaux.find(b => b.id === formData.bureau);
+        // Pour les élections pro : filtrer les listes du collège du bureau sélectionné
+        const visibleCandidates = isPro && selectedBureau?.college_type
+          ? candidatesData.filter(c => !c.college_type || c.college_type === selectedBureau.college_type)
+          : candidatesData;
+        // Grouper par collège pour affichage (élections pro sans filtre de bureau)
+        const collegeGroups = isPro
+          ? Array.from(new Set(visibleCandidates.map(c => c.college_type || 'general')))
+          : null;
+
         return (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Saisie des Résultats par Candidat</h3>
-            
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              {isPro ? 'Résultats par liste syndicale' : 'Saisie des Résultats par Candidat'}
+            </h3>
+
             <div className="space-y-4">
               {loading ? (
                 <div className="text-center py-4">
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
                   <p className="text-sm text-gray-600">Chargement des candidats...</p>
                 </div>
-              ) : candidatesData.length > 0 ? (
-                candidatesData.map((candidate) => (
-                  <div key={candidate.id} className="p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <h4 className="font-semibold text-gray-900">{candidate.name}</h4>
-                        {candidate.suppleant && (
-                          <p className="text-xs text-gray-700 mt-0.5">Suppléant : {candidate.suppleant}</p>
-                        )}
-                        <p className="text-sm font-medium text-blue-600 mt-0.5">{candidate.party}</p>
+              ) : visibleCandidates.length > 0 ? (
+                collegeGroups ? (
+                  // Élection professionnelle — groupé par collège
+                  collegeGroups.map(ct => {
+                    const groupLabel = ct === 'cadres' ? 'Collège Cadres' : ct === 'employes' ? 'Collège Maîtrise' : ct === 'ouvriers' ? 'Collège Exécution' : 'Collège Général';
+                    const groupCandidates = visibleCandidates.filter(c => (c.college_type || 'general') === ct);
+                    const college = electoralColleges.find(col => col.college_type === ct);
+                    return (
+                      <div key={ct} className="space-y-2">
+                        <div className="flex items-center gap-3">
+                          <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{groupLabel}</h4>
+                          {college?.seats_to_fill > 0 && (
+                            <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                              {college.seats_to_fill} siège{college.seats_to_fill > 1 ? 's' : ''} à pourvoir
+                            </span>
+                          )}
+                        </div>
+                        {groupCandidates.map(candidate => (
+                          <div key={candidate.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-gray-900 text-sm truncate">{candidate.name}</p>
+                              {candidate.suppleant && (
+                                <p className="text-xs text-gray-500 mt-0.5">Suppléant : {candidate.suppleant}</p>
+                              )}
+                            </div>
+                            <div className="w-28 flex-shrink-0">
+                              <Input type="number" placeholder="Voix"
+                                value={formData.candidateVotes[candidate.id] || ''}
+                                onChange={(e) => setFormData({ ...formData, candidateVotes: { ...formData.candidateVotes, [candidate.id]: e.target.value } })}
+                              />
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="w-32">
-                        <Input
-                          type="number"
-                          placeholder="Voix"
-                          value={formData.candidateVotes[candidate.id] || ''}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            candidateVotes: { ...formData.candidateVotes, [candidate.id]: e.target.value }
-                          })}
-                        />
+                    );
+                  })
+                ) : (
+                  // Élection standard
+                  visibleCandidates.map((candidate) => (
+                    <div key={candidate.id} className="p-4 border border-gray-200 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <h4 className="font-semibold text-gray-900">{candidate.name}</h4>
+                          {candidate.suppleant && (
+                            <p className="text-xs text-gray-700 mt-0.5">Suppléant : {candidate.suppleant}</p>
+                          )}
+                          <p className="text-sm font-medium text-blue-600 mt-0.5">{candidate.party}</p>
+                        </div>
+                        <div className="w-32">
+                          <Input type="number" placeholder="Voix"
+                            value={formData.candidateVotes[candidate.id] || ''}
+                            onChange={(e) => setFormData({ ...formData, candidateVotes: { ...formData.candidateVotes, [candidate.id]: e.target.value } })}
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  ))
+                )
               ) : (
                 <div className="text-center py-4 text-gray-500">
                   <Users className="w-8 h-8 mx-auto mb-2 text-gray-400" />
@@ -835,6 +967,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             </div>
           </div>
         );
+      } // fin case 3
 
       case 4:
         return (
@@ -1063,9 +1196,12 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             return hasContext ? (
               <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded flex items-center justify-between text-sm text-blue-900">
                 <div>
-                  <span>Centre: <span className="font-semibold">{centerName}</span></span>
+                  <span>
+                    {isProfessionalElection(electionInfo?.type) ? 'Établissement' : 'Centre'} :{' '}
+                    <span className="font-semibold">{centerName}</span>
+                  </span>
                   <span className="mx-2">•</span>
-                  <span>Bureau: <span className="font-semibold">{bureauName}</span></span>
+                  <span>Bureau : <span className="font-semibold">{bureauName}</span></span>
                 </div>
                 {formData.inscrits && (
                   <div className="text-blue-800">{getRegisteredVotersLabel(electionInfo?.type)}: <span className="font-semibold">{formData.inscrits}</span></div>

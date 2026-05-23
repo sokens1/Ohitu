@@ -159,7 +159,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
           const data = event.target?.result;
           if (!data) return;
           const workbook = XLSX.read(data, { type: 'array' });
-          const parsedCenters = parseEstablishmentsSheet(workbook, true);
+          const parsedCenters = await parseEstablishmentsSheet(workbook, true);
 
           if (!parsedCenters || parsedCenters.length === 0) {
             toast.error("Le fichier Excel semble vide ou mal formaté.");
@@ -245,7 +245,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
           const data = event.target?.result;
           if (!data) return;
           const workbook = XLSX.read(data, { type: 'array' });
-          const parsedLists = parseUnionListsSheet(workbook, true);
+          const parsedLists = await parseUnionListsSheet(workbook, true);
 
           if (parsedLists.length === 0) {
             toast.error('Aucune liste dans le fichier. Remplissez des lignes sous les en-têtes (feuille « Listes »).');
