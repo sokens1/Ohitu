@@ -100,10 +100,11 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
 
         // Transformer les données
         const transformedCenters = data?.map(center => {
-          // Bureaux de ce centre liés à cette élection (election_id si renseigné, sinon tous)
+          // Filtre STRICT : uniquement les bureaux explicitement liés à cette élection
+          // (même logique que ElectionDetailView — on n'accepte plus les bureaux sans election_id)
           const centerBureaux = (bureauxData || []).filter((b: any) =>
             b.center_id === center.id &&
-            (!b.election_id || b.election_id === selectedElection)
+            (b.election_id === selectedElection || String(b.election_id) === String(selectedElection))
           );
           const bureaux = centerBureaux.map((bureau: any) => {
             const pv = pvMap.get(bureau.id);
