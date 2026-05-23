@@ -72,7 +72,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         // (election_id sur voting_bureaux si présent, sinon tous les bureaux du centre)
         const { data: bureauxData } = await supabase
           .from('voting_bureaux')
-          .select('id, name, center_id, registered_voters, college_type, election_id')
+          .select('id, name, center_id, registered_voters, college_type, election_id, college, seats_to_fill')
           .in('center_id', centerIds);
 
         // Mapper bureaux_id → PV pour cette élection
@@ -98,13 +98,19 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return;
         }
 
+        // Prédicat : pseudo-entrée collège (ne doit pas apparaître comme bureau saisissable)
+        const isCollegeEntry = (b: any) =>
+          b.name?.startsWith?.('College -') ||
+          (b.college != null && (b.seats_to_fill ?? 0) > 0);
+
         // Transformer les données
         const transformedCenters = data?.map(center => {
-          // Filtre STRICT : uniquement les bureaux explicitement liés à cette élection
+          // Filtre STRICT : uniquement les bureaux physiques liés à cette élection
           // (même logique que ElectionDetailView — on n'accepte plus les bureaux sans election_id)
           const centerBureaux = (bureauxData || []).filter((b: any) =>
             b.center_id === center.id &&
-            (b.election_id === selectedElection || String(b.election_id) === String(selectedElection))
+            (b.election_id === selectedElection || String(b.election_id) === String(selectedElection)) &&
+            !isCollegeEntry(b)
           );
           const bureaux = centerBureaux.map((bureau: any) => {
             const pv = pvMap.get(bureau.id);
