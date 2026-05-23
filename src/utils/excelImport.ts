@@ -1,5 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import * as XLSX from 'xlsx';
 import type { WorkBook } from 'xlsx';
 
 export interface ParsedBooth {
@@ -18,10 +17,12 @@ export interface ParsedVotingCenter {
 }
 
 /** Lit la feuille Établissements (modèle pro ou politique). */
-export function parseEstablishmentsSheet(
+export async function parseEstablishmentsSheet(
   workbook: WorkBook,
   isProfessional: boolean
-): ParsedVotingCenter[] {
+): Promise<ParsedVotingCenter[]> {
+  const { utils } = await import('xlsx');
+
   const estSheet = isProfessional
     ? workbook.Sheets['Etablissements'] || workbook.Sheets['Établissements & Bureaux'] || workbook.Sheets[workbook.SheetNames[0]]
     : workbook.Sheets['Établissements & Bureaux'] || workbook.Sheets['Etablissements'] || workbook.Sheets[workbook.SheetNames[0]];
@@ -30,14 +31,14 @@ export function parseEstablishmentsSheet(
     throw new Error('La feuille des établissements est introuvable (attendu : « Etablissements »).');
   }
 
-  const estRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(estSheet);
+  const estRows = utils.sheet_to_json<Record<string, unknown>>(estSheet);
   const centerGroups: Record<string, ParsedVotingCenter> = {};
 
   let bureauxRows: Record<string, unknown>[] = [];
   if (isProfessional) {
     const bureauxSheet = workbook.Sheets['Bureaux'] || workbook.Sheets[workbook.SheetNames[1]];
     if (bureauxSheet) {
-      bureauxRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(bureauxSheet);
+      bureauxRows = utils.sheet_to_json<Record<string, unknown>>(bureauxSheet);
     }
   }
 
@@ -419,7 +420,9 @@ function normalizeCollegeValue(raw: unknown): ParsedUnionList['college'] {
 }
 
 /** Lit la feuille Listes (modèle pro) ou Candidats & Syndicats (politique). */
-export function parseUnionListsSheet(workbook: WorkBook, isProfessional: boolean): ParsedUnionList[] {
+export async function parseUnionListsSheet(workbook: WorkBook, isProfessional: boolean): Promise<ParsedUnionList[]> {
+  const { utils } = await import('xlsx');
+
   const listSheet = isProfessional
     ? workbook.Sheets['Listes'] || workbook.Sheets['Candidats']
     : workbook.Sheets['Candidats & Syndicats'] || workbook.Sheets['Candidats'] || workbook.Sheets['Listes'];
@@ -432,7 +435,7 @@ export function parseUnionListsSheet(workbook: WorkBook, isProfessional: boolean
     );
   }
 
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(listSheet);
+  const rows = utils.sheet_to_json<Record<string, unknown>>(listSheet);
   const lists: ParsedUnionList[] = [];
 
   rows.forEach((row) => {
