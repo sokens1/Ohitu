@@ -68,24 +68,28 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         const { data: usersData } = await supabase.from('users').select('id, name');
         const usersMap = new Map(usersData?.map((u: any) => [u.id, u.name]) || []);
 
+        // Récupérer les bureaux directement liés à cette élection pour être robuste
+        // (election_id sur voting_bureaux si présent, sinon tous les bureaux du centre)
+        const { data: bureauxData } = await supabase
+          .from('voting_bureaux')
+          .select('id, name, center_id, registered_voters, college_type, election_id')
+          .in('center_id', centerIds);
+
+        // Mapper bureaux_id → PV pour cette élection
+        const allBureauIds = (bureauxData || []).map((b: any) => b.id);
+        let pvMap: Map<string, any> = new Map();
+        if (allBureauIds.length > 0) {
+          const { data: pvRows } = await supabase
+            .from('procès_verbaux')
+            .select('id, bureau_id, status, entered_by, entered_at, anomalies, college_type')
+            .eq('election_id', selectedElection)
+            .in('bureau_id', allBureauIds);
+          (pvRows || []).forEach((pv: any) => pvMap.set(pv.bureau_id, pv));
+        }
+
         const { data, error } = await supabase
           .from('voting_centers')
-          .select(`
-            *,
-            voting_bureaux(
-              id,
-              name,
-              election_id,
-              procès_verbaux(
-                id,
-                status,
-                entered_by,
-                entered_at,
-                election_id,
-                anomalies
-              )
-            )
-          `)
+          .select('id, name, address')
           .in('id', centerIds)
           .order('name', { ascending: true });
 
@@ -94,23 +98,27 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return;
         }
 
-        // Transformer les données Supabase
+        // Transformer les données
         const transformedCenters = data?.map(center => {
-          const filteredBureaux = (center.voting_bureaux || []).filter((b: any) => b.election_id === selectedElection);
-          const bureaux = filteredBureaux.map((bureau: any) => {
-            const pvsForElection = (bureau.procès_verbaux || []).filter((pv: any) => pv.election_id === selectedElection);
-            const pv = pvsForElection.sort((a: any, b: any) => new Date(b.entered_at || 0).getTime() - new Date(a.entered_at || 0).getTime())[0];
+          // Bureaux de ce centre liés à cette élection (election_id si renseigné, sinon tous)
+          const centerBureaux = (bureauxData || []).filter((b: any) =>
+            b.center_id === center.id &&
+            (!b.election_id || b.election_id === selectedElection)
+          );
+          const bureaux = centerBureaux.map((bureau: any) => {
+            const pv = pvMap.get(bureau.id);
             return {
               id: bureau.id.toString(),
               name: bureau.name,
+              college_type: bureau.college_type ?? null,
+              registered_voters: bureau.registered_voters ?? 0,
               status: pv?.status || 'pending',
               agent: pv?.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : '',
-              time: pv?.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
+              time: pv?.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', {
+                hour: '2-digit', minute: '2-digit'
               }) : '',
               dateStr: pv?.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') : '',
-              anomaly: pv?.anomalies || null
+              anomaly: pv?.anomalies || null,
             };
           }) || [];
 
@@ -121,9 +129,9 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return {
             id: center.id.toString(),
             name: center.name,
-            totalBureaux: filteredBureaux.length,
+            totalBureaux: bureaux.length,
             bureauxSaisis,
-            status: filteredBureaux.length > 0 && bureauxSaisis === filteredBureaux.length ? 'completed' : 
+            status: bureaux.length > 0 && bureauxSaisis === bureaux.length ? 'completed' :
                    bureauxSaisis > 0 ? 'in-progress' : 'pending',
             bureaux
           };
@@ -336,7 +344,21 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                           <div className="flex items-center space-x-3">
                             {getStatusIcon(bureau.status)}
                             <div>
-                              <span className="font-medium text-sm">{bureau.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-sm">{bureau.name}</span>
+                                {bureau.college_type && (
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                                    bureau.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                    bureau.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                    bureau.college_type === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                                    'bg-gray-50 text-gray-600 border-gray-200'
+                                  }`}>
+                                    {bureau.college_type === 'cadres' ? 'Cadres' :
+                                     bureau.college_type === 'employes' ? 'Maîtrise' :
+                                     bureau.college_type === 'ouvriers' ? 'Exécution' : 'Général'}
+                                  </span>
+                                )}
+                              </div>
                               {bureau.agent && (
                                 <div className="flex items-center space-x-1 text-xs text-gray-500 mt-1">
                                   <User className="w-3 h-3" />
@@ -344,9 +366,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                                 </div>
                               )}
                               {bureau.anomaly && (
-                                <div className="text-xs text-red-600 mt-1">
-                                  {bureau.anomaly}
-                                </div>
+                                <div className="text-xs text-red-600 mt-1">{bureau.anomaly}</div>
                               )}
                             </div>
                           </div>

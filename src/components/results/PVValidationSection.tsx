@@ -202,7 +202,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         if (!selectedElection) { setPvs([]); setBureauxMap(new Map()); setCentersMap(new Map()); setLoading(false); return; }
         const { data: pvRows, error: pvErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url, observer_annotation, observer_conformity, observer_id, observer_annotated_at')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url, observer_annotation, observer_conformity, observer_id, observer_annotated_at, college_type')
           .eq('election_id', selectedElection)
           .order('created_at', { ascending: false })
           .limit(500);
@@ -270,6 +270,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
         validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         // Données observateur
+        college_type: (pv.college_type ?? null) as string | null,
         observer_annotation: pv.observer_annotation ?? null,
         observer_conformity: (pv.observer_conformity ?? null) as 'conforme' | 'non_conforme' | null,
         observer_name: pv.observer_id ? (usersMap.get(pv.observer_id) || pv.observer_id) : null,
@@ -607,9 +608,19 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   onClick={() => { setSelectedPV(pv.id); setDetailOpen(true); }}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 flex-wrap gap-1">
                       {getStatusIcon(pv.status)}
                       <span className="font-medium text-gray-900">{pv.bureauLabel}</span>
+                      {pv.college_type && (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                          pv.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                          pv.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                          pv.college_type === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                          'bg-gray-50 text-gray-600 border-gray-200'
+                        }`}>
+                          {pv.college_type === 'cadres' ? 'Cadres' : pv.college_type === 'employes' ? 'Maîtrise' : pv.college_type === 'ouvriers' ? 'Exécution' : 'Général'}
+                        </span>
+                      )}
                     </div>
                     {getPriorityBadge(pv.status)}
                   </div>
@@ -651,14 +662,26 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               {/* ── Timeline circuit de validation ──────────────────────────── */}
               <PVTimeline pv={selectedPVData} />
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center space-x-2 flex-wrap gap-1">
                   {getStatusIcon(selectedPVData.status)}
                   <span className="font-semibold">{(() => {
                     const bureau = bureauxMap.get(pvs.find(p=>p.id===selectedPVData.id)?.bureau_id || '');
                     const center = bureau ? centersMap.get(bureau.center_id) : undefined;
                     return `${center?.name || 'Centre'} - ${bureau?.name || 'Bureau'}`;
                   })()}</span>
+                  {selectedPVData.college_type && (
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                      selectedPVData.college_type === 'cadres'   ? 'bg-orange-100 text-orange-700 border-orange-300' :
+                      selectedPVData.college_type === 'employes' ? 'bg-blue-100 text-blue-700 border-blue-300' :
+                      selectedPVData.college_type === 'ouvriers' ? 'bg-green-100 text-green-700 border-green-300' :
+                      'bg-gray-100 text-gray-600 border-gray-300'
+                    }`}>
+                      {selectedPVData.college_type === 'cadres' ? 'Collège Cadres' :
+                       selectedPVData.college_type === 'employes' ? 'Collège Maîtrise' :
+                       selectedPVData.college_type === 'ouvriers' ? 'Collège Exécution' : 'Collège Général'}
+                    </span>
+                  )}
                 </div>
                 {getPriorityBadge(selectedPVData.status)}
               </div>

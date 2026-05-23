@@ -20,6 +20,7 @@ export interface CandidateInfo {
   name: string;
   party: string;
   suppleant?: string;
+  college_type?: string | null; // cadres | employes | ouvriers | general — pour élections pro
 }
 
 const PRO_ELECTION_TYPE = 'Élection Professionnelle';
@@ -206,6 +207,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
         name: displayName,
         party: displayParty,
         suppleant: suppleantName,
+        college_type: collegeRaw,
       });
     } else {
       // Créer le candidat shadow avec des valeurs 100 % lisibles
@@ -245,6 +247,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
         name: displayName,
         party: displayParty,
         suppleant: suppleantName,
+        college_type: collegeRaw,
       });
     }
   }
