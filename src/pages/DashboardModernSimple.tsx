@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import Layout from '@/components/Layout';
+import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -509,10 +510,48 @@ const DashboardModernSimple = () => {
   if (loading) {
     return (
       <Layout>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-oh-blue mx-auto mb-4"></div>
-            <p className="text-gray-600">Chargement des données du tableau de bord...</p>
+        <div className="space-y-6 pb-8">
+          {/* En-tête */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <Skeleton className="h-9 w-56" />
+            <Skeleton className="h-12 w-full sm:w-80 rounded-2xl" />
+          </div>
+          {/* Cartes de stats */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="rounded-2xl border bg-white p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-3.5 w-24" />
+                  <Skeleton className="h-8 w-8 rounded-xl" />
+                </div>
+                <Skeleton className="h-8 w-20" />
+                <Skeleton className="h-3 w-32" />
+              </div>
+            ))}
+          </div>
+          {/* Graphiques */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="rounded-2xl border bg-white p-6 space-y-4">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-48 w-full rounded-xl" />
+            </div>
+            <div className="rounded-2xl border bg-white p-6 space-y-4">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-48 w-full rounded-xl" />
+            </div>
+          </div>
+          {/* Liste élections */}
+          <div className="rounded-2xl border bg-white p-6 space-y-3">
+            <Skeleton className="h-5 w-36 mb-4" />
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex items-center justify-between p-3 rounded-xl border">
+                <div className="space-y-1.5">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
+                <Skeleton className="h-6 w-20 rounded-full" />
+              </div>
+            ))}
           </div>
         </div>
       </Layout>

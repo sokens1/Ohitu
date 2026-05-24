@@ -35,10 +35,6 @@ export function isProfessionalElection(electionType?: string | null): boolean {
 
 /**
  * Résout la liste de candidats à afficher / utiliser pour la saisie de résultats.
- *
- * @param electionId   UUID de l'élection
- * @param electionType Type de l'élection (string depuis la DB)
- * @returns Tableau de { id, name, party } avec des valeurs toujours lisibles
  */
 export async function resolveCandidatesForElection(
   electionId: string,
@@ -72,7 +68,6 @@ export async function resolveCandidatesForElection(
 
 /**
  * Calcule le nom d'affichage et le parti d'affichage pour une union_list.
- * Ces valeurs sont également celles stockées en DB (toujours lisibles).
  */
 function computeDisplayInfo(ul: any): { displayName: string; displayParty: string; suppleantName: string; etablissementName: string } {
   const union = ul.unions;
@@ -124,42 +119,42 @@ function computeDisplayInfo(ul: any): { displayName: string; displayParty: strin
 
 /**
  * Pour les élections professionnelles :
- *  1. Charge les union_lists de cette élection
- *  2. Charge les election_candidates existants
- *  3. Pour chaque liste, retrouve ou crée le candidat shadow avec des données lisibles
- *  4. Corrige en base les anciens marqueurs "ul:<uuid>" si trouvés
+ *  - CHEMIN RAPIDE : si tous les candidats sont déjà liés, retourne sans aucune écriture DB
+ *  - CHEMIN LENT   : synchronise les candidats shadow manquants (premier chargement / après import)
+ *
+ * Les deux requêtes initiales sont lancées en parallèle.
  */
 async function resolveUnionListsAsCandidates(electionId: string): Promise<CandidateInfo[]> {
-  // 1. Charger les listes syndicales
-  const { data: unionLists, error: ulError } = await supabase
-    .from('union_lists')
-    .select('id, college, titulaires, suppleants, unions(id, name, acronym)')
-    .eq('election_id', electionId);
+  // Chargement parallèle : union_lists + election_candidates en un seul aller-retour réseau
+  const [ulResult, ecResult] = await Promise.all([
+    supabase
+      .from('union_lists')
+      .select('id, college, titulaires, suppleants, unions(id, name, acronym)')
+      .eq('election_id', electionId),
+    supabase
+      .from('election_candidates')
+      .select('candidate_id, candidates(id, name, party)')
+      .eq('election_id', electionId),
+  ]);
 
-  if (ulError) {
-    console.error('[candidateUtils] Erreur union_lists:', ulError);
+  if (ulResult.error) {
+    console.error('[candidateUtils] Erreur union_lists:', ulResult.error);
     return [];
   }
-
-  if (!unionLists || unionLists.length === 0) return [];
-
-  // 2. Charger les election_candidates existants pour cette élection
-  const { data: existingLinks, error: ecError } = await supabase
-    .from('election_candidates')
-    .select('candidate_id, candidates(id, name, party)')
-    .eq('election_id', electionId);
-
-  if (ecError) {
-    console.error('[candidateUtils] Erreur election_candidates (pro):', ecError);
+  if (ecResult.error) {
+    console.error('[candidateUtils] Erreur election_candidates (pro):', ecResult.error);
   }
 
+  const unionLists = ulResult.data ?? [];
+  if (unionLists.length === 0) return [];
+
   // Maps depuis les candidats déjà liés à CETTE élection
-  const byName    = new Map<string, any>();
-  const byParty   = new Map<string, any>();
-  const byUlMarker = new Map<string, any>();
+  const byName      = new Map<string, any>();
+  const byParty     = new Map<string, any>();
+  const byUlMarker  = new Map<string, any>();
   const linkedCandidateIds = new Set<string>();
 
-  (existingLinks ?? []).forEach((link: any) => {
+  (ecResult.data ?? []).forEach((link: any) => {
     const cand = link.candidates;
     if (!cand) return;
     byName.set(cand.name, cand);
@@ -169,7 +164,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
     linkedCandidateIds.add(link.candidate_id);
   });
 
-  // 3. Pré-calcul des noms d'affichage pour toutes les listes
+  // Pré-calcul des noms d'affichage pour toutes les listes
   const ulInfos = (unionLists as any[]).map(ul => {
     const info = computeDisplayInfo(ul);
     const union = ul.unions;
@@ -182,8 +177,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
     return { ul, ...info, collegeRaw, oldDisplayParty };
   });
 
-  // 4. Batch-fetch les candidats DB par nom pour ceux non encore dans byName.
-  //    Évite les 409 liés à l'unicité du nom (candidats partagés entre élections).
+  // Batch-fetch les candidats DB par nom pour ceux non encore dans byName
   const missingNames = ulInfos
     .map(({ displayName }) => displayName)
     .filter(n => !byName.has(n));
@@ -199,10 +193,37 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
     });
   }
 
+  // ─── CHEMIN RAPIDE ────────────────────────────────────────────────────────
+  // Si tous les candidats sont déjà liés → retour immédiat sans aucune écriture
+  const fastResult: CandidateInfo[] = [];
+  let canFastPath = true;
+
+  for (const { ul, displayName, displayParty, suppleantName, etablissementName, collegeRaw, oldDisplayParty } of ulInfos) {
+    const cand = byName.get(displayName)
+              ?? byParty.get(displayParty)
+              ?? byParty.get(oldDisplayParty)
+              ?? byUlMarker.get(ul.id)
+              ?? null;
+    if (!cand || !linkedCandidateIds.has(cand.id)) {
+      canFastPath = false;
+      break;
+    }
+    fastResult.push({
+      id: cand.id,
+      name: displayName,
+      party: displayParty,
+      suppleant: suppleantName,
+      college_type: collegeRaw,
+      etablissement: etablissementName || null,
+    });
+  }
+
+  if (canFastPath && fastResult.length === ulInfos.length) return fastResult;
+
+  // ─── CHEMIN LENT : synchronisation des candidats shadow ───────────────────
   const result: CandidateInfo[] = [];
 
   for (const { ul, displayName, displayParty, suppleantName, etablissementName, collegeRaw, oldDisplayParty } of ulInfos) {
-    // Recherche : nom exact, ou par parti (nouveau ou ancien), ou par marqueur ul:
     let existingCand = byName.get(displayName)
                     ?? byParty.get(displayParty)
                     ?? byParty.get(oldDisplayParty)
@@ -210,27 +231,19 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
                     ?? null;
 
     if (existingCand) {
-      // Corriger le party/nom si nécessaire (seulement si ce candidat est lié à cette élection)
-      const isLinkedToThisElection = linkedCandidateIds.has(existingCand.id);
-      if (isLinkedToThisElection && (existingCand.party !== displayParty || existingCand.name !== displayName)) {
+      const isLinked = linkedCandidateIds.has(existingCand.id);
+      if (isLinked && (existingCand.party !== displayParty || existingCand.name !== displayName)) {
         await supabase
           .from('candidates')
           .update({ party: displayParty, name: displayName })
           .eq('id', existingCand.id);
       }
-
-      // Créer le lien election_candidates s'il n'existe pas encore
-      if (!isLinkedToThisElection) {
+      if (!isLinked) {
         const { error: linkErr } = await supabase
           .from('election_candidates')
           .insert({ election_id: electionId, candidate_id: existingCand.id, is_our_candidate: false });
-        if (linkErr) {
-          console.warn('[candidateUtils] Lien election_candidates déjà existant ou erreur:', linkErr.message);
-        } else {
-          linkedCandidateIds.add(existingCand.id);
-        }
+        if (!linkErr) linkedCandidateIds.add(existingCand.id);
       }
-
       result.push({
         id: existingCand.id,
         name: displayName,
@@ -240,7 +253,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
         etablissement: etablissementName || null,
       });
     } else {
-      // Candidat vraiment nouveau (absent de la DB) — création
+      // Nouveau candidat absent de la DB
       const { data: newCand, error: insertCandErr } = await supabase
         .from('candidates')
         .insert({ name: displayName, party: displayParty, is_our_candidate: false })
@@ -248,7 +261,6 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
         .single();
 
       if (insertCandErr) {
-        // Dernier recours : conflit unique imprévu → chercher par nom
         if ((insertCandErr as any).code === '23505') {
           const { data: foundCand } = await supabase
             .from('candidates')
@@ -268,7 +280,6 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
         continue;
       }
 
-      // Créer le lien election_candidates
       const { error: insertLinkErr } = await supabase
         .from('election_candidates')
         .insert({ election_id: electionId, candidate_id: newCand.id, is_our_candidate: false });

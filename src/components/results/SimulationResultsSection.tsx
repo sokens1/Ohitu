@@ -998,53 +998,48 @@ const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ ele
                 <TrendingUp className="h-4 w-4" />
                 Résultats simulés
               </h3>
-               <div className="flex flex-col sm:flex-row sm:h-48 gap-4">
-                <div className="w-full sm:w-1/2 h-48 sm:h-full">
+               <div className="flex flex-col sm:flex-row gap-4" style={{ minHeight: '10rem' }}>
+                <div className="w-full sm:w-2/5 h-40 sm:h-auto">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={chartData}
                         cx="50%"
                         cy="50%"
-                        outerRadius={60}
+                        outerRadius={55}
                         dataKey="value"
                       >
                         {chartData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip 
-                        formatter={(value: number, name: string, props: any) => [
-                          `${value.toLocaleString()} voix (${props.payload.percentage.toFixed(2)}%)`, 
+                      <Tooltip
+                        formatter={(value: number, _name: string, props: any) => [
+                          `${value.toLocaleString()} voix (${props.payload.percentage.toFixed(1)}%)`,
                           props.payload.name
                         ]}
-                        labelFormatter={(label, payload) => {
-                          if (payload && payload[0]) {
-                            const data = payload[0].payload;
-                            return `${data.name}`;
-                          }
-                          return '';
-                        }}
                         contentStyle={{
                           backgroundColor: 'white',
                           border: '1px solid #e5e7eb',
                           borderRadius: '8px',
-                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                          fontSize: '12px',
+                          maxWidth: '200px',
                         }}
                       />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="w-full sm:w-1/2 flex items-center justify-center py-2">
-                  <div className="space-y-2">
+                {/* Légende compacte scrollable */}
+                <div className="w-full sm:w-3/5 overflow-y-auto max-h-40 pr-1">
+                  <div className="space-y-1">
                     {chartData.map((entry, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <div 
-                          className="w-3 h-3 rounded-full" 
-                          style={{ backgroundColor: entry.color }}
-                        ></div>
-                        <span className="text-xs text-gray-600 font-medium">
+                      <div key={index} className="flex items-center gap-2 min-w-0">
+                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
+                        <span className="text-xs text-gray-700 truncate flex-1" title={entry.name}>
                           {entry.name}
+                        </span>
+                        <span className="text-xs font-bold text-gray-800 flex-shrink-0 ml-1">
+                          {entry.percentage.toFixed(1)}%
                         </span>
                       </div>
                     ))}

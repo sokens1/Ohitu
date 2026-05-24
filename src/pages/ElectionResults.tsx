@@ -19,6 +19,7 @@ import {
   isProfessionalElection,
 } from '@/utils/electionCalculations';
 import { isElectionPublishedForPublic } from '@/utils/electionVisibility';
+import SimulationResultsSection from '@/components/results/SimulationResultsSection';
 
 type CollegeDetailRow = {
   collegeName: string;
@@ -3180,11 +3181,19 @@ const ElectionResults: React.FC = () => {
         </section>
         )}
 
-        {/* Section analyse croisée / simulation — masquée sur la vue publique pour l'instant
-        {showPublicResults && results?.election?.id && (
-          <CrossAnalysisSection electionId={String(results.election.id)} />
-        )}
-        */}
+        {/* Section simulation — visible uniquement si activée ET non masquée pour la vue publique */}
+        {showPublicResults && electionId && (() => {
+          const simVisible  = localStorage.getItem(`sim_visible_${electionId}`) === 'true';
+          const simHidden   = localStorage.getItem(`sim_public_hidden_${electionId}`) !== 'false';
+          if (!simVisible || simHidden) return null;
+          return (
+            <section className="py-6 sm:py-8 bg-white">
+              <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                <SimulationResultsSection electionId={electionId} />
+              </div>
+            </section>
+          );
+        })()}
 
         {/* Section de navigation vers autre élection */}
         {showPublicResults && getAlternativeElection() && (
