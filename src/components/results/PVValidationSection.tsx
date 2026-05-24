@@ -616,9 +616,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           pv.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
                           pv.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                           pv.college_type === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                          pv.college_type === 'general'  ? 'bg-purple-50 text-purple-700 border-purple-200' :
                           'bg-gray-50 text-gray-600 border-gray-200'
                         }`}>
-                          {pv.college_type === 'cadres' ? 'Cadres' : pv.college_type === 'employes' ? 'Maîtrise' : pv.college_type === 'ouvriers' ? 'Exécution' : 'Général'}
+                          {pv.college_type === 'cadres' ? 'Cadres' : pv.college_type === 'employes' ? 'Maîtrise' : pv.college_type === 'ouvriers' ? 'Exécution' : pv.college_type === 'general' ? 'Encadrement' : 'Général'}
                         </span>
                       )}
                     </div>
@@ -675,11 +676,13 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       selectedPVData.college_type === 'cadres'   ? 'bg-orange-100 text-orange-700 border-orange-300' :
                       selectedPVData.college_type === 'employes' ? 'bg-blue-100 text-blue-700 border-blue-300' :
                       selectedPVData.college_type === 'ouvriers' ? 'bg-green-100 text-green-700 border-green-300' :
+                      selectedPVData.college_type === 'general'  ? 'bg-purple-100 text-purple-700 border-purple-300' :
                       'bg-gray-100 text-gray-600 border-gray-300'
                     }`}>
-                      {selectedPVData.college_type === 'cadres' ? 'Collège Cadres' :
+                      {selectedPVData.college_type === 'cadres'   ? 'Collège Cadres' :
                        selectedPVData.college_type === 'employes' ? 'Collège Maîtrise' :
-                       selectedPVData.college_type === 'ouvriers' ? 'Collège Exécution' : 'Collège Général'}
+                       selectedPVData.college_type === 'ouvriers' ? 'Collège Exécution' :
+                       selectedPVData.college_type === 'general'  ? 'Collège Encadrement' : 'Collège Général'}
                     </span>
                   )}
                 </div>

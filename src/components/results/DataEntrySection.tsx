@@ -44,8 +44,8 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     if (!selectedElection) return;
       try {
         setLoading(true);
-        
-        // Filtrer STRICTEMENT par les centres liés via la table de liaison election_centers
+
+        // Étape 1 : récupérer les centre_ids liés à cette élection
         const { data: ecRows, error: ecError } = await supabase
           .from('election_centers')
           .select('center_id')
@@ -64,20 +64,32 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return;
         }
 
-        // Récupérer les utilisateurs pour afficher qui a saisi
-        const { data: usersData } = await supabase.from('users').select('id, name');
-        const usersMap = new Map(usersData?.map((u: any) => [u.id, u.name]) || []);
+        // Étape 2 : requêtes indépendantes en parallèle
+        const [usersResult, bureauxResult, centersResult] = await Promise.all([
+          supabase.from('users').select('id, name'),
+          supabase
+            .from('voting_bureaux')
+            .select('id, name, center_id, registered_voters, college_type, election_id, college, seats_to_fill')
+            .in('center_id', centerIds),
+          supabase
+            .from('voting_centers')
+            .select('id, name, address')
+            .in('id', centerIds)
+            .order('name', { ascending: true }),
+        ]);
 
-        // Récupérer les bureaux directement liés à cette élection pour être robuste
-        // (election_id sur voting_bureaux si présent, sinon tous les bureaux du centre)
-        const { data: bureauxData } = await supabase
-          .from('voting_bureaux')
-          .select('id, name, center_id, registered_voters, college_type, election_id, college, seats_to_fill')
-          .in('center_id', centerIds);
+        const usersMap = new Map((usersResult.data || []).map((u: any) => [u.id, u.name]));
+        const bureauxData = bureauxResult.data;
+        const { data, error } = centersResult;
 
-        // Mapper bureaux_id → PV pour cette élection
+        if (error) {
+          console.error('Erreur lors du chargement des centres de vote:', error);
+          return;
+        }
+
+        // Étape 3 : récupérer les PV (nécessite les bureau_ids de l'étape 2)
         const allBureauIds = (bureauxData || []).map((b: any) => b.id);
-        let pvMap: Map<string, any> = new Map();
+        const pvMap = new Map<string, any>();
         if (allBureauIds.length > 0) {
           const { data: pvRows } = await supabase
             .from('procès_verbaux')
@@ -85,17 +97,6 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
             .eq('election_id', selectedElection)
             .in('bureau_id', allBureauIds);
           (pvRows || []).forEach((pv: any) => pvMap.set(pv.bureau_id, pv));
-        }
-
-        const { data, error } = await supabase
-          .from('voting_centers')
-          .select('id, name, address')
-          .in('id', centerIds)
-          .order('name', { ascending: true });
-
-        if (error) {
-          console.error('Erreur lors du chargement des centres de vote:', error);
-          return;
         }
 
         // Prédicat : pseudo-entrée collège (ne doit pas apparaître comme bureau saisissable)
@@ -358,11 +359,13 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                                     bureau.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
                                     bureau.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                                     bureau.college_type === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                                    bureau.college_type === 'general'  ? 'bg-purple-50 text-purple-700 border-purple-200' :
                                     'bg-gray-50 text-gray-600 border-gray-200'
                                   }`}>
-                                    {bureau.college_type === 'cadres' ? 'Cadres' :
+                                    {bureau.college_type === 'cadres'   ? 'Cadres' :
                                      bureau.college_type === 'employes' ? 'Maîtrise' :
-                                     bureau.college_type === 'ouvriers' ? 'Exécution' : 'Général'}
+                                     bureau.college_type === 'ouvriers' ? 'Exécution' :
+                                     bureau.college_type === 'general'  ? 'Encadrement' : 'Général'}
                                   </span>
                                 )}
                               </div>

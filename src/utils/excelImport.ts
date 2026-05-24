@@ -4,6 +4,11 @@ import type { WorkBook } from 'xlsx';
 export interface ParsedBooth {
   name: string;
   registered_voters: number;
+  seats_to_fill?: number;
+  is_college?: boolean;
+  college?: string | null;
+  college_type?: string | null;
+  lieu_vote?: string;
 }
 
 export interface ParsedVotingCenter {
@@ -165,12 +170,16 @@ export async function parseEstablishmentsSheet(
         );
         if (!exists) {
           const lieuVote = String(bRow['Lieu_vote'] || bRow['Lieu de vote'] || bRow['Lieu de Vote'] || '').trim();
+          // Lecture optionnelle du collège associé à ce bureau physique
+          const rawCollege = bRow['College'] || bRow['Collège'] || bRow['College_type'] || bRow['Type_College'] || null;
+          const college_type = rawCollege ? normalizeCollegeValue(rawCollege) : null;
           centerGroups[groupKey].booths.push({
             name: bName,
             registered_voters: 0,
             seats_to_fill: 0,
             is_college: false,
             college: null,
+            college_type,
             lieu_vote: lieuVote || (centerGroups[groupKey].booths.find((b: any) => b.lieu_vote)?.lieu_vote) || ''
           } as any);
         }
@@ -372,7 +381,8 @@ export async function importEstablishmentsToElection(
             registered_voters: booth.registered_voters || 0,
             election_id: electionId,
             lieu_vote: (booth as any).lieu_vote || null,
-            college: (booth as any).college || null
+            college: (booth as any).college || null,
+            ...(booth.college_type != null ? { college_type: booth.college_type } : {}),
           };
 
           if (existingBooth) {
