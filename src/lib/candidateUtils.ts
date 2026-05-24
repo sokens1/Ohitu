@@ -21,6 +21,7 @@ export interface CandidateInfo {
   party: string;
   suppleant?: string;
   college_type?: string | null; // cadres | employes | ouvriers | general — pour élections pro
+  etablissement?: string | null; // nom de l'établissement — pour filtrage UI
 }
 
 const PRO_ELECTION_TYPE = 'Élection Professionnelle';
@@ -73,12 +74,12 @@ export async function resolveCandidatesForElection(
  * Calcule le nom d'affichage et le parti d'affichage pour une union_list.
  * Ces valeurs sont également celles stockées en DB (toujours lisibles).
  */
-function computeDisplayInfo(ul: any): { displayName: string; displayParty: string } {
+function computeDisplayInfo(ul: any): { displayName: string; displayParty: string; suppleantName: string; etablissementName: string } {
   const union = ul.unions;
   const unionName: string = union?.name || 'Syndicat inconnu';
   const unionAcronym: string = union?.acronym || '';
   const collegeRaw: string = ul.college || 'general';
-  
+
   let college = collegeRaw;
   if (collegeRaw === 'general') college = 'Encadrement';
   else if (collegeRaw === 'cadres') college = 'Cadre';
@@ -90,12 +91,17 @@ function computeDisplayInfo(ul: any): { displayName: string; displayParty: strin
     : `${unionName} — ${college}`;
 
   let titulaireName = '';
+  let etablissementName = '';
   if (Array.isArray(ul.titulaires) && ul.titulaires.length > 0) {
     titulaireName = ul.titulaires[0].name || '';
+    etablissementName = ul.titulaires[0].etablissement || '';
   } else if (typeof ul.titulaires === 'string') {
     try {
       const parsed = JSON.parse(ul.titulaires);
-      if (Array.isArray(parsed) && parsed.length > 0) titulaireName = parsed[0].name || '';
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        titulaireName = parsed[0].name || '';
+        etablissementName = parsed[0].etablissement || '';
+      }
     } catch (e) {}
   }
 
@@ -109,11 +115,11 @@ function computeDisplayInfo(ul: any): { displayName: string; displayParty: strin
     } catch (e) {}
   }
 
-  const displayName = titulaireName 
-    ? titulaireName 
+  const displayName = titulaireName
+    ? titulaireName
     : (unionAcronym ? `Liste ${unionAcronym} (${college})` : `Liste ${unionName} (${college})`);
 
-  return { displayName, displayParty, suppleantName };
+  return { displayName, displayParty, suppleantName, etablissementName };
 }
 
 /**
@@ -147,58 +153,81 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
     console.error('[candidateUtils] Erreur election_candidates (pro):', ecError);
   }
 
-  // Construire deux maps pour retrouver les candidats existants :
-  //   - Par nom exact (stratégie principale)
-  //   - Par ancien marqueur "ul:<uuid>" (rétrocompatibilité)
-  const byName = new Map<string, any>();
-  const byParty = new Map<string, any>();
-  const byUlMarker = new Map<string, any>(); // clé = union_list_id
+  // Maps depuis les candidats déjà liés à CETTE élection
+  const byName    = new Map<string, any>();
+  const byParty   = new Map<string, any>();
+  const byUlMarker = new Map<string, any>();
+  const linkedCandidateIds = new Set<string>();
 
   (existingLinks ?? []).forEach((link: any) => {
     const cand = link.candidates;
     if (!cand) return;
-
     byName.set(cand.name, cand);
-
     const partyStr: string = cand.party || '';
     byParty.set(partyStr, cand);
-    
-    if (partyStr.startsWith('ul:')) {
-      byUlMarker.set(partyStr.slice(3), cand);
-    }
+    if (partyStr.startsWith('ul:')) byUlMarker.set(partyStr.slice(3), cand);
+    linkedCandidateIds.add(link.candidate_id);
   });
 
-  const result: CandidateInfo[] = [];
-
-  for (const ul of unionLists as any[]) {
-    const { displayName, displayParty, suppleantName } = computeDisplayInfo(ul);
-    
-    // Reconstruire l'ancien displayParty au cas où
+  // 3. Pré-calcul des noms d'affichage pour toutes les listes
+  const ulInfos = (unionLists as any[]).map(ul => {
+    const info = computeDisplayInfo(ul);
     const union = ul.unions;
-    const unionName: string = union?.name || 'Syndicat inconnu';
     const unionAcronym: string = union?.acronym || '';
+    const unionName: string = union?.name || 'Syndicat inconnu';
     const collegeRaw: string = ul.college || 'general';
     const oldDisplayParty = unionAcronym
       ? `${unionAcronym} — ${collegeRaw}`
       : `${unionName} — ${collegeRaw}`;
+    return { ul, ...info, collegeRaw, oldDisplayParty };
+  });
 
+  // 4. Batch-fetch les candidats DB par nom pour ceux non encore dans byName.
+  //    Évite les 409 liés à l'unicité du nom (candidats partagés entre élections).
+  const missingNames = ulInfos
+    .map(({ displayName }) => displayName)
+    .filter(n => !byName.has(n));
+
+  if (missingNames.length > 0) {
+    const { data: dbCandidates } = await supabase
+      .from('candidates')
+      .select('id, name, party')
+      .in('name', missingNames);
+
+    (dbCandidates ?? []).forEach((c: any) => {
+      if (!byName.has(c.name)) byName.set(c.name, c);
+    });
+  }
+
+  const result: CandidateInfo[] = [];
+
+  for (const { ul, displayName, displayParty, suppleantName, etablissementName, collegeRaw, oldDisplayParty } of ulInfos) {
     // Recherche : nom exact, ou par parti (nouveau ou ancien), ou par marqueur ul:
-    let existingCand = byName.get(displayName) 
+    let existingCand = byName.get(displayName)
                     ?? byParty.get(displayParty)
                     ?? byParty.get(oldDisplayParty)
-                    ?? byUlMarker.get(ul.id) 
+                    ?? byUlMarker.get(ul.id)
                     ?? null;
 
     if (existingCand) {
-      // Corriger l'ancien party/nom ou mettre à jour le collège si nécessaire
-      if (existingCand.party !== displayParty || existingCand.name !== displayName) {
-        const { error: updateErr } = await supabase
+      // Corriger le party/nom si nécessaire (seulement si ce candidat est lié à cette élection)
+      const isLinkedToThisElection = linkedCandidateIds.has(existingCand.id);
+      if (isLinkedToThisElection && (existingCand.party !== displayParty || existingCand.name !== displayName)) {
+        await supabase
           .from('candidates')
           .update({ party: displayParty, name: displayName })
           .eq('id', existingCand.id);
+      }
 
-        if (updateErr) {
-          console.warn('[candidateUtils] Impossible de corriger party/nom:', updateErr);
+      // Créer le lien election_candidates s'il n'existe pas encore
+      if (!isLinkedToThisElection) {
+        const { error: linkErr } = await supabase
+          .from('election_candidates')
+          .insert({ election_id: electionId, candidate_id: existingCand.id, is_our_candidate: false });
+        if (linkErr) {
+          console.warn('[candidateUtils] Lien election_candidates déjà existant ou erreur:', linkErr.message);
+        } else {
+          linkedCandidateIds.add(existingCand.id);
         }
       }
 
@@ -208,47 +237,50 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
         party: displayParty,
         suppleant: suppleantName,
         college_type: collegeRaw,
+        etablissement: etablissementName || null,
       });
     } else {
-      // Créer le candidat shadow avec des valeurs 100 % lisibles
+      // Candidat vraiment nouveau (absent de la DB) — création
       const { data: newCand, error: insertCandErr } = await supabase
         .from('candidates')
-        .insert({
-          name: displayName,
-          party: displayParty, // lisible directement depuis la DB
-          is_our_candidate: false,
-        })
+        .insert({ name: displayName, party: displayParty, is_our_candidate: false })
         .select('id')
         .single();
 
       if (insertCandErr) {
-        console.error('[candidateUtils] Erreur création candidat shadow:', insertCandErr);
+        // Dernier recours : conflit unique imprévu → chercher par nom
+        if ((insertCandErr as any).code === '23505') {
+          const { data: foundCand } = await supabase
+            .from('candidates')
+            .select('id, name, party')
+            .eq('name', displayName)
+            .maybeSingle();
+          if (foundCand) {
+            byName.set(foundCand.name, foundCand);
+            await supabase
+              .from('election_candidates')
+              .insert({ election_id: electionId, candidate_id: foundCand.id, is_our_candidate: false });
+            result.push({ id: foundCand.id, name: displayName, party: displayParty, suppleant: suppleantName, college_type: collegeRaw, etablissement: etablissementName || null });
+          }
+        } else {
+          console.error('[candidateUtils] Erreur création candidat shadow:', insertCandErr);
+        }
         continue;
       }
 
       // Créer le lien election_candidates
       const { error: insertLinkErr } = await supabase
         .from('election_candidates')
-        .insert({
-          election_id: electionId,
-          candidate_id: newCand.id,
-          is_our_candidate: false,
-        });
+        .insert({ election_id: electionId, candidate_id: newCand.id, is_our_candidate: false });
 
       if (insertLinkErr) {
         console.error('[candidateUtils] Erreur création election_candidates:', insertLinkErr);
-        // Nettoyer le candidat orphelin
         await supabase.from('candidates').delete().eq('id', newCand.id);
         continue;
       }
 
-      result.push({
-        id: newCand.id,
-        name: displayName,
-        party: displayParty,
-        suppleant: suppleantName,
-        college_type: collegeRaw,
-      });
+      linkedCandidateIds.add(newCand.id);
+      result.push({ id: newCand.id, name: displayName, party: displayParty, suppleant: suppleantName, college_type: collegeRaw, etablissement: etablissementName || null });
     }
   }
 
