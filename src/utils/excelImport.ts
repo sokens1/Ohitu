@@ -428,10 +428,11 @@ export interface ParsedUnionList {
 
 function normalizeCollegeValue(raw: unknown): ParsedUnionList['college'] {
   const collegeVal = String(raw || '').toLowerCase();
+  // 'encadrement' doit être testé AVANT 'cadre' car 'encadrement'.includes('cadre') === true
+  if (collegeVal === 'general' || collegeVal.includes('encadrement')) return 'general';
   if (collegeVal.includes('cadre')) return 'cadres';
   if (collegeVal.includes('maitrise') || collegeVal.includes('maîtrise')) return 'employes';
   if (collegeVal.includes('execution') || collegeVal.includes('exécution')) return 'ouvriers';
-  if (collegeVal.includes('encadrement')) return 'general';
   return 'general';
 }
 
