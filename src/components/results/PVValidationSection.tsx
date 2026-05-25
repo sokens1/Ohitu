@@ -87,7 +87,7 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
         : pv.observer_conformity === 'non_conforme'
           ? STEP_COLORS.error
           : hasAnnotation ? STEP_COLORS.info : STEP_COLORS.pending,
-      description: pv.observer_annotation ?? '',
+      description: '',
       isInfo: true
     },
   ];
@@ -881,6 +881,84 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   </div>
                 )}
 
+                {/* ── Annotation observateur ──────────────────────────────── */}
+                {isObserver ? (
+                  /* ── Formulaire d'annotation observateur — ligne unique ── */
+                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3">
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2 px-1">
+                      Annotation observateur
+                    </p>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Remarque ou observation (optionnel)…"
+                        value={observerAnnotation}
+                        onChange={e => setObserverAnnotation(e.target.value)}
+                        className="flex-1 min-w-0 h-10 px-3 text-sm rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:border-slate-400 focus:bg-white transition"
+                      />
+                      <button
+                        type="button"
+                        disabled={savingAnnotation}
+                        onClick={() => submitObserverConformity('conforme')}
+                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
+                          observerConformity === 'conforme'
+                            ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                            : 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                        }`}
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Conforme
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingAnnotation}
+                        onClick={() => submitObserverConformity('non_conforme')}
+                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
+                          observerConformity === 'non_conforme'
+                            ? 'border-red-600 bg-red-600 text-white shadow-sm'
+                            : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
+                        }`}
+                      >
+                        <XCircle className="w-4 h-4" />
+                        Non conforme
+                      </button>
+                    </div>
+                    {savingAnnotation && (
+                      <p className="text-xs text-slate-400 mt-2 px-1 animate-pulse">Enregistrement…</p>
+                    )}
+                  </div>
+                ) : (
+                  /* Autres rôles : annotation sur une seule ligne compacte */
+                  (selectedPVData?.observer_annotation || selectedPVData?.observer_conformity) ? (
+                    <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs">
+                      <PenLine className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                      <span className="font-medium text-slate-600 whitespace-nowrap">
+                        {selectedPVData.observer_name ?? 'Observateur'}
+                      </span>
+                      {selectedPVData.observer_annotated_at_str && (
+                        <span className="text-slate-400 whitespace-nowrap">{selectedPVData.observer_annotated_at_str}</span>
+                      )}
+                      {selectedPVData.observer_conformity && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${
+                          selectedPVData.observer_conformity === 'conforme'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {selectedPVData.observer_conformity === 'conforme'
+                            ? <><CheckCircle className="w-3 h-3" /> Conforme</>
+                            : <><XCircle className="w-3 h-3" /> Non conforme</>
+                          }
+                        </span>
+                      )}
+                      {selectedPVData.observer_annotation && (
+                        <span className="text-slate-600 italic truncate max-w-xs" title={selectedPVData.observer_annotation}>
+                          "{selectedPVData.observer_annotation}"
+                        </span>
+                      )}
+                    </div>
+                  ) : null
+                )}
+
               <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-6">
                 {!editMode && !readOnly && (
                   <Button onClick={() => {
@@ -974,88 +1052,6 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         <RotateCcw className="w-4 h-4 mr-2" />
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
       </Button>}
-                {/* ── Annotation observateur ──────────────────────────────── */}
-                {isObserver ? (
-                  /* ── Formulaire d'annotation observateur — ligne unique ── */
-                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3">
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2 px-1">
-                      Annotation observateur
-                    </p>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      {/* Annotation texte */}
-                      <input
-                        type="text"
-                        placeholder="Remarque ou observation (optionnel)…"
-                        value={observerAnnotation}
-                        onChange={e => setObserverAnnotation(e.target.value)}
-                        className="flex-1 min-w-0 h-10 px-3 text-sm rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:border-slate-400 focus:bg-white transition"
-                      />
-                      {/* Conforme */}
-                      <button
-                        type="button"
-                        disabled={savingAnnotation}
-                        onClick={() => submitObserverConformity('conforme')}
-                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
-                          observerConformity === 'conforme'
-                            ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
-                            : 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                        }`}
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                        Conforme
-                      </button>
-                      {/* Non conforme */}
-                      <button
-                        type="button"
-                        disabled={savingAnnotation}
-                        onClick={() => submitObserverConformity('non_conforme')}
-                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
-                          observerConformity === 'non_conforme'
-                            ? 'border-red-600 bg-red-600 text-white shadow-sm'
-                            : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
-                        }`}
-                      >
-                        <XCircle className="w-4 h-4" />
-                        Non conforme
-                      </button>
-                    </div>
-                    {savingAnnotation && (
-                      <p className="text-xs text-slate-400 mt-2 px-1 animate-pulse">Enregistrement…</p>
-                    )}
-                  </div>
-                ) : (
-                  /* Autres rôles : afficher l'annotation si elle existe */
-                  (selectedPVData?.observer_annotation || selectedPVData?.observer_conformity) ? (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 overflow-hidden">
-                      <div className="flex items-center gap-2 px-4 py-3 bg-slate-100 border-b border-slate-200">
-                        <PenLine className="w-4 h-4 text-slate-500" />
-                        <span className="text-sm font-medium text-slate-700">
-                          Annotation de {selectedPVData.observer_name ?? 'l\'observateur'}
-                        </span>
-                        {selectedPVData.observer_annotated_at_str && (
-                          <span className="ml-auto text-xs text-slate-400">{selectedPVData.observer_annotated_at_str}</span>
-                        )}
-                      </div>
-                      <div className="px-4 py-3 space-y-2">
-                        {selectedPVData.observer_conformity && (
-                          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
-                            selectedPVData.observer_conformity === 'conforme'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-red-100 text-red-700'
-                          }`}>
-                            {selectedPVData.observer_conformity === 'conforme'
-                              ? <><CheckCircle className="w-3.5 h-3.5" /> Conforme</>
-                              : <><XCircle className="w-3.5 h-3.5" /> Non conforme</>
-                            }
-                          </span>
-                        )}
-                        {selectedPVData.observer_annotation && (
-                          <p className="text-sm text-slate-700 italic">"{selectedPVData.observer_annotation}"</p>
-                        )}
-                      </div>
-                    </div>
-                  ) : null
-                )}
 
                 {/* Boutons d'action — masqués pour l'observateur */}
                 {!readOnly && <>
