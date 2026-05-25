@@ -1,3 +1,6 @@
+/* eslint-disable no-empty */
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -1001,15 +1004,34 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         // Pour une élection pro, le collège est connu directement depuis formData.college
         const effectiveCollegeType: string | null = isPro ? (formData.college || null) : null;
         const selectedCenterName = (votingCenters.find(c => c.id === formData.centre)?.name || '').toLowerCase();
+
+        // ── Sièges à pourvoir par collège pour CET établissement ────────────
+        const establishmentSeatsMap = new Map<string, number>();
+        if (isPro && formData.centre) {
+          const collegePseudos = centerCollegesMap.get(formData.centre) || [];
+          if (collegePseudos.length > 0) {
+            collegePseudos.forEach((cp: any) => {
+              const ct = toRawCollegeKey(cp.college_type || cp.college);
+              if (ct) establishmentSeatsMap.set(ct, cp.seats_to_fill ?? 0);
+            });
+          } else {
+            electoralColleges.forEach(ec => {
+              if (ec.college_type) establishmentSeatsMap.set(ec.college_type, ec.seats_to_fill ?? 0);
+            });
+          }
+        }
+
+        // ── Candidats visibles : collège sélectionné + établissement ────────
         const visibleCandidates = isPro
           ? candidatesData.filter(c => {
               const collegeMatch = !effectiveCollegeType || c.college_type === effectiveCollegeType;
-              // Si le candidat a un établissement renseigné, l'afficher uniquement pour cet établissement
+              // Si le candidat a un établissement renseigné, ne l'afficher que pour cet établissement
               const etabMatch = !c.etablissement || c.etablissement.toLowerCase() === selectedCenterName;
               return collegeMatch && etabMatch;
             })
           : candidatesData;
-        // Grouper par collège pour affichage (élections pro)
+
+        // Grouper par collège (uniquement les collèges présents dans les candidats visibles)
         const collegeGroups = isPro
           ? Array.from(new Set(visibleCandidates.map(c => c.college_type || 'general')))
           : null;
@@ -1040,16 +1062,21 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   collegeGroups.map(ct => {
                     const groupLabel = ct === 'cadres' ? 'Collège Cadres' : ct === 'employes' ? 'Collège Maîtrise' : ct === 'ouvriers' ? 'Collège Exécution' : 'Collège Encadrement';
                     const groupCandidates = visibleCandidates.filter(c => (c.college_type || 'general') === ct);
-                    const college = electoralColleges.find(col => toRawCollegeKey(col.college_type) === ct);
                     return (
                       <div key={ct} className="space-y-2">
                         <div className="flex items-center gap-3">
                           <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{groupLabel}</h4>
-                          {college?.seats_to_fill > 0 && (
-                            <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-                              {college.seats_to_fill} siège{college.seats_to_fill > 1 ? 's' : ''} à pourvoir
-                            </span>
-                          )}
+                          {(() => {
+                            // Sièges de l'établissement en priorité, sinon fallback global
+                            const seats = establishmentSeatsMap.get(ct)
+                              ?? electoralColleges.find(col => col.college_type === ct)?.seats_to_fill
+                              ?? 0;
+                            return seats > 0 ? (
+                              <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                                {seats} siège{seats > 1 ? 's' : ''} à pourvoir
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
                         {groupCandidates.map(candidate => {
                           const syndicat = candidate.party?.split(' — ')[0] || '';
