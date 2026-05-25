@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
+import { Skeleton } from '@/components/ui/skeleton';
 import SimulationResultsSection from './SimulationResultsSection';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 import {
@@ -35,6 +36,19 @@ import {
   getRegisteredVotersLabel,
   isProfessionalElection,
 } from '@/utils/electionCalculations';
+
+function dhondt(votes: number[], totalSeats: number): number[] {
+  const seats = new Array(votes.length).fill(0);
+  for (let s = 0; s < totalSeats; s++) {
+    let maxQ = -1, maxIdx = 0;
+    votes.forEach((v, i) => {
+      const q = v / (seats[i] + 1);
+      if (q > maxQ) { maxQ = q; maxIdx = i; }
+    });
+    seats[maxIdx]++;
+  }
+  return seats;
+}
 
 interface PublishSectionProps {
   selectedElection: string;
@@ -63,6 +77,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     availableCenters: { id: string; name: string }[];
     availableColleges: string[];
   } | null>(null);
+  const [seatsByParty, setSeatsByParty] = useState<Record<string, number>>({});
   const [showSimulation, setShowSimulation] = useState(() =>
     selectedElection ? localStorage.getItem(`sim_visible_${selectedElection}`) === 'true' : false
   );
@@ -240,6 +255,43 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         setRawResultsData({ crRows, pvMeta, baseVotesByCandidate: { ...votesByCandidate }, availableCenters, availableColleges });
         setFilterCenter('');
         setFilterCollege('');
+
+        // Calcul des sièges par syndicat (méthode D'Hondt, élections pro uniquement)
+        const newSeatsByParty: Record<string, number> = {};
+        if (isPro) {
+          const { data: electoralColleges } = await supabase
+            .from('electoral_colleges')
+            .select('college_type, seats_to_fill')
+            .eq('election_id', selectedElection);
+          const seatsMap: Record<string, number> = {};
+          (electoralColleges || []).forEach((ec: any) => {
+            seatsMap[ec.college_type] = Number(ec.seats_to_fill) || 0;
+          });
+          const pvToCollege: Record<string, string> = {};
+          filteredPvsAll.forEach((pv: any) => { if (pv.college_type) pvToCollege[pv.id] = pv.college_type; });
+          const collegeKeys = [...new Set(filteredPvsAll.map((pv: any) => pv.college_type).filter(Boolean))] as string[];
+          for (const collegeType of collegeKeys) {
+            const totalSeats = seatsMap[collegeType] || 0;
+            if (totalSeats === 0) continue;
+            const votesByPartyForCollege: Record<string, number> = {};
+            crRows.forEach((r: any) => {
+              if (pvToCollege[r.pv_id] !== collegeType) return;
+              const cid = r.candidates?.id || r.candidate_id;
+              const cand = votesByCandidate[cid];
+              if (!cand) return;
+              const partyKey = (cand.party?.split(' — ')[0] || cand.name || '').trim();
+              votesByPartyForCollege[partyKey] = (votesByPartyForCollege[partyKey] || 0) + (r.votes || 0);
+            });
+            const parties = Object.keys(votesByPartyForCollege);
+            const votes = parties.map(p => votesByPartyForCollege[p]);
+            if (parties.length === 0 || votes.every(v => v === 0)) continue;
+            const allocated = dhondt(votes, totalSeats);
+            parties.forEach((party, i) => {
+              newSeatsByParty[party] = (newSeatsByParty[party] || 0) + allocated[i];
+            });
+          }
+        }
+        setSeatsByParty(newSeatsByParty);
 
         // Calculer le total des inscrits UNIQUEMENT des bureaux avec PV (validés + saisis)
         const totalInscritsDesBureauxAvecPV = bureaux.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
@@ -495,21 +547,28 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
     const partyMap = new Map<string, any>();
     for (const c of raw) {
-      const key = c.party || c.name;
+      const key = (c.party?.split(' — ')[0] || c.name || '').trim();
       if (partyMap.has(key)) {
         partyMap.get(key).votes += Number(c.votes) || 0;
       } else {
         partyMap.set(key, { ...c, votes: Number(c.votes) || 0 });
       }
     }
-    const merged = Array.from(partyMap.values()).sort((a, b) => b.votes - a.votes);
+    const merged = Array.from(partyMap.values()).sort((a, b) => {
+      const aKey = (a.party?.split(' — ')[0] || a.name || '').trim();
+      const bKey = (b.party?.split(' — ')[0] || b.name || '').trim();
+      const aSeats = seatsByParty[aKey] ?? 0;
+      const bSeats = seatsByParty[bKey] ?? 0;
+      if (bSeats !== aSeats) return bSeats - aSeats;
+      return b.votes - a.votes;
+    });
     const total = merged.reduce((s, c) => s + c.votes, 0);
     return merged.map((c, idx) => ({
       ...c,
       percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
       color: colorPalette[idx % colorPalette.length],
     }));
-  }, [finalResults, electionType]);
+  }, [finalResults, electionType, seatsByParty]);
 
   // Candidats filtrés par établissement / collège pour la liste affichée
   const displayedCandidates = useMemo(() => {
@@ -538,18 +597,25 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
 
     const partyMap = new Map<string, any>();
     for (const c of result) {
-      const key = c.party || c.name;
+      const key = (c.party?.split(' — ')[0] || c.name || '').trim();
       if (partyMap.has(key)) { partyMap.get(key).votes += c.votes; }
       else { partyMap.set(key, { ...c }); }
     }
-    const merged = Array.from(partyMap.values()).sort((a, b) => b.votes - a.votes);
+    const merged = Array.from(partyMap.values()).sort((a, b) => {
+      const aKey = (a.party?.split(' — ')[0] || a.name || '').trim();
+      const bKey = (b.party?.split(' — ')[0] || b.name || '').trim();
+      const aSeats = seatsByParty[aKey] ?? 0;
+      const bSeats = seatsByParty[bKey] ?? 0;
+      if (bSeats !== aSeats) return bSeats - aSeats;
+      return b.votes - a.votes;
+    });
     const total = merged.reduce((s, c) => s + c.votes, 0);
     return merged.map((c, idx) => ({
       ...c,
       percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
       color: colorPalette[idx % colorPalette.length],
     }));
-  }, [rawResultsData, filterCenter, filterCollege, groupedCandidates, electionType]);
+  }, [rawResultsData, filterCenter, filterCollege, groupedCandidates, electionType, seatsByParty]);
 
   const toCollegeLabel = (key: string) => {
     if (key === 'general') return 'Encadrement';
@@ -723,6 +789,40 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     console.log('Export CSV...');
   };
 
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Card className="gov-card border-l-4 border-l-green-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-14 w-64" />
+              <Skeleton className="h-10 w-32" />
+            </div>
+            <Skeleton className="h-2 w-full mt-3" />
+          </CardContent>
+        </Card>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card className="gov-card">
+            <CardHeader><Skeleton className="h-6 w-40" /></CardHeader>
+            <CardContent><Skeleton className="h-48 w-full" /></CardContent>
+          </Card>
+          <Card className="gov-card">
+            <CardHeader><Skeleton className="h-6 w-40" /></CardHeader>
+            <CardContent><Skeleton className="h-48 w-full" /></CardContent>
+          </Card>
+        </div>
+        <Card className="gov-card">
+          <CardHeader><Skeleton className="h-6 w-64" /></CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 w-full" />)}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Statut de validation */}
@@ -883,7 +983,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     onChange={e => { setFilterCenter(e.target.value); setFilterCollege(''); }}
                     className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Tous</option>
+                    <option value="">Tous établissements confondus</option>
                     {rawResultsData.availableCenters.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
@@ -898,7 +998,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     onChange={e => setFilterCollege(e.target.value)}
                     className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Tous</option>
+                    <option value="">Tous collèges confondus</option>
                     {rawResultsData.availableColleges.map(col => (
                       <option key={col} value={col}>{toCollegeLabel(col)}</option>
                     ))}
@@ -918,9 +1018,11 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           <div className="space-y-3">
             {displayedCandidates.map((candidate: any, index: number) => {
               const isPro = isProfessionalElection(electionType);
-              const syndicat = isPro ? (candidate.party?.split(' — ')[0] || '') : '';
+              const syndicat = isPro ? (candidate.party?.split(' — ')[0] || candidate.name || '') : '';
+              // Détails candidat (titulaire/suppléant) uniquement quand un filtre est actif
+              const showCandidateDetails = !isPro || filterCollege || filterCenter;
               return (
-                <div key={candidate.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl bg-white gap-4">
+                <div key={candidate.id || index} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl bg-white gap-4">
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <div className="text-2xl font-bold text-gray-400 w-8 text-center flex-shrink-0">
                       #{index + 1}
@@ -928,15 +1030,19 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     <div className="flex-1 min-w-0">
                       {isPro ? (
                         <>
-                          <p className="font-bold text-blue-700 text-sm truncate">{syndicat}</p>
-                          <p className="text-sm text-gray-900 mt-0.5">
-                            <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
-                            <span className="font-semibold">{candidate.name}</span>
-                          </p>
-                          {candidate.suppleant && (
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              <span className="font-medium">Suppléant : </span>{candidate.suppleant}
-                            </p>
+                          <p className="font-bold text-blue-700 truncate">{syndicat}</p>
+                          {showCandidateDetails && (
+                            <>
+                              <p className="text-sm text-gray-900 mt-0.5">
+                                <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
+                                <span className="font-semibold">{candidate.name}</span>
+                              </p>
+                              {candidate.suppleant && (
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  <span className="font-medium">Suppléant : </span>{candidate.suppleant}
+                                </p>
+                              )}
+                            </>
                           )}
                         </>
                       ) : (
@@ -959,6 +1065,15 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     <div className="text-sm text-gray-600">
                       {Number(candidate.percentage).toFixed(2)}%
                     </div>
+                    {isPro && Object.keys(seatsByParty).length > 0 && (() => {
+                      const syndicatKey = (candidate.party?.split(' — ')[0] || candidate.name || '').trim();
+                      const seats = seatsByParty[syndicatKey] ?? 0;
+                      return (
+                        <div className={`mt-1 text-xs font-semibold rounded px-2 py-0.5 ${seats > 0 ? 'text-green-700 bg-green-50 border border-green-200' : 'text-gray-500 bg-gray-50 border border-gray-200'}`}>
+                          {seats} siège{seats !== 1 ? 's' : ''}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               );
