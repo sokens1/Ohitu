@@ -99,28 +99,44 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           (pvRows || []).forEach((pv: any) => pvMap.set(pv.bureau_id, pv));
         }
 
-        // Prédicat : pseudo-entrée collège (ne doit pas apparaître comme bureau saisissable)
+        // Normalise n'importe quelle valeur collège vers la clé brute DB
+        const toRawKey = (val: string | null | undefined): string | null => {
+          if (!val) return null;
+          const v = val.toLowerCase();
+          if (v === 'general' || v === 'encadrement') return 'general';
+          if (v === 'cadres' || v === 'cadre') return 'cadres';
+          if (v === 'employes' || v === 'maîtrise' || v === 'maitrise') return 'employes';
+          if (v === 'ouvriers' || v.includes('execution') || v.includes('exécution')) return 'ouvriers';
+          return val;
+        };
+
+        // Prédicat : pseudo-entrée collège
         const isCollegeEntry = (b: any) =>
           b.name?.startsWith?.('College -') ||
           (b.college != null && (b.seats_to_fill ?? 0) > 0);
 
         // Transformer les données
         const transformedCenters = data?.map(center => {
-          // Filtre STRICT : uniquement les bureaux physiques liés à cette élection
-          // (même logique que ElectionDetailView — on n'accepte plus les bureaux sans election_id)
-          const centerBureaux = (bureauxData || []).filter((b: any) =>
+          const allCenterBureaux = (bureauxData || []).filter((b: any) =>
             b.center_id === center.id &&
-            (b.election_id === selectedElection || String(b.election_id) === String(selectedElection)) &&
-            !isCollegeEntry(b)
+            (b.election_id === selectedElection || String(b.election_id) === String(selectedElection))
           );
+          const physicalBureaux = allCenterBureaux.filter((b: any) => !isCollegeEntry(b));
+          const collegeBureaux = allCenterBureaux.filter((b: any) => isCollegeEntry(b));
+          // Pour les élections pro : les PV sont sur les pseudo-entrées collège → priorité sur les bureaux physiques
+          const centerBureaux = collegeBureaux.length > 0 ? collegeBureaux : physicalBureaux;
+          const isProCenter = collegeBureaux.length > 0;
+
           const bureaux = centerBureaux.map((bureau: any) => {
             const pv = pvMap.get(bureau.id);
             return {
               id: bureau.id.toString(),
               name: bureau.name,
-              college_type: bureau.college_type ?? null,
+              college_type: toRawKey(bureau.college_type ?? bureau.college) ?? null,
+              college_key: toRawKey(bureau.college ?? bureau.college_type) ?? null,
               registered_voters: bureau.registered_voters ?? 0,
               status: pv?.status || 'pending',
+              isCollege: isProCenter,
               agent: pv?.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : '',
               time: pv?.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', {
                 hour: '2-digit', minute: '2-digit'
@@ -322,14 +338,31 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                       {center.bureaux
                         .filter(bureau => !showAnomaliesOnly || bureau.status === 'anomaly')
                         .map((bureau) => (
-                        <div 
-                          key={bureau.id} 
+                        <div
+                          key={bureau.id}
                           className={`flex items-center justify-between p-3 bg-white rounded-lg border ${
-                            bureau.status === 'entered' || bureau.status === 'saisi' 
-                              ? 'cursor-not-allowed opacity-60' 
+                            (bureau.isCollege
+                              ? ['entered', 'validated', 'published', 'anomaly'].includes(bureau.status)
+                              : bureau.status === 'entered' || bureau.status === 'saisi')
+                              ? 'cursor-not-allowed opacity-60'
                               : 'cursor-pointer hover:bg-gray-50'
                           }`}
                           onClick={() => {
+                            if (bureau.isCollege) {
+                              if (['entered', 'validated', 'published', 'anomaly'].includes(bureau.status)) {
+                                toast.warning('Ce collège a déjà été saisi. Utilisez l\'onglet "Valider les résultats" pour le modifier.', {
+                                  duration: 4000,
+                                  position: 'bottom-center'
+                                });
+                                return;
+                              }
+                              setShowPVEntry(true);
+                              try {
+                                localStorage.setItem('pv_prefill_center_id', center.id);
+                                localStorage.setItem('pv_prefill_college_type', bureau.college_key || bureau.college_type || '');
+                              } catch {}
+                              return;
+                            }
                             // Vérifier si le bureau est déjà saisi
                             if (bureau.status === 'entered' || bureau.status === 'saisi') {
                               toast.warning('Ce bureau a déjà été saisi. Utilisez l\'onglet "Valider les résultats" pour le modifier.', {
@@ -338,7 +371,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                               });
                               return;
                             }
-                            
+
                             setShowPVEntry(true);
                             // pré-remplir via stockage local minimal
                             try {
@@ -354,7 +387,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="font-medium text-sm">{bureau.name}</span>
-                                {bureau.college_type && (
+                                {bureau.college_type && !bureau.isCollege && (
                                   <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
                                     bureau.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
                                     bureau.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
@@ -365,7 +398,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                                     {bureau.college_type === 'cadres'   ? 'Cadres' :
                                      bureau.college_type === 'employes' ? 'Maîtrise' :
                                      bureau.college_type === 'ouvriers' ? 'Exécution' :
-                                     bureau.college_type === 'general'  ? 'Encadrement' : 'Général'}
+                                     bureau.college_type === 'general'  ? 'Encadrement' : bureau.college_type}
                                   </span>
                                 )}
                               </div>

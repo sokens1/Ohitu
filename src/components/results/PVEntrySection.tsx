@@ -65,6 +65,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   // Collèges rattachés à chaque établissement (pseudo-entrées de voting_bureaux avec college non null)
   // Clé : center_id | Valeur : tableau de { college, seats_to_fill, ... }
   const [centerCollegesMap, setCenterCollegesMap] = useState<Map<string, any[]>>(new Map());
+  // Clés "centreId_collegeType" des PV déjà soumis pour cette élection
+  const [submittedColleges, setSubmittedColleges] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -228,6 +230,28 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         const loadedColleges = (collegesResult as any).data || [];
         setElectoralColleges(loadedColleges);
 
+        // Charger les PV déjà soumis pour verrouiller les collèges déjà saisis
+        if (isPro) {
+          const { data: existingPVs } = await supabase
+            .from('procès_verbaux')
+            .select('bureau_id, college_type')
+            .eq('election_id', selectedElection)
+            .in('status', ['entered', 'validated', 'published']);
+
+          // Construire la map inverse : pseudo-entry id → center_id
+          const pseudoToCenterMap = new Map<string, string>();
+          collegesMap.forEach((pseudos, centerId) => {
+            pseudos.forEach((p: any) => pseudoToCenterMap.set(p.id, centerId));
+          });
+
+          const doneKeys = new Set<string>();
+          (existingPVs || []).forEach((pv: any) => {
+            const centerId = pseudoToCenterMap.get(pv.bureau_id);
+            const ct = toRawCollegeKey(pv.college_type);
+            if (centerId && ct) doneKeys.add(`${centerId}_${ct}`);
+          });
+          setSubmittedColleges(doneKeys);
+        }
 
         // Pré-remplissage depuis DataEntrySection si présent (utilise les données déjà chargées)
         try {
@@ -281,10 +305,33 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             if (!rv) rv = preBureau?.registered_voters || 0;
             setFormData(prev => ({ ...prev, bureau: preBureauId, inscrits: String(rv) }));
           }
+          // Pré-remplissage collège (élection pro depuis DataEntrySection)
+          // Normaliser la valeur stockée ('Encadrement' → 'general', etc.)
+          const rawStored = localStorage.getItem('pv_prefill_college_type') || '';
+          const preCollegeType = toRawCollegeKey(rawStored) || rawStored;
+          if (preCenterId && preCollegeType) {
+            const pseudos = collegesMap.get(preCenterId) || [];
+            const pseudo = pseudos.find((p: any) =>
+              (toRawCollegeKey(p.college_type || p.college) || 'general') === preCollegeType
+            );
+            const bureauId = pseudo?.id ? String(pseudo.id) : '';
+            const col = loadedColleges.find((c: any) => toRawCollegeKey(c.college_type) === preCollegeType);
+            const rv = col?.total_voters ?? (pseudo?.registered_voters ?? 0);
+            const sieges = col?.seats_to_fill ?? 0;
+            setFormData(prev => ({
+              ...prev,
+              centre: preCenterId,
+              college: preCollegeType,
+              bureau: bureauId,
+              inscrits: String(rv),
+              sieges: String(sieges),
+            }));
+          }
           localStorage.removeItem('pv_prefill_center_id');
           localStorage.removeItem('pv_prefill_center_name');
           localStorage.removeItem('pv_prefill_bureau_id');
           localStorage.removeItem('pv_prefill_bureau_name');
+          localStorage.removeItem('pv_prefill_college_type');
         } catch {}
 
       } catch (error) {
@@ -613,14 +660,36 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       toast.success(existingPv?.id ? 'PV mis à jour avec succès.' : 'PV enregistré avec succès.');
 
       if (isPro) {
-        // Pour une élection pro : revenir à l'étape 1 en gardant l'établissement sélectionné
-        // pour permettre la saisie d'un autre collège
-        const savedCentre = formData.centre;
+        // Verrouiller le collège qui vient d'être soumis
+        const doneKey = `${formData.centre}_${formData.college}`;
+        const newSubmitted = new Set([...submittedColleges, doneKey]);
+        setSubmittedColleges(newSubmitted);
+
+        // Calculer les collèges disponibles pour cet établissement
+        const pseudos = centerCollegesMap.get(formData.centre) || [];
+        const seen = new Set<string>();
+        const collegeKeys: string[] = [];
+        pseudos.forEach((p: any) => {
+          const key = toRawCollegeKey(p.college_type || p.college) || 'general';
+          if (!seen.has(key)) { seen.add(key); collegeKeys.push(key); }
+        });
+        if (collegeKeys.length === 0) {
+          electoralColleges.forEach((ec: any) => {
+            const key = ec.college_type || 'general';
+            if (!seen.has(key)) { seen.add(key); collegeKeys.push(key); }
+          });
+        }
+
+        // Si tous les collèges de cet établissement sont saisis → retour sélection établissement
+        const allDone = collegeKeys.every(k => newSubmitted.has(`${formData.centre}_${k}`));
         setFormData({
-          province: '', ville: '', centre: savedCentre, college: '', bureau: '',
+          province: '', ville: '', centre: allDone ? '' : formData.centre, college: '', bureau: '',
           inscrits: '', sieges: '', votants: '', bulletinsNuls: '', suffragesExprimes: '',
           candidateVotes: {}, uploadedFile: null,
         });
+        if (allDone) {
+          toast.info('Tous les collèges ont été saisis pour cet établissement.');
+        }
         setCurrentStep(1);
       } else {
         onClose();
@@ -736,7 +805,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   }
                   return (
                     <div>
-                      <Label>Type de Collège</Label>
+                      <Label>Collège</Label>
                       <Select
                         value={formData.college}
                         onValueChange={(collegeKey) => {
@@ -744,7 +813,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                           const bureauId = pseudo?.id || '';
                           // Électeurs : electoral_colleges → pseudo-entry
                           let rv = 0;
-                          const ec = electoralColleges.find((c: any) => c.college_type === collegeKey);
+                          const ec = electoralColleges.find((c: any) => toRawCollegeKey(c.college_type) === collegeKey);
                           rv = ec?.total_voters ?? 0;
                           if (!rv && pseudo) rv = pseudo.registered_voters ?? 0;
                           setFormData({ ...formData, college: collegeKey, bureau: bureauId, inscrits: rv > 0 ? String(rv) : '' });
@@ -755,9 +824,21 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                           <SelectValue placeholder="Sélectionner un collège" />
                         </SelectTrigger>
                         <SelectContent>
-                          {options.map(o => (
-                            <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>
-                          ))}
+                          {options.map(o => {
+                            const alreadyDone = submittedColleges.has(`${formData.centre}_${o.key}`);
+                            return (
+                              <SelectItem key={o.key} value={o.key} disabled={alreadyDone}>
+                                <span className="flex items-center gap-2">
+                                  {o.label}
+                                  {alreadyDone && (
+                                    <span className="text-xs bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded-full font-medium">
+                                      ✓ Saisi
+                                    </span>
+                                  )}
+                                </span>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -794,7 +875,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               const selectedCenter = votingCenters.find(c => c.id === formData.centre);
               const isPro = isProfessionalElection(electionInfo?.type);
               if (isPro && formData.college) {
-                const ec = electoralColleges.find((c: any) => c.college_type === formData.college);
+                const ec = electoralColleges.find((c: any) => toRawCollegeKey(c.college_type) === formData.college);
                 return (
                   <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
                     <h4 className="font-semibold text-blue-900 text-sm">Récapitulatif</h4>
@@ -959,7 +1040,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   collegeGroups.map(ct => {
                     const groupLabel = ct === 'cadres' ? 'Collège Cadres' : ct === 'employes' ? 'Collège Maîtrise' : ct === 'ouvriers' ? 'Collège Exécution' : 'Collège Encadrement';
                     const groupCandidates = visibleCandidates.filter(c => (c.college_type || 'general') === ct);
-                    const college = electoralColleges.find(col => col.college_type === ct);
+                    const college = electoralColleges.find(col => toRawCollegeKey(col.college_type) === ct);
                     return (
                       <div key={ct} className="space-y-2">
                         <div className="flex items-center gap-3">
@@ -1323,16 +1404,21 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
           {(() => {
             const centerName = votingCenters.find(c => c.id === formData.centre)?.name || '—';
             const bureauName = votingBureaux.find(b => b.id === formData.bureau)?.name || '—';
-            const hasContext = !!formData.centre || !!formData.bureau;
+            const isPro = isProfessionalElection(electionInfo?.type);
+            const hasContext = !!formData.centre || !!formData.bureau || !!formData.college;
             return hasContext ? (
               <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded flex items-center justify-between text-sm text-blue-900">
                 <div>
                   <span>
-                    {isProfessionalElection(electionInfo?.type) ? 'Établissement' : 'Centre'} :{' '}
+                    {isPro ? 'Établissement' : 'Centre'} :{' '}
                     <span className="font-semibold">{centerName}</span>
                   </span>
                   <span className="mx-2">•</span>
-                  <span>Bureau : <span className="font-semibold">{bureauName}</span></span>
+                  {isPro ? (
+                    <span>Collège : <span className="font-semibold">{toCollegeLabel(formData.college) || '—'}</span></span>
+                  ) : (
+                    <span>Bureau : <span className="font-semibold">{bureauName}</span></span>
+                  )}
                 </div>
                 {formData.inscrits && (
                   <div className="text-blue-800">{getRegisteredVotersLabel(electionInfo?.type)}: <span className="font-semibold">{formData.inscrits}</span></div>
