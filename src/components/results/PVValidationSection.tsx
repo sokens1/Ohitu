@@ -87,7 +87,7 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
         : pv.observer_conformity === 'non_conforme'
           ? STEP_COLORS.error
           : hasAnnotation ? STEP_COLORS.info : STEP_COLORS.pending,
-      description: pv.observer_annotation ?? '',
+      description: '',
       isInfo: true
     },
   ];
