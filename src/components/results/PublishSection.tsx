@@ -54,6 +54,15 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const [nonValidatedByBureau, setNonValidatedByBureau] = useState<any[]>([]);
   const [nonValidatedCount, setNonValidatedCount] = useState<number>(0);
   const [electionType, setElectionType] = useState<string | undefined>();
+  const [filterCenter, setFilterCenter] = useState('');
+  const [filterCollege, setFilterCollege] = useState('');
+  const [rawResultsData, setRawResultsData] = useState<{
+    crRows: any[];
+    pvMeta: Map<string, { centerId: string; centerName: string; collegeType: string | null }>;
+    baseVotesByCandidate: Record<string, any>;
+    availableCenters: { id: string; name: string }[];
+    availableColleges: string[];
+  } | null>(null);
   const [showSimulation, setShowSimulation] = useState(() =>
     selectedElection ? localStorage.getItem(`sim_visible_${selectedElection}`) === 'true' : false
   );
@@ -205,12 +214,32 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         let bulletinsNuls = 0;
         let totalExprimesPV = 0;
 
-        // Agrégation locale à partir des candidate_results (respecte le filtre précédent)
-        crRows.forEach((r: any) => {
-            const cid = r.candidates?.id || r.candidate_id;
-          if (!votesByCandidate[cid]) return;
-            votesByCandidate[cid].votes += r.votes || 0;
+        // Construire la map PV → {centerId, centerName, collegeType} pour les filtres
+        const pvMeta = new Map<string, { centerId: string; centerName: string; collegeType: string | null }>();
+        filteredPvsAll.forEach((pv: any) => {
+          const bureau = bureauMap.get(pv.bureau_id);
+          const center = bureau ? centerMap.get(bureau.center_id) : undefined;
+          pvMeta.set(pv.id, {
+            centerId: bureau?.center_id ? String(bureau.center_id) : '',
+            centerName: center?.name || '',
+            collegeType: pv.college_type || null,
           });
+        });
+        const availableCenters = centers.map((c: any) => ({ id: String(c.id), name: c.name }));
+        const availableColleges = [...new Set(filteredPvsAll.map((pv: any) => pv.college_type).filter(Boolean))] as string[];
+
+        // Agrégation locale à partir des candidate_results (respecte le filtre précédent)
+        const enteredCandidateIds = new Set<string>();
+        crRows.forEach((r: any) => {
+          const cid = r.candidates?.id || r.candidate_id;
+          if (!votesByCandidate[cid]) return;
+          votesByCandidate[cid].votes += r.votes || 0;
+          enteredCandidateIds.add(cid);
+        });
+
+        setRawResultsData({ crRows, pvMeta, baseVotesByCandidate: { ...votesByCandidate }, availableCenters, availableColleges });
+        setFilterCenter('');
+        setFilterCollege('');
 
         // Calculer le total des inscrits UNIQUEMENT des bureaux avec PV (validés + saisis)
         const totalInscritsDesBureauxAvecPV = bureaux.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
@@ -231,7 +260,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         console.log('📊 [PublishSection] Total votants:', totalVotants);
         console.log('📊 [PublishSection] Nombre de bureaux avec PV:', bureaux.length);
 
-        const candidates = Object.values(votesByCandidate).sort((a, b) => b.votes - a.votes);
+        const candidates = Object.values(votesByCandidate).filter(c => enteredCandidateIds.has(c.id)).sort((a, b) => b.votes - a.votes);
         const totalVotes = candidates.reduce((s, c) => s + c.votes, 0);
         // Base de pourcentage: privilégier la valeur des PV (plus fiable), fallback sur somme candidats
         const baseExprimes = totalExprimesPV > 0 ? totalExprimesPV : totalVotes;
@@ -481,6 +510,54 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       color: colorPalette[idx % colorPalette.length],
     }));
   }, [finalResults, electionType]);
+
+  // Candidats filtrés par établissement / collège pour la liste affichée
+  const displayedCandidates = useMemo(() => {
+    if (!rawResultsData || (!filterCenter && !filterCollege)) return groupedCandidates;
+
+    const filteredVotes: Record<string, number> = {};
+    const filteredEntered = new Set<string>();
+    rawResultsData.crRows.forEach((r: any) => {
+      const cid = r.candidates?.id || r.candidate_id;
+      if (!rawResultsData.baseVotesByCandidate[cid]) return;
+      const meta = rawResultsData.pvMeta.get(r.pv_id);
+      if (!meta) return;
+      if (filterCenter && meta.centerId !== filterCenter) return;
+      if (filterCollege && meta.collegeType !== filterCollege) return;
+      filteredVotes[cid] = (filteredVotes[cid] || 0) + (r.votes || 0);
+      filteredEntered.add(cid);
+    });
+
+    const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
+    const result = Object.values(rawResultsData.baseVotesByCandidate)
+      .filter((c: any) => filteredEntered.has(c.id))
+      .map((c: any) => ({ ...c, votes: filteredVotes[c.id] || 0 }))
+      .sort((a: any, b: any) => b.votes - a.votes);
+
+    if (!isProfessionalElection(electionType) || result.length === 0) return result;
+
+    const partyMap = new Map<string, any>();
+    for (const c of result) {
+      const key = c.party || c.name;
+      if (partyMap.has(key)) { partyMap.get(key).votes += c.votes; }
+      else { partyMap.set(key, { ...c }); }
+    }
+    const merged = Array.from(partyMap.values()).sort((a, b) => b.votes - a.votes);
+    const total = merged.reduce((s, c) => s + c.votes, 0);
+    return merged.map((c, idx) => ({
+      ...c,
+      percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
+      color: colorPalette[idx % colorPalette.length],
+    }));
+  }, [rawResultsData, filterCenter, filterCollege, groupedCandidates, electionType]);
+
+  const toCollegeLabel = (key: string) => {
+    if (key === 'general') return 'Encadrement';
+    if (key === 'cadres') return 'Cadres';
+    if (key === 'employes') return 'Maîtrise';
+    if (key === 'ouvriers') return 'Exécution';
+    return key;
+  };
 
   const pieChartData = useMemo(() => (
     groupedCandidates.map((candidate: any) => ({
@@ -795,8 +872,51 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {/* Filtres établissement / collège */}
+          {rawResultsData && (rawResultsData.availableCenters.length > 1 || rawResultsData.availableColleges.length > 0) && (
+            <div className="flex flex-wrap gap-3 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              {rawResultsData.availableCenters.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Établissement</label>
+                  <select
+                    value={filterCenter}
+                    onChange={e => { setFilterCenter(e.target.value); setFilterCollege(''); }}
+                    className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Tous</option>
+                    {rawResultsData.availableCenters.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {rawResultsData.availableColleges.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Collège</label>
+                  <select
+                    value={filterCollege}
+                    onChange={e => setFilterCollege(e.target.value)}
+                    className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Tous</option>
+                    {rawResultsData.availableColleges.map(col => (
+                      <option key={col} value={col}>{toCollegeLabel(col)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {(filterCenter || filterCollege) && (
+                <button
+                  onClick={() => { setFilterCenter(''); setFilterCollege(''); }}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                >
+                  Réinitialiser
+                </button>
+              )}
+            </div>
+          )}
           <div className="space-y-3">
-            {groupedCandidates.map((candidate: any, index: number) => {
+            {displayedCandidates.map((candidate: any, index: number) => {
               const isPro = isProfessionalElection(electionType);
               const syndicat = isPro ? (candidate.party?.split(' — ')[0] || '') : '';
               return (
