@@ -419,11 +419,16 @@ export interface ParsedUnionList {
   unionName: string;
   college: 'general' | 'cadres' | 'employes' | 'ouvriers';
   etablissement: string;
+  titulaireMatricule: string;
   titulaireName: string;
   titulaireGenre: string;
+  titulaireAge: string;
   titulaireAnciennete: string;
+  suppleantMatricule: string;
   suppleantName: string;
   suppleantGenre: string;
+  suppleantAge: string;
+  suppleantAnciennete: string;
 }
 
 function normalizeCollegeValue(raw: unknown): ParsedUnionList['college'] {
@@ -460,22 +465,32 @@ export async function parseUnionListsSheet(workbook: WorkBook, isProfessional: b
     let unionName = '';
     let college: ParsedUnionList['college'] = 'general';
     let etablissement = '';
+    let titulaireMatricule = '';
     let titulaireName = '';
     let titulaireGenre = '';
+    let titulaireAge = '';
     let titulaireAnciennete = '';
+    let suppleantMatricule = '';
     let suppleantName = '';
     let suppleantGenre = '';
+    let suppleantAge = '';
+    let suppleantAnciennete = '';
 
     if (isProfessional) {
       unionAcronym = String(row['Acronyme_Representation'] || row['Sigle'] || '').trim();
       unionName = String(row['Representation'] || row['Nom'] || '').trim();
       etablissement = String(row['Etablissement'] || '').trim();
       college = normalizeCollegeValue(row['College']);
+      titulaireMatricule = String(row['Matricule_Titulaire'] || '').trim();
       titulaireName = String(row['Titulaire'] || '').trim();
       titulaireGenre = String(row['Genre_Titulaire'] || '').trim();
+      titulaireAge = String(row['Age_Titulaire'] || '').trim();
       titulaireAnciennete = String(row['Anciennete_Titulaire'] || '').trim();
+      suppleantMatricule = String(row['Matricule_Suppleant'] || '').trim();
       suppleantName = String(row['Suppleant'] || row['Suppléant'] || '').trim();
       suppleantGenre = String(row['Genre_Suppleant'] || '').trim();
+      suppleantAge = String(row['Age_Suppleant'] || '').trim();
+      suppleantAnciennete = String(row['Ancienneté_Suppleant'] || row['Anciennete_Suppleant'] || '').trim();
     } else {
       unionAcronym = String(row['Sigle Syndicat'] || row['Sigle'] || row['Acronyme'] || '').trim();
       unionName = String(
@@ -497,11 +512,16 @@ export async function parseUnionListsSheet(workbook: WorkBook, isProfessional: b
       unionName: unionName || unionAcronym,
       college,
       etablissement,
+      titulaireMatricule,
       titulaireName,
       titulaireGenre,
+      titulaireAge,
       titulaireAnciennete,
+      suppleantMatricule,
       suppleantName,
       suppleantGenre,
+      suppleantAge,
+      suppleantAnciennete,
     });
   });
 
@@ -542,11 +562,16 @@ export function normalizeWizardCandidates(candidates: unknown[]): ParsedUnionLis
             unionName: name || party,
             college,
             etablissement,
+            titulaireMatricule: String(tit?.matricule || '').trim(),
             titulaireName: String(tit?.name || '').trim(),
             titulaireGenre: String(tit?.genre || '').trim(),
+            titulaireAge: String(tit?.age || '').trim(),
             titulaireAnciennete: String(tit?.anciennete || '').trim(),
+            suppleantMatricule: String(sup?.matricule || '').trim(),
             suppleantName: String(sup?.name || '').trim(),
             suppleantGenre: String(sup?.genre || '').trim(),
+            suppleantAge: String(sup?.age || '').trim(),
+            suppleantAnciennete: String(sup?.anciennete || '').trim(),
           });
         }
       }
@@ -557,11 +582,16 @@ export function normalizeWizardCandidates(candidates: unknown[]): ParsedUnionLis
         unionName: String(cand.unionName || cand.unionAcronym || '').trim(),
         college,
         etablissement: String(cand.etablissement || '').trim(),
+        titulaireMatricule: String(cand.titulaireMatricule || '').trim(),
         titulaireName: String(cand.titulaireName || '').trim(),
         titulaireGenre: String(cand.titulaireGenre || '').trim(),
+        titulaireAge: String(cand.titulaireAge || '').trim(),
         titulaireAnciennete: String(cand.titulaireAnciennete || '').trim(),
+        suppleantMatricule: String(cand.suppleantMatricule || '').trim(),
         suppleantName: String(cand.suppleantName || '').trim(),
         suppleantGenre: String(cand.suppleantGenre || '').trim(),
+        suppleantAge: String(cand.suppleantAge || '').trim(),
+        suppleantAnciennete: String(cand.suppleantAnciennete || '').trim(),
       });
     }
   }
@@ -638,7 +668,9 @@ export async function importUnionListsToElection(
         name: list.titulaireName,
         role: 'Tête de liste',
         genre: list.titulaireGenre || undefined,
+        age: list.titulaireAge || undefined,
         anciennete: list.titulaireAnciennete || undefined,
+        matricule: list.titulaireMatricule || undefined,
         etablissement: list.etablissement || undefined,
       }] : [];
 
@@ -646,6 +678,9 @@ export async function importUnionListsToElection(
         name: list.suppleantName,
         role: 'Suppléant',
         genre: list.suppleantGenre || undefined,
+        age: list.suppleantAge || undefined,
+        anciennete: list.suppleantAnciennete || undefined,
+        matricule: list.suppleantMatricule || undefined,
       }] : [];
 
       const { error: listErr } = await supabase.from('union_lists').insert({

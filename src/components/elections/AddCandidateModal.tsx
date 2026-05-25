@@ -46,8 +46,8 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
   const [college, setCollege] = useState('general');
   
   // New fields for Head of List and Deputy
-  const [teteDeListe, setTeteDeListe] = useState({ name: '', photo: '', file: null as File | null, preview: '' });
-  const [suppleant, setSuppleant] = useState({ name: '', photo: '', file: null as File | null, preview: '' });
+  const [teteDeListe, setTeteDeListe] = useState({ name: '', genre: '', anciennete: '', etablissement: '', photo: '', file: null as File | null, preview: '' });
+  const [suppleant, setSuppleant] = useState({ name: '', genre: '', photo: '', file: null as File | null, preview: '' });
 
   const teteFileInputRef = useRef<HTMLInputElement>(null);
   const suppleantFileInputRef = useRef<HTMLInputElement>(null);
@@ -246,8 +246,8 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
           election_id: electionId,
           union_id: unionId,
           college: college,
-          titulaires: [{ name: teteDeListe.name, photo: tetePhotoUrl, role: 'Tête de liste' }],
-          suppleants: [{ name: suppleant.name, photo: suppleantPhotoUrl, role: 'Suppléant' }]
+          titulaires: [{ name: teteDeListe.name, photo: tetePhotoUrl, role: 'Tête de liste', genre: teteDeListe.genre || undefined, anciennete: teteDeListe.anciennete || undefined, etablissement: teteDeListe.etablissement || undefined }],
+          suppleants: [{ name: suppleant.name, photo: suppleantPhotoUrl, role: 'Suppléant', genre: suppleant.genre || undefined }]
         })
         .select()
         .single();
@@ -274,8 +274,8 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
       
       // Reset form and switch mode
       setNewUnion({ name: '', acronym: '' });
-      setTeteDeListe({ name: '', photo: '', file: null, preview: '' });
-      setSuppleant({ name: '', photo: '', file: null, preview: '' });
+      setTeteDeListe({ name: '', genre: '', anciennete: '', etablissement: '', photo: '', file: null, preview: '' });
+      setSuppleant({ name: '', genre: '', photo: '', file: null, preview: '' });
       setMode('select');
       
       toast.success('Liste syndicale ajoutée. Vous pouvez maintenant la sélectionner dans la liste.');
@@ -405,7 +405,7 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                 
                 <div className="bg-gray-50 p-4 rounded-xl space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <p className="text-xs font-semibold text-purple-700 uppercase tracking-wider">Tête de liste (Titulaire)</p>
                       <FloatingInput
                         label="Nom complet"
@@ -413,9 +413,29 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                         onChange={(e) => setTeteDeListe({...teteDeListe, name: e.target.value})}
                         required
                       />
+                      <FloatingSelect
+                        label="Genre"
+                        value={teteDeListe.genre}
+                        onChange={(v) => setTeteDeListe({...teteDeListe, genre: v})}
+                        options={[
+                          { value: '', label: '—' },
+                          { value: 'M', label: 'Masculin' },
+                          { value: 'F', label: 'Féminin' }
+                        ]}
+                      />
+                      <FloatingInput
+                        label="Ancienneté"
+                        value={teteDeListe.anciennete}
+                        onChange={(e) => setTeteDeListe({...teteDeListe, anciennete: e.target.value})}
+                      />
+                      <FloatingInput
+                        label="Etablissement"
+                        value={teteDeListe.etablissement}
+                        onChange={(e) => setTeteDeListe({...teteDeListe, etablissement: e.target.value})}
+                      />
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Photo Profil</label>
-                        <div 
+                        <div
                           onClick={() => teteFileInputRef.current?.click()}
                           className="relative h-24 w-full rounded-xl border-2 border-dashed border-gray-200 bg-white hover:border-purple-400 hover:bg-purple-50 transition-all cursor-pointer overflow-hidden flex flex-col items-center justify-center group"
                         >
@@ -427,18 +447,18 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                               <span className="text-[10px] text-gray-400 font-medium">Cliquer pour uploader</span>
                             </>
                           )}
-                          <input 
-                            type="file" 
-                            ref={teteFileInputRef} 
-                            className="hidden" 
+                          <input
+                            type="file"
+                            ref={teteFileInputRef}
+                            className="hidden"
                             accept="image/*"
-                            onChange={(e) => handleFileChange(e, 'tete')} 
+                            onChange={(e) => handleFileChange(e, 'tete')}
                           />
                         </div>
                       </div>
                     </div>
-                    
-                    <div className="space-y-4">
+
+                    <div className="space-y-3">
                       <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Suppléant</p>
                       <FloatingInput
                         label="Nom complet"
@@ -446,9 +466,19 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                         onChange={(e) => setSuppleant({...suppleant, name: e.target.value})}
                         required
                       />
+                      <FloatingSelect
+                        label="Genre"
+                        value={suppleant.genre}
+                        onChange={(v) => setSuppleant({...suppleant, genre: v})}
+                        options={[
+                          { value: '', label: '—' },
+                          { value: 'M', label: 'Masculin' },
+                          { value: 'F', label: 'Féminin' }
+                        ]}
+                      />
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Photo Profil</label>
-                        <div 
+                        <div
                           onClick={() => suppleantFileInputRef.current?.click()}
                           className="relative h-24 w-full rounded-xl border-2 border-dashed border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer overflow-hidden flex flex-col items-center justify-center group"
                         >
@@ -460,12 +490,12 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
                               <span className="text-[10px] text-gray-400 font-medium">Cliquer pour uploader</span>
                             </>
                           )}
-                          <input 
-                            type="file" 
-                            ref={suppleantFileInputRef} 
-                            className="hidden" 
+                          <input
+                            type="file"
+                            ref={suppleantFileInputRef}
+                            className="hidden"
                             accept="image/*"
-                            onChange={(e) => handleFileChange(e, 'suppleant')} 
+                            onChange={(e) => handleFileChange(e, 'suppleant')}
                           />
                         </div>
                       </div>
