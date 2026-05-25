@@ -37,6 +37,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
   const [expandedCenters, setExpandedCenters] = useState<string[]>([]);
   const [showAnomaliesOnly, setShowAnomaliesOnly] = useState(false);
   const [showPVEntry, setShowPVEntry] = useState(false);
+  const [pvPrefill, setPvPrefill] = useState<{ centreId: string; bureauId: string; collegeType: string | null } | null>(null);
   const [votingCenters, setVotingCenters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -87,18 +88,6 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return;
         }
 
-        // Étape 3 : récupérer les PV (nécessite les bureau_ids de l'étape 2)
-        const allBureauIds = (bureauxData || []).map((b: any) => b.id);
-        const pvMap = new Map<string, any>();
-        if (allBureauIds.length > 0) {
-          const { data: pvRows } = await supabase
-            .from('procès_verbaux')
-            .select('id, bureau_id, status, entered_by, entered_at, anomalies, college_type')
-            .eq('election_id', selectedElection)
-            .in('bureau_id', allBureauIds);
-          (pvRows || []).forEach((pv: any) => pvMap.set(pv.bureau_id, pv));
-        }
-
         // Normalise n'importe quelle valeur collège vers la clé brute DB
         const toRawKey = (val: string | null | undefined): string | null => {
           if (!val) return null;
@@ -115,20 +104,57 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           b.name?.startsWith?.('College -') ||
           (b.college != null && (b.seats_to_fill ?? 0) > 0);
 
+        // Étape 3 : récupérer les PV pour tous les bureaux (physiques ET pseudo-entrées)
+        const allBureauIds = (bureauxData || []).map((b: any) => String(b.id));
+        // pvMap  : bureauId (string) → PV
+        const pvMap = new Map<string, any>();
+        // pvByCollegeType : "${centerId}_${rawCollegeType}" → PV  (rétro-compat PV saisis via pseudo-entrée)
+        const pvByCollegeType = new Map<string, any>();
+        if (allBureauIds.length > 0) {
+          const { data: pvRows } = await supabase
+            .from('procès_verbaux')
+            .select('id, bureau_id, status, entered_by, entered_at, anomalies, college_type')
+            .eq('election_id', selectedElection)
+            .in('bureau_id', allBureauIds);
+          (pvRows || []).forEach((pv: any) => {
+            const bureauIdStr = String(pv.bureau_id);
+            pvMap.set(bureauIdStr, pv);
+            // Indexer aussi par centreId + college_type pour retrouver via bureau physique
+            const srcBureau = (bureauxData || []).find((b: any) => String(b.id) === bureauIdStr);
+            if (srcBureau) {
+              const ct = toRawKey(pv.college_type || srcBureau.college_type || srcBureau.college);
+              if (ct) pvByCollegeType.set(`${String(srcBureau.center_id)}_${ct}`, pv);
+            }
+          });
+        }
+
         // Transformer les données
         const transformedCenters = data?.map(center => {
+          const centerId = String(center.id);
           const allCenterBureaux = (bureauxData || []).filter((b: any) =>
-            b.center_id === center.id &&
-            (b.election_id === selectedElection || String(b.election_id) === String(selectedElection))
+            String(b.center_id) === centerId &&
+            (!b.election_id || String(b.election_id) === String(selectedElection))
           );
           const physicalBureaux = allCenterBureaux.filter((b: any) => !isCollegeEntry(b));
-          const collegeBureaux = allCenterBureaux.filter((b: any) => isCollegeEntry(b));
-          // Pour les élections pro : les PV sont sur les pseudo-entrées collège → priorité sur les bureaux physiques
-          const centerBureaux = collegeBureaux.length > 0 ? collegeBureaux : physicalBureaux;
-          const isProCenter = collegeBureaux.length > 0;
+          const collegeBureaux  = allCenterBureaux.filter((b: any) =>  isCollegeEntry(b));
+          // Toujours afficher les vrais bureaux physiques ; pseudo-entrées en fallback si aucun physique
+          const centerBureaux = physicalBureaux.length > 0 ? physicalBureaux : collegeBureaux;
+
+          // Fallback centre : si TOUTES les pseudo-entrées collège ont un PV → bureaux physiques héritent du statut
+          const allCollegePvs = collegeBureaux.map((cb: any) => pvMap.get(String(cb.id))).filter(Boolean);
+          const allCollegesSubmitted = collegeBureaux.length > 0 && allCollegePvs.length === collegeBureaux.length;
+          const centreRepresentativePv = allCollegesSubmitted ? allCollegePvs[0] : null;
 
           const bureaux = centerBureaux.map((bureau: any) => {
-            const pv = pvMap.get(bureau.id);
+            const bureauIdStr = String(bureau.id);
+            const bureauCt = toRawKey(bureau.college_type || bureau.college);
+            // Ordre de priorité :
+            // 1. PV direct (bureau physique saisi avec le nouvel UI)
+            // 2. PV par centreId+collegeType (PV saisi via pseudo-entrée ancienne UI)
+            // 3. Fallback centre : tous les collèges saisis → bureau physique considéré saisi
+            const pv = pvMap.get(bureauIdStr)
+              || (bureauCt ? pvByCollegeType.get(`${centerId}_${bureauCt}`) : null)
+              || (!isCollegeEntry(bureau) ? centreRepresentativePv : null);
             return {
               id: bureau.id.toString(),
               name: bureau.name,
@@ -136,7 +162,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
               college_key: toRawKey(bureau.college ?? bureau.college_type) ?? null,
               registered_voters: bureau.registered_voters ?? 0,
               status: pv?.status || 'pending',
-              isCollege: isProCenter,
+              isCollege: isCollegeEntry(bureau),
               agent: pv?.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : '',
               time: pv?.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', {
                 hour: '2-digit', minute: '2-digit'
@@ -238,14 +264,53 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     );
   };
 
-  const filteredCenters = showAnomaliesOnly 
-    ? votingCenters.filter(center => 
+  const filteredCenters = showAnomaliesOnly
+    ? votingCenters.filter(center =>
         center.bureaux.some(bureau => bureau.status === 'anomaly')
       )
     : votingCenters;
 
+  const handleCloseBureau = async (bureau: any, center: any) => {
+    if (!window.confirm(`Clôturer le bureau "${bureau.name}" avec 0 votant ?`)) return;
+    try {
+      const pvBase = {
+        election_id: selectedElection,
+        bureau_id: bureau.id,
+        total_registered: 0,
+        total_voters: 0,
+        null_votes: 0,
+        votes_expressed: 0,
+        status: 'entered',
+        entered_at: new Date().toISOString(),
+        college_type: bureau.college_type || null,
+      };
+      const { data: existing } = await supabase
+        .from('procès_verbaux')
+        .select('id')
+        .eq('election_id', selectedElection)
+        .eq('bureau_id', bureau.id)
+        .maybeSingle();
+      if (existing?.id) {
+        await supabase.from('procès_verbaux').update(pvBase).eq('id', existing.id);
+      } else {
+        await supabase.from('procès_verbaux').insert(pvBase);
+      }
+      toast.success(`Bureau "${bureau.name}" clôturé avec 0 votant.`);
+      fetchVotingCenters();
+    } catch {
+      toast.error('Erreur lors de la clôture du bureau.');
+    }
+  };
+
   if (showPVEntry) {
-    return <PVEntrySection onClose={() => setShowPVEntry(false)} selectedElection={selectedElection} readOnly={readOnly} />;
+    return (
+      <PVEntrySection
+        onClose={() => { setShowPVEntry(false); setPvPrefill(null); }}
+        selectedElection={selectedElection}
+        readOnly={readOnly}
+        prefill={pvPrefill}
+      />
+    );
   }
 
   return (
@@ -337,85 +402,80 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {center.bureaux
                         .filter(bureau => !showAnomaliesOnly || bureau.status === 'anomaly')
-                        .map((bureau) => (
-                        <div
-                          key={bureau.id}
-                          className={`flex items-center justify-between p-3 bg-white rounded-lg border ${
-                            (bureau.isCollege
-                              ? ['entered', 'validated', 'published', 'anomaly'].includes(bureau.status)
-                              : bureau.status === 'entered' || bureau.status === 'saisi')
-                              ? 'cursor-not-allowed opacity-60'
-                              : 'cursor-pointer hover:bg-gray-50'
-                          }`}
-                          onClick={() => {
-                            if (bureau.isCollege) {
-                              if (['entered', 'validated', 'published', 'anomaly'].includes(bureau.status)) {
-                                toast.warning('Ce collège a déjà été saisi. Utilisez l\'onglet "Valider les résultats" pour le modifier.', {
+                        .map((bureau) => {
+                          const alreadyEntered = ['entered', 'validated', 'published', 'anomaly'].includes(bureau.status);
+                          const canClose = !readOnly && center.totalBureaux > 1 && bureau.status === 'pending';
+                          return (
+                          <div
+                            key={bureau.id}
+                            className={`flex items-center justify-between p-3 bg-white rounded-lg border ${
+                              alreadyEntered
+                                ? 'cursor-not-allowed opacity-60'
+                                : 'cursor-pointer hover:bg-gray-50'
+                            }`}
+                            onClick={() => {
+                              if (alreadyEntered) {
+                                toast.warning('Ce bureau a déjà été saisi. Utilisez l\'onglet "Valider les résultats" pour le modifier.', {
                                   duration: 4000,
                                   position: 'bottom-center'
                                 });
                                 return;
                               }
-                              setShowPVEntry(true);
-                              try {
-                                localStorage.setItem('pv_prefill_center_id', center.id);
-                                localStorage.setItem('pv_prefill_college_type', bureau.college_key || bureau.college_type || '');
-                              } catch {}
-                              return;
-                            }
-                            // Vérifier si le bureau est déjà saisi
-                            if (bureau.status === 'entered' || bureau.status === 'saisi') {
-                              toast.warning('Ce bureau a déjà été saisi. Utilisez l\'onglet "Valider les résultats" pour le modifier.', {
-                                duration: 4000,
-                                position: 'bottom-center'
+                              setPvPrefill({
+                                centreId: center.id,
+                                bureauId: bureau.id,
+                                collegeType: bureau.college_type || null,
                               });
-                              return;
-                            }
-
-                            setShowPVEntry(true);
-                            // pré-remplir via stockage local minimal
-                            try {
-                              localStorage.setItem('pv_prefill_center_id', center.id);
-                              localStorage.setItem('pv_prefill_center_name', center.name);
-                              localStorage.setItem('pv_prefill_bureau_id', bureau.id);
-                              localStorage.setItem('pv_prefill_bureau_name', bureau.name);
-                            } catch {}
-                          }}
-                        >
-                          <div className="flex items-center space-x-3">
-                            {getStatusIcon(bureau.status)}
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-sm">{bureau.name}</span>
-                                {bureau.college_type && !bureau.isCollege && (
-                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
-                                    bureau.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                                    bureau.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                    bureau.college_type === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
-                                    bureau.college_type === 'general'  ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                                    'bg-gray-50 text-gray-600 border-gray-200'
-                                  }`}>
-                                    {bureau.college_type === 'cadres'   ? 'Cadres' :
-                                     bureau.college_type === 'employes' ? 'Maîtrise' :
-                                     bureau.college_type === 'ouvriers' ? 'Exécution' :
-                                     bureau.college_type === 'general'  ? 'Encadrement' : bureau.college_type}
-                                  </span>
+                              setShowPVEntry(true);
+                            }}
+                          >
+                            <div className="flex items-center space-x-3">
+                              {getStatusIcon(bureau.status)}
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-sm">{bureau.name}</span>
+                                  {bureau.college_type && (
+                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                                      bureau.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                      bureau.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                      bureau.college_type === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                                      bureau.college_type === 'general'  ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                      'bg-gray-50 text-gray-600 border-gray-200'
+                                    }`}>
+                                      {bureau.college_type === 'cadres'   ? 'Cadres' :
+                                       bureau.college_type === 'employes' ? 'Maîtrise' :
+                                       bureau.college_type === 'ouvriers' ? 'Exécution' :
+                                       bureau.college_type === 'general'  ? 'Encadrement' : bureau.college_type}
+                                    </span>
+                                  )}
+                                </div>
+                                {bureau.agent && (
+                                  <div className="flex items-center space-x-1 text-xs text-gray-500 mt-1">
+                                    <User className="w-3 h-3" />
+                                    <span>Saisi par <strong>{bureau.agent}</strong> le {bureau.dateStr} à {bureau.time}</span>
+                                  </div>
+                                )}
+                                {bureau.anomaly && (
+                                  <div className="text-xs text-red-600 mt-1">{bureau.anomaly}</div>
                                 )}
                               </div>
-                              {bureau.agent && (
-                                <div className="flex items-center space-x-1 text-xs text-gray-500 mt-1">
-                                  <User className="w-3 h-3" />
-                                  <span>Saisi par <strong>{bureau.agent}</strong> le {bureau.dateStr} à {bureau.time}</span>
-                                </div>
+                            </div>
+                            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                              {canClose && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs text-gray-500 border-gray-300 hover:bg-gray-100 h-7 px-2"
+                                  onClick={() => handleCloseBureau(bureau, center)}
+                                >
+                                  Clôturer ce bureau
+                                </Button>
                               )}
-                              {bureau.anomaly && (
-                                <div className="text-xs text-red-600 mt-1">{bureau.anomaly}</div>
-                              )}
+                              {getStatusBadge(bureau.status)}
                             </div>
                           </div>
-                          {getStatusBadge(bureau.status)}
-                        </div>
-                      ))}
+                          );
+                        })}
                     </div>
                   </div>
                 )}
