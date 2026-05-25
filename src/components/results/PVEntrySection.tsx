@@ -321,6 +321,20 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     loadAll();
   }, [selectedElection]);
 
+  // Auto-sélection du bureau quand il n'y en a qu'un seul pour le collège/centre en cours
+  useEffect(() => {
+    if (!formData.college || !formData.centre) return;
+    const realBureaux = votingBureaux.filter((b: any) => String(b.center_id) === String(formData.centre));
+    const ps = centerCollegesMap.get(formData.centre) || [];
+    const allB = realBureaux.length > 0 ? realBureaux : ps;
+    if (allB.length !== 1) return;
+    const singleId = String(allB[0].id);
+    setFormData(prev => {
+      if (prev.bureau === singleId) return prev;
+      return { ...prev, bureau: singleId };
+    });
+  }, [formData.college, formData.centre, votingBureaux, centerCollegesMap]);
+
   // Validation en temps réel
   const validateParticipation = () => {
     const errors: Record<string, string> = {};
@@ -354,15 +368,25 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     return errors;
   };
 
+  const validateStep1 = () => {
+    const errors: Record<string, string> = {};
+    if (!formData.centre) errors.centre = 'Veuillez sélectionner un établissement.';
+    if (isProfessionalElection(electionInfo?.type) && !formData.college) errors.college = 'Veuillez sélectionner un collège.';
+    if (!formData.bureau) errors.bureau = 'Veuillez sélectionner un bureau de vote.';
+    return errors;
+  };
+
   const handleStepValidation = (step: number) => {
     let errors: Record<string, string> = {};
-    
-    if (step === 2) {
+
+    if (step === 1) {
+      errors = validateStep1();
+    } else if (step === 2) {
       errors = validateParticipation();
     } else if (step === 3) {
       errors = { ...validateParticipation(), ...validateCandidateVotes() };
     }
-    
+
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -531,6 +555,13 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       const bureauId = formData.bureau;
       const centerId = formData.centre;
 
+      if (!bureauId) {
+        toast.error('Aucun bureau sélectionné. Veuillez retourner à l\'étape 1.');
+        setCurrentStep(1);
+        setSubmitting(false);
+        return;
+      }
+
       // Récupérer les inscrits du bureau si possible, mais prioriser champ saisi
       let registeredVoters = parseInt(formData.inscrits) || 0;
       try {
@@ -623,6 +654,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
           votes: parseInt(votes) || 0
         }));
       if (candidateEntries.length > 0) {
+        // Supprimer les anciens résultats avant de réinsérer (mise à jour d'un PV existant)
+        await supabase.from('candidate_results').delete().eq('pv_id', pv.id);
         const { error: crErr } = await supabase.from('candidate_results').insert(candidateEntries);
         if (crErr) throw crErr;
       }
@@ -633,38 +666,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       // Supprimer le brouillon local après soumission réussie
       localStorage.removeItem(`ohitu_pv_draft_${selectedElection}`);
 
-      const isPro = isProfessionalElection(electionInfo?.type);
       toast.success(existingPv?.id ? 'PV mis à jour avec succès.' : 'PV enregistré avec succès.');
-
-      if (isPro) {
-        // Verrouiller le bureau qui vient d'être soumis (clé centreId_bureauId)
-        const doneKey = `${formData.centre}_${formData.bureau}`;
-        const newSubmitted = new Set([...submittedColleges, doneKey]);
-        setSubmittedColleges(newSubmitted);
-        // Mémoriser le nb de votants saisis pour ce bureau (pré-remplissage des bureaux suivants)
-        const newVotersMap = new Map(submittedVotersMap);
-        newVotersMap.set(String(formData.bureau), parseInt(formData.votants) || 0);
-        setSubmittedVotersMap(newVotersMap);
-
-        // Tous les bureaux de cet établissement sont-ils saisis ?
-        // Priorité aux bureaux physiques ; fallback sur les pseudo-entrées
-        const physicalForCenter = votingBureaux.filter((b: any) => String(b.center_id) === String(formData.centre));
-        const pseudosForCenter  = centerCollegesMap.get(formData.centre) || [];
-        const bureausToCheck    = physicalForCenter.length > 0 ? physicalForCenter : pseudosForCenter;
-        const allDone = bureausToCheck.length > 0 &&
-          bureausToCheck.every((b: any) => newSubmitted.has(`${formData.centre}_${String(b.id)}`));
-        setFormData({
-          province: '', ville: '', centre: allDone ? '' : formData.centre, college: '', bureau: '',
-          inscrits: '', sieges: '', votants: '', bulletinsNuls: '', suffragesExprimes: '',
-          candidateVotes: {}, uploadedFile: null,
-        });
-        if (allDone) {
-          toast.info('Tous les collèges ont été saisis pour cet établissement.');
-        }
-        setCurrentStep(1);
-      } else {
-        onClose();
-      }
+      onClose();
     } catch (err) {
       console.error('Erreur soumission PV:', err);
       toast.error('Échec enregistrement PV');
@@ -862,6 +865,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             })}
                           </SelectContent>
                         </Select>
+                        {validationErrors.college && (
+                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 flex-shrink-0" />{validationErrors.college}
+                          </p>
+                        )}
                       </div>
 
                       {/* Select bureau : toujours présent pour alignement 3 colonnes, actif si plusieurs bureaux */}
@@ -916,6 +924,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             </SelectTrigger>
                           </Select>
                         )}
+                        {validationErrors.bureau && (
+                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 flex-shrink-0" />{validationErrors.bureau}
+                          </p>
+                        )}
                       </div>
                     </>
                   );
@@ -941,6 +954,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                           .map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                    {validationErrors.bureau && (
+                      <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />{validationErrors.bureau}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1539,9 +1557,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             </Button>
             
             {currentStep < 5 ? (
-              <Button 
+              <Button
                 onClick={nextStep}
-                disabled={!(formData.bureau || formData.college) && currentStep === 1}
                 className="bg-gov-blue hover:bg-gov-blue-dark"
               >
                 Suivant
