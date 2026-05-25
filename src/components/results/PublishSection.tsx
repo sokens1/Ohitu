@@ -14,13 +14,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { 
-  Upload, 
-  Download, 
-  Users, 
+import {
+  Upload,
+  Download,
+  Users,
   TrendingUp,
   FileText,
   Eye,
+  EyeOff,
   BarChart3,
   CheckCircle,
   AlertTriangle
@@ -48,10 +49,44 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const [detailedResults, setDetailedResults] = useState<any[]>([]);
   const [centerBreakdown, setCenterBreakdown] = useState<any[]>([]);
   const [bureauBreakdown, setBureauBreakdown] = useState<any[]>([]);
+  const [collegeBreakdown, setCollegeBreakdown] = useState<any[]>([]);
   const [nonValidatedByCenter, setNonValidatedByCenter] = useState<any[]>([]);
   const [nonValidatedByBureau, setNonValidatedByBureau] = useState<any[]>([]);
   const [nonValidatedCount, setNonValidatedCount] = useState<number>(0);
   const [electionType, setElectionType] = useState<string | undefined>();
+  const [filterCenter, setFilterCenter] = useState('');
+  const [filterCollege, setFilterCollege] = useState('');
+  const [rawResultsData, setRawResultsData] = useState<{
+    crRows: any[];
+    pvMeta: Map<string, { centerId: string; centerName: string; collegeType: string | null }>;
+    baseVotesByCandidate: Record<string, any>;
+    availableCenters: { id: string; name: string }[];
+    availableColleges: string[];
+  } | null>(null);
+  const [showSimulation, setShowSimulation] = useState(() =>
+    selectedElection ? localStorage.getItem(`sim_visible_${selectedElection}`) === 'true' : false
+  );
+  const [hideSimulationFromPublic, setHideSimulationFromPublic] = useState(() =>
+    selectedElection ? localStorage.getItem(`sim_public_hidden_${selectedElection}`) !== 'false' : true
+  );
+
+  // Synchroniser les états simulation quand l'élection change
+  useEffect(() => {
+    if (!selectedElection) return;
+    setShowSimulation(localStorage.getItem(`sim_visible_${selectedElection}`) === 'true');
+    setHideSimulationFromPublic(localStorage.getItem(`sim_public_hidden_${selectedElection}`) !== 'false');
+  }, [selectedElection]);
+
+  // Persister les états simulation
+  useEffect(() => {
+    if (!selectedElection) return;
+    localStorage.setItem(`sim_visible_${selectedElection}`, String(showSimulation));
+  }, [showSimulation, selectedElection]);
+
+  useEffect(() => {
+    if (!selectedElection) return;
+    localStorage.setItem(`sim_public_hidden_${selectedElection}`, String(hideSimulationFromPublic));
+  }, [hideSimulationFromPublic, selectedElection]);
 
   // Fonction pour charger les résultats (provisoires = entered + validés) et calculer les agrégats
   const loadFinalResults = useCallback(async () => {
@@ -76,14 +111,13 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         // 1) Récupérer PV par statut (validés ET publiés ensemble)
         const { data: pvsValidated, error: pvValErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, college_type')
           .eq('election_id', selectedElection)
-          .in('status', ['validated', 'published']); // Inclure les publiés
+          .in('status', ['validated', 'published']);
 
-        
         const { data: pvsEntered, error: pvEntErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, college_type')
           .eq('election_id', selectedElection)
           .eq('status', 'entered');
 
@@ -172,20 +206,40 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         const centerMap = new Map(centers.map(c => [c.id, c]));
 
         // 5) Agrégations (n'afficher que les candidats de cette élection, même à 0 voix)
-        const votesByCandidate: Record<string, { id: string; name: string; party: string; votes: number }> = {};
+        const votesByCandidate: Record<string, { id: string; name: string; party: string; suppleant?: string; college_type?: string | null; votes: number }> = {};
         electionCandidates.forEach(c => {
-          votesByCandidate[c.id] = { id: c.id, name: c.name, party: c.party, votes: 0 };
+          votesByCandidate[c.id] = { id: c.id, name: c.name, party: c.party, suppleant: c.suppleant, college_type: c.college_type, votes: 0 };
         });
         let totalVotants = 0;
         let bulletinsNuls = 0;
         let totalExprimesPV = 0;
 
-        // Agrégation locale à partir des candidate_results (respecte le filtre précédent)
-        crRows.forEach((r: any) => {
-            const cid = r.candidates?.id || r.candidate_id;
-          if (!votesByCandidate[cid]) return;
-            votesByCandidate[cid].votes += r.votes || 0;
+        // Construire la map PV → {centerId, centerName, collegeType} pour les filtres
+        const pvMeta = new Map<string, { centerId: string; centerName: string; collegeType: string | null }>();
+        filteredPvsAll.forEach((pv: any) => {
+          const bureau = bureauMap.get(pv.bureau_id);
+          const center = bureau ? centerMap.get(bureau.center_id) : undefined;
+          pvMeta.set(pv.id, {
+            centerId: bureau?.center_id ? String(bureau.center_id) : '',
+            centerName: center?.name || '',
+            collegeType: pv.college_type || null,
           });
+        });
+        const availableCenters = centers.map((c: any) => ({ id: String(c.id), name: c.name }));
+        const availableColleges = [...new Set(filteredPvsAll.map((pv: any) => pv.college_type).filter(Boolean))] as string[];
+
+        // Agrégation locale à partir des candidate_results (respecte le filtre précédent)
+        const enteredCandidateIds = new Set<string>();
+        crRows.forEach((r: any) => {
+          const cid = r.candidates?.id || r.candidate_id;
+          if (!votesByCandidate[cid]) return;
+          votesByCandidate[cid].votes += r.votes || 0;
+          enteredCandidateIds.add(cid);
+        });
+
+        setRawResultsData({ crRows, pvMeta, baseVotesByCandidate: { ...votesByCandidate }, availableCenters, availableColleges });
+        setFilterCenter('');
+        setFilterCollege('');
 
         // Calculer le total des inscrits UNIQUEMENT des bureaux avec PV (validés + saisis)
         const totalInscritsDesBureauxAvecPV = bureaux.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
@@ -206,7 +260,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         console.log('📊 [PublishSection] Total votants:', totalVotants);
         console.log('📊 [PublishSection] Nombre de bureaux avec PV:', bureaux.length);
 
-        const candidates = Object.values(votesByCandidate).sort((a, b) => b.votes - a.votes);
+        const candidates = Object.values(votesByCandidate).filter(c => enteredCandidateIds.has(c.id)).sort((a, b) => b.votes - a.votes);
         const totalVotes = candidates.reduce((s, c) => s + c.votes, 0);
         // Base de pourcentage: privilégier la valeur des PV (plus fiable), fallback sur somme candidats
         const baseExprimes = totalExprimesPV > 0 ? totalExprimesPV : totalVotes;
@@ -385,12 +439,36 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             centerAggMapEntered.set(key, prev);
           });
           setNonValidatedByCenter(Array.from(centerAggMapEntered.values()));
-          
-          console.log('📊 [PublishSection] Bureaux saisis (non validés):', enteredByBureau.length);
-          console.log('📊 [PublishSection] Centres avec PV saisis:', centerAggMapEntered.size);
+
+          // Agrégation par collège (élections professionnelles)
+          const COLLEGE_LABELS: Record<string, string> = {
+            general: 'Encadrement', cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution',
+          };
+          const collegeAggMap = new Map<string, any>();
+          filteredValidatedPvs.forEach((pv: any) => {
+            const key = pv.college_type || 'general';
+            const prev = collegeAggMap.get(key) || {
+              college_type: key,
+              college_label: COLLEGE_LABELS[key] || key,
+              total_registered: 0, total_voters: 0, total_null_votes: 0, total_expressed_votes: 0, pv_count: 0,
+            };
+            prev.total_registered    += Number(pv.total_registered) || 0;
+            prev.total_voters        += Number(pv.total_voters) || 0;
+            prev.total_null_votes    += Number(pv.null_votes) || 0;
+            prev.total_expressed_votes += Number(pv.votes_expressed) || 0;
+            prev.pv_count            += 1;
+            collegeAggMap.set(key, prev);
+          });
+          const collegeOrder = ['general', 'cadres', 'employes', 'ouvriers'];
+          setCollegeBreakdown(
+            Array.from(collegeAggMap.values()).sort(
+              (a, b) => collegeOrder.indexOf(a.college_type) - collegeOrder.indexOf(b.college_type)
+            )
+          );
         } catch (_) {
           setCenterBreakdown([]);
           setBureauBreakdown([]);
+          setCollegeBreakdown([]);
           setNonValidatedByCenter([]);
           setNonValidatedByBureau([]);
         }
@@ -408,26 +486,95 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     loadFinalResults();
   }, [loadFinalResults]);
 
+  // Pour les élections pro, plusieurs shadow-candidats partagent le même party (syndicat + collège,
+  // un par établissement). On les fusionne ici pour n'afficher qu'une ligne par liste syndicale.
+  const groupedCandidates = useMemo(() => {
+    const raw: any[] = finalResults?.candidates ?? [];
+    if (!isProfessionalElection(electionType) || raw.length === 0) return raw;
+
+    const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
+    const partyMap = new Map<string, any>();
+    for (const c of raw) {
+      const key = c.party || c.name;
+      if (partyMap.has(key)) {
+        partyMap.get(key).votes += Number(c.votes) || 0;
+      } else {
+        partyMap.set(key, { ...c, votes: Number(c.votes) || 0 });
+      }
+    }
+    const merged = Array.from(partyMap.values()).sort((a, b) => b.votes - a.votes);
+    const total = merged.reduce((s, c) => s + c.votes, 0);
+    return merged.map((c, idx) => ({
+      ...c,
+      percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
+      color: colorPalette[idx % colorPalette.length],
+    }));
+  }, [finalResults, electionType]);
+
+  // Candidats filtrés par établissement / collège pour la liste affichée
+  const displayedCandidates = useMemo(() => {
+    if (!rawResultsData || (!filterCenter && !filterCollege)) return groupedCandidates;
+
+    const filteredVotes: Record<string, number> = {};
+    const filteredEntered = new Set<string>();
+    rawResultsData.crRows.forEach((r: any) => {
+      const cid = r.candidates?.id || r.candidate_id;
+      if (!rawResultsData.baseVotesByCandidate[cid]) return;
+      const meta = rawResultsData.pvMeta.get(r.pv_id);
+      if (!meta) return;
+      if (filterCenter && meta.centerId !== filterCenter) return;
+      if (filterCollege && meta.collegeType !== filterCollege) return;
+      filteredVotes[cid] = (filteredVotes[cid] || 0) + (r.votes || 0);
+      filteredEntered.add(cid);
+    });
+
+    const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
+    const result = Object.values(rawResultsData.baseVotesByCandidate)
+      .filter((c: any) => filteredEntered.has(c.id))
+      .map((c: any) => ({ ...c, votes: filteredVotes[c.id] || 0 }))
+      .sort((a: any, b: any) => b.votes - a.votes);
+
+    if (!isProfessionalElection(electionType) || result.length === 0) return result;
+
+    const partyMap = new Map<string, any>();
+    for (const c of result) {
+      const key = c.party || c.name;
+      if (partyMap.has(key)) { partyMap.get(key).votes += c.votes; }
+      else { partyMap.set(key, { ...c }); }
+    }
+    const merged = Array.from(partyMap.values()).sort((a, b) => b.votes - a.votes);
+    const total = merged.reduce((s, c) => s + c.votes, 0);
+    return merged.map((c, idx) => ({
+      ...c,
+      percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
+      color: colorPalette[idx % colorPalette.length],
+    }));
+  }, [rawResultsData, filterCenter, filterCollege, groupedCandidates, electionType]);
+
+  const toCollegeLabel = (key: string) => {
+    if (key === 'general') return 'Encadrement';
+    if (key === 'cadres') return 'Cadres';
+    if (key === 'employes') return 'Maîtrise';
+    if (key === 'ouvriers') return 'Exécution';
+    return key;
+  };
+
   const pieChartData = useMemo(() => (
-    finalResults && Array.isArray(finalResults.candidates)
-      ? finalResults.candidates.map((candidate: any) => ({
-          name: candidate.name || '—',
-          value: Number(candidate.votes) || 0,
-          percentage: Number(candidate.percentage) || 0,
-          color: candidate.color || '#3b82f6'
-        }))
-      : []
-  ), [finalResults]);
+    groupedCandidates.map((candidate: any) => ({
+      name: (candidate.party?.split(' — ')[0] || candidate.name || '—'),
+      value: Number(candidate.votes) || 0,
+      percentage: Number(candidate.percentage) || 0,
+      color: candidate.color || '#3b82f6'
+    }))
+  ), [groupedCandidates]);
 
   const barChartData = useMemo(() => (
-    finalResults && Array.isArray(finalResults.candidates)
-      ? finalResults.candidates.map((candidate: any) => ({
-          name: (candidate.name || '—').split(' ').slice(0, 2).join(' '),
-          votes: Number(candidate.votes) || 0,
-    color: candidate.color
-        }))
-      : []
-  ), [finalResults]);
+    groupedCandidates.map((candidate: any) => ({
+      name: (candidate.party?.split(' — ')[0] || candidate.name || '—').split(' ').slice(0, 2).join(' '),
+      votes: Number(candidate.votes) || 0,
+      color: candidate.color
+    }))
+  ), [groupedCandidates]);
 
   const CenterAndBureauTables = () => (
     <div className="mt-8 space-y-8">
@@ -476,45 +623,39 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         </Card>
       )}
 
-      {(nonValidatedByBureau.length > 0 || bureauBreakdown.length > 0) && (
+      {collegeBreakdown.length > 0 && (
         <Card className="gov-card">
           <CardHeader>
-            <CardTitle className="text-gov-dark flex items-center justify-between">
-              <span>Par Bureau</span>
-              {nonValidatedByBureau.length > 0 && (
-                <Badge className="bg-yellow-100 text-yellow-800">{nonValidatedByBureau.length} PV non validés</Badge>
-              )}
-            </CardTitle>
+            <CardTitle className="text-gov-dark">Par Collège</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Centre</TableHead>
-                    <TableHead>Bureau</TableHead>
+                    <TableHead>Collège</TableHead>
+                    <TableHead className="text-right">PV</TableHead>
+                    <TableHead className="text-right">Électeurs</TableHead>
                     <TableHead className="text-right">Votants</TableHead>
                     <TableHead className="text-right">Nuls</TableHead>
                     <TableHead className="text-right">Exprimés</TableHead>
+                    <TableHead className="text-right">Participation</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {nonValidatedByBureau.map((row: any, idx: number) => (
-                    <TableRow key={`nv-bureau-${idx}`} className="bg-yellow-50">
-                      <TableCell className="font-medium text-yellow-900">{row.center_name}</TableCell>
-                      <TableCell className="text-yellow-900">{row.bureau_name}</TableCell>
-                      <TableCell className="text-right text-yellow-900">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
-                      <TableCell className="text-right text-yellow-900">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
-                      <TableCell className="text-right text-yellow-900">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
-                    </TableRow>
-                  ))}
-                  {bureauBreakdown.map((row: any) => (
-                    <TableRow key={`${row.bureau_id}`}>
-                      <TableCell>{centerBreakdown.find((c:any)=>c.center_id===row.center_id)?.center_name || 'Centre'}</TableCell>
-                      <TableCell>{row.bureau_name}</TableCell>
+                  {collegeBreakdown.map((row: any) => (
+                    <TableRow key={row.college_type}>
+                      <TableCell className="font-medium">{row.college_label}</TableCell>
+                      <TableCell className="text-right text-gray-500">{row.pv_count}</TableCell>
+                      <TableCell className="text-right">{Number(row.total_registered || 0).toLocaleString()}</TableCell>
                       <TableCell className="text-right">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
                       <TableCell className="text-right">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
                       <TableCell className="text-right">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        {row.total_registered > 0
+                          ? `${((row.total_voters / row.total_registered) * 100).toFixed(1)}%`
+                          : '—'}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -731,28 +872,97 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {(finalResults ? finalResults.candidates : []).map((candidate: any, index: number) => (
-              <div key={candidate.id} className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="flex items-center space-x-4">
-                  <div className="text-2xl font-bold text-gray-600">
-                    #{index + 1}
+          {/* Filtres établissement / collège */}
+          {rawResultsData && (rawResultsData.availableCenters.length > 1 || rawResultsData.availableColleges.length > 0) && (
+            <div className="flex flex-wrap gap-3 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              {rawResultsData.availableCenters.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Établissement</label>
+                  <select
+                    value={filterCenter}
+                    onChange={e => { setFilterCenter(e.target.value); setFilterCollege(''); }}
+                    className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Tous</option>
+                    {rawResultsData.availableCenters.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {rawResultsData.availableColleges.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Collège</label>
+                  <select
+                    value={filterCollege}
+                    onChange={e => setFilterCollege(e.target.value)}
+                    className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Tous</option>
+                    {rawResultsData.availableColleges.map(col => (
+                      <option key={col} value={col}>{toCollegeLabel(col)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {(filterCenter || filterCollege) && (
+                <button
+                  onClick={() => { setFilterCenter(''); setFilterCollege(''); }}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                >
+                  Réinitialiser
+                </button>
+              )}
+            </div>
+          )}
+          <div className="space-y-3">
+            {displayedCandidates.map((candidate: any, index: number) => {
+              const isPro = isProfessionalElection(electionType);
+              const syndicat = isPro ? (candidate.party?.split(' — ')[0] || '') : '';
+              return (
+                <div key={candidate.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl bg-white gap-4">
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="text-2xl font-bold text-gray-400 w-8 text-center flex-shrink-0">
+                      #{index + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {isPro ? (
+                        <>
+                          <p className="font-bold text-blue-700 text-sm truncate">{syndicat}</p>
+                          <p className="text-sm text-gray-900 mt-0.5">
+                            <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
+                            <span className="font-semibold">{candidate.name}</span>
+                          </p>
+                          {candidate.suppleant && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              <span className="font-medium">Suppléant : </span>{candidate.suppleant}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <h3 className="font-semibold text-gray-900">{candidate.name}</h3>
+                          {candidate.party && <p className="text-sm text-blue-600 mt-0.5">{candidate.party}</p>}
+                          {candidate.suppleant && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              <span className="font-medium">Suppléant : </span>{candidate.suppleant}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{candidate.name}</h3>
-                    <p className="text-sm text-gray-600">{candidate.party}</p>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-2xl font-bold" style={{ color: candidate.color }}>
+                      {candidate.votes.toLocaleString()}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {Number(candidate.percentage).toFixed(2)}%
+                    </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold" style={{ color: candidate.color }}>
-                    {candidate.votes.toLocaleString()}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Score : {Number(candidate.percentage).toFixed(2)}%
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Graphique en barres */}
@@ -832,7 +1042,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                 <li>• {finalResults ? finalResults.validatedBureaux : 0} bureaux validés</li>
                 <li>• {finalResults ? finalResults.participation.suffragesExprimes.toLocaleString() : 0} suffrages exprimés</li>
                 <li>• Taux de participation : {finalResults ? finalResults.participation.tauxParticipation : 0}%</li>
-                <li>• Candidat en tête : {finalResults && finalResults.candidates[0] ? `${finalResults.candidates[0].name} (${finalResults.candidates[0].percentage}%)` : '—'}</li>
+                <li>• En tête : {groupedCandidates[0] ? `${groupedCandidates[0].party?.split(' — ')[0] || groupedCandidates[0].name} (${groupedCandidates[0].percentage}%)` : '—'}</li>
               </ul>
             </div>
             
@@ -899,10 +1109,64 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         </DialogContent>
       </Dialog>
 
-      {/* Section de simulation */}
+      {/* Section de simulation — interrupteur ON/OFF */}
       {selectedElection && (
         <div className="mt-6">
-          <SimulationResultsSection electionId={selectedElection} />
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            {/* Ligne 1 : toggle admin */}
+            <button
+              onClick={() => setShowSimulation(prev => !prev)}
+              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors ${
+                showSimulation
+                  ? 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" />
+                <span>Simulation des résultats</span>
+              </div>
+              {/* Interrupteur visuel */}
+              <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                showSimulation ? 'bg-blue-600' : 'bg-gray-300'
+              }`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  showSimulation ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </div>
+            </button>
+
+            {/* Ligne 2 : option vue publique (toujours visible) */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-white">
+              <div className="flex items-center gap-2">
+                {hideSimulationFromPublic
+                  ? <EyeOff className="w-3.5 h-3.5 text-gray-400" />
+                  : <Eye className="w-3.5 h-3.5 text-green-500" />}
+                <span className="text-xs text-gray-500">
+                  {hideSimulationFromPublic
+                    ? 'Masquée de la vue publique'
+                    : 'Visible dans la vue publique'}
+                </span>
+              </div>
+              <button
+                onClick={() => setHideSimulationFromPublic(prev => !prev)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  hideSimulationFromPublic ? 'bg-gray-300' : 'bg-green-500'
+                }`}
+                title={hideSimulationFromPublic ? 'Rendre visible publiquement' : 'Masquer de la vue publique'}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                  hideSimulationFromPublic ? 'translate-x-1' : 'translate-x-4'
+                }`} />
+              </button>
+            </div>
+          </div>
+
+          {showSimulation && (
+            <div className="mt-3">
+              <SimulationResultsSection electionId={selectedElection} />
+            </div>
+          )}
         </div>
       )}
     </div>

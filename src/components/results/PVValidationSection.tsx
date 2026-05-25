@@ -20,7 +20,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { resolveCandidatesForElection } from '@/lib/candidateUtils';
+import { resolveCandidatesForElection, isProfessionalElection } from '@/lib/candidateUtils';
 import { useRBAC } from '@/hooks/useRBAC';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -150,7 +150,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [detailOpen, setDetailOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editValues, setEditValues] = useState<{ total_registered: number; total_voters: number; null_votes: number; votes_expressed: number }>({ total_registered: 0, total_voters: 0, null_votes: 0, votes_expressed: 0 });
-  const [candidateResults, setCandidateResults] = useState<Array<{ id: string; name: string; votes: number }>>([]);
+  const [candidateResults, setCandidateResults] = useState<Array<{ id: string; name: string; party?: string; suppleant?: string; college_type?: string | null; votes: number }>>([]);
+  const [isProElection, setIsProElection] = useState(false);
   const [newPvFile, setNewPvFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
@@ -520,6 +521,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
         // Résoudre la liste des candidats (supporte pro + standard)
         const resolvedCandidates = await resolveCandidatesForElection(selectedElection, elecInfo?.type);
+        setIsProElection(isProfessionalElection(elecInfo?.type));
 
         // Charger les résultats existants pour ce PV
         const { data: resultsData, error: resultsError } = await supabase
@@ -537,12 +539,30 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           resultsMap.set(r.candidate_id, r.votes || 0);
         });
 
-        // Combiner candidats résolus et résultats
-        const mapped = resolvedCandidates.map(c => ({
-          id: c.id,
-          name: c.name,
-          votes: resultsMap.get(c.id) || 0
-        }));
+        // Filtrer par collège et établissement du PV
+        const pv = pvs.find(p => p.id === selectedPV);
+        const pvCollegeType = pv?.college_type ?? null;
+        const pvBureau = pv?.bureau_id ? bureauxMap.get(pv.bureau_id) : null;
+        const pvCenter = pvBureau?.center_id ? centersMap.get(pvBureau.center_id) : null;
+        const pvCenterName = (pvCenter?.name || '').toLowerCase();
+
+        const filteredCandidates = resolvedCandidates.filter(c => {
+          const collegeMatch = !pvCollegeType || !c.college_type || c.college_type === pvCollegeType;
+          const etabMatch = !c.etablissement || !pvCenterName || c.etablissement.toLowerCase() === pvCenterName;
+          return collegeMatch && etabMatch;
+        });
+
+        // Combiner candidats filtrés et résultats, n'afficher que ceux renseignés
+        const mapped = filteredCandidates
+          .map(c => ({
+            id: c.id,
+            name: c.name,
+            party: c.party,
+            suppleant: c.suppleant,
+            college_type: c.college_type,
+            votes: resultsMap.get(c.id) || 0
+          }))
+          .filter(cr => cr.votes > 0);
 
         setCandidateResults(mapped);
       } catch (error) {
@@ -551,7 +571,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
     };
     loadCandidateResults();
-  }, [selectedPV, selectedElection]);
+  }, [selectedPV, selectedElection, pvs, bureauxMap, centersMap]);
 
   useEffect(() => {
     if (!selectedPVData) return;
@@ -616,9 +636,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           pv.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
                           pv.college_type === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                           pv.college_type === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                          pv.college_type === 'general'  ? 'bg-purple-50 text-purple-700 border-purple-200' :
                           'bg-gray-50 text-gray-600 border-gray-200'
                         }`}>
-                          {pv.college_type === 'cadres' ? 'Cadres' : pv.college_type === 'employes' ? 'Maîtrise' : pv.college_type === 'ouvriers' ? 'Exécution' : 'Général'}
+                          {pv.college_type === 'cadres' ? 'Cadres' : pv.college_type === 'employes' ? 'Maîtrise' : pv.college_type === 'ouvriers' ? 'Exécution' : pv.college_type === 'general' ? 'Encadrement' : 'Général'}
                         </span>
                       )}
                     </div>
@@ -675,11 +696,13 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       selectedPVData.college_type === 'cadres'   ? 'bg-orange-100 text-orange-700 border-orange-300' :
                       selectedPVData.college_type === 'employes' ? 'bg-blue-100 text-blue-700 border-blue-300' :
                       selectedPVData.college_type === 'ouvriers' ? 'bg-green-100 text-green-700 border-green-300' :
+                      selectedPVData.college_type === 'general'  ? 'bg-purple-100 text-purple-700 border-purple-300' :
                       'bg-gray-100 text-gray-600 border-gray-300'
                     }`}>
-                      {selectedPVData.college_type === 'cadres' ? 'Collège Cadres' :
+                      {selectedPVData.college_type === 'cadres'   ? 'Collège Cadres' :
                        selectedPVData.college_type === 'employes' ? 'Collège Maîtrise' :
-                       selectedPVData.college_type === 'ouvriers' ? 'Collège Exécution' : 'Collège Général'}
+                       selectedPVData.college_type === 'ouvriers' ? 'Collège Exécution' :
+                       selectedPVData.college_type === 'general'  ? 'Collège Encadrement' : 'Collège Général'}
                     </span>
                   )}
                 </div>
@@ -777,24 +800,73 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 <h4 className="font-medium text-gray-900 mb-3">Résultats par Candidat</h4>
                 {candidateResults.length > 0 ? (
                   <div className="space-y-2">
-                    {candidateResults.map(cr => (
-                      <div key={cr.id} className="flex items-center justify-between text-sm">
-                        <span className="text-gray-700">{cr.name}</span>
-                        {editMode ? (
-                          <input
-                            type="number"
-                            className="border rounded px-2 py-1 w-24 text-right"
-                            value={cr.votes}
-                            onChange={e => {
-                              const value = parseInt(e.target.value || '0');
-                              setCandidateResults(prev => prev.map(c => c.id === cr.id ? { ...c, votes: value } : c));
-                            }}
-                          />
-                        ) : (
-                          <span className="font-semibold">{cr.votes}</span>
-                        )}
-                    </div>
-                    ))}
+                    {isProElection ? (
+                      // Élection professionnelle — blocs syndicat identiques à la saisie
+                      candidateResults.map(cr => {
+                        const syndicat = cr.party?.split(' — ')[0] || '';
+                        return (
+                          <div key={cr.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-blue-700 text-sm truncate">{syndicat}</p>
+                              <p className="text-sm text-gray-900 mt-0.5">
+                                <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
+                                <span className="font-semibold">{cr.name}</span>
+                              </p>
+                              {cr.suppleant && (
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  <span className="font-medium">Suppléant : </span>{cr.suppleant}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex-shrink-0 text-right">
+                              {editMode ? (
+                                <input
+                                  type="number"
+                                  className="border rounded px-2 py-1 w-24 text-right"
+                                  value={cr.votes}
+                                  onChange={e => {
+                                    const value = parseInt(e.target.value || '0');
+                                    setCandidateResults(prev => prev.map(c => c.id === cr.id ? { ...c, votes: value } : c));
+                                  }}
+                                />
+                              ) : (
+                                <span className="font-bold text-gray-900">{cr.votes} <span className="text-xs font-normal text-gray-500">voix</span></span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      // Élection standard — liste plate
+                      candidateResults.map(cr => (
+                        <div key={cr.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-gray-900 text-sm">{cr.name}</p>
+                            {cr.party && <p className="text-xs text-blue-600 mt-0.5">{cr.party}</p>}
+                            {cr.suppleant && (
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                <span className="font-medium">Suppléant : </span>{cr.suppleant}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0 text-right">
+                            {editMode ? (
+                              <input
+                                type="number"
+                                className="border rounded px-2 py-1 w-24 text-right"
+                                value={cr.votes}
+                                onChange={e => {
+                                  const value = parseInt(e.target.value || '0');
+                                  setCandidateResults(prev => prev.map(c => c.id === cr.id ? { ...c, votes: value } : c));
+                                }}
+                              />
+                            ) : (
+                              <span className="font-bold text-gray-900">{cr.votes} <span className="text-xs font-normal text-gray-500">voix</span></span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 ) : (
                   <div className="text-sm text-gray-500">Aucun résultat détaillé saisi</div>

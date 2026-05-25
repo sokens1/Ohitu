@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
-interface FloatingInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface FloatingInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'size'> {
   label: string;
   error?: string;
   helperText?: string;
@@ -11,27 +11,30 @@ interface FloatingInputProps extends React.InputHTMLAttributes<HTMLInputElement>
 }
 
 const FloatingInput = React.forwardRef<HTMLInputElement, FloatingInputProps>(
-  ({ 
-    label, 
-    error, 
-    helperText, 
-    icon, 
-    variant = 'outlined', 
+  ({
+    label,
+    error,
+    helperText,
+    icon,
+    variant = 'outlined',
     size = 'md',
     className,
     value,
     onChange,
     onFocus,
     onBlur,
-    ...props 
+    ...props
   }, ref) => {
     const [isFocused, setIsFocused] = useState(false);
     const [hasValue, setHasValue] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-      setHasValue(!!(value && value.toString().length > 0));
-    }, [value]);
+      // Traiter 0 comme une valeur valide pour les champs number
+      const isNumber = props.type === 'number';
+      const hasActualValue = value !== '' && value !== undefined && value !== null && (isNumber ? true : value);
+      setHasValue(!!hasActualValue);
+    }, [value, props.type]);
 
     const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
       setIsFocused(true);
