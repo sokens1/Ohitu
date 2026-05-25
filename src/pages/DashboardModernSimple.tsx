@@ -36,8 +36,9 @@ import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '@/contexts/NotificationContext';
 import MetricCard from '@/components/dashboard/MetricCard';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+import { useRBAC } from '@/hooks/useRBAC';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell, PieChart, Pie, Legend
 } from 'recharts';
 
@@ -66,6 +67,7 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444'
 
 const DashboardModernSimple = () => {
   const { user } = useAuth();
+  const { can, isOperational, assignedElectionIds } = useRBAC();
   const navigate = useNavigate();
   const { addNotification } = useNotifications();
   const [loading, setLoading] = useState(true);
@@ -110,16 +112,27 @@ const DashboardModernSimple = () => {
           .from('elections')
           .select('id, title, status, type, election_date');
 
-        if (user && user.role !== 'super-admin' && user.role !== 'observateur' && user.role !== 'validateur') {
-          const conditions = [];
-          conditions.push(`created_by.eq.${user.id}`);
-          if (user.assigned_election_id) {
-            conditions.push(`id.eq.${user.assigned_election_id}`);
+        if (user) {
+          if (user.role === 'super-admin') {
+            // accès total — aucun filtre
+          } else if (user.role === 'admin') {
+            // élections créées par lui ou qui lui sont assignées
+            const adminIds = assignedElectionIds.length > 0
+              ? [`created_by.eq.${user.id}`, ...assignedElectionIds.map(id => `id.eq.${id}`)]
+              : [`created_by.eq.${user.id}`];
+            query = query.or(adminIds.join(','));
+          } else {
+            // rôles opérationnels → uniquement les élections assignées
+            if (assignedElectionIds.length > 0) {
+              query = query.in('id', assignedElectionIds);
+            } else {
+              // aucune assignation → retourner vide
+              setElectionsList([]);
+              setSelectedElectionIds([]);
+              setLoading(false);
+              return;
+            }
           }
-          if ((user.role === 'agent-saisie' || user.role === 'president-bureau') && user.created_by) {
-            conditions.push(`created_by.eq.${user.created_by}`);
-          }
-          query = query.or(conditions.join(','));
         }
 
         const { data, error } = await query.order('election_date', { ascending: false });
@@ -419,25 +432,27 @@ const DashboardModernSimple = () => {
 
         // 6. Recent activities query
         const activities: any[] = [];
-        
-        // Fetch new users
-        const { data: recentUsers } = await supabase
-          .from('users')
-          .select('name, email, role, created_at')
-          .order('created_at', { ascending: false })
-          .limit(3);
 
-        if (recentUsers) {
-          recentUsers.forEach((u, i) => {
-            activities.push({
-              id: `user_${i}_${u.created_at}`,
-              type: 'user',
-              action: 'Utilisateur créé',
-              description: `${u.name} ajouté en tant que ${u.role}`,
-              timestamp: new Date(u.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-              icon: <UserPlus className="w-4 h-4 text-blue-500" />
+        // Fetch new users — uniquement pour super-admin et admin
+        if (user && (user.role === 'super-admin' || user.role === 'admin')) {
+          const { data: recentUsers } = await supabase
+            .from('users')
+            .select('name, email, role, created_at')
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          if (recentUsers) {
+            recentUsers.forEach((u, i) => {
+              activities.push({
+                id: `user_${i}_${u.created_at}`,
+                type: 'user',
+                action: 'Utilisateur créé',
+                description: `${u.name} ajouté en tant que ${u.role}`,
+                timestamp: new Date(u.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+                icon: <UserPlus className="w-4 h-4 text-blue-500" />
+              });
             });
-          });
+          }
         }
 
         // Fetch recent PV modifications for selected elections
@@ -604,71 +619,90 @@ const DashboardModernSimple = () => {
               <Activity className="w-8 h-8 text-indigo-600 animate-pulse-slow" />
               <span>Tableau de bord</span>
             </h1>
+            {isOperational && (
+              <p className="text-xs text-slate-500 mt-1 font-medium">
+                Vous consultez les données de vos élections assignées uniquement.
+              </p>
+            )}
           </div>
 
-          {/* Custom Multiple Election Dropdown Picker */}
-          <div className="relative z-40" ref={dropdownRef}>
-            <button 
-              onClick={() => setIsOpen(!isOpen)}
-              className="flex items-center justify-between w-full sm:w-[320px] px-5 py-3.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-2xl shadow-sm text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all duration-300"
-            >
-              <span className="truncate flex items-center gap-2">
-                <Layers className="w-4 h-4 text-indigo-500" />
-                {selectedElectionIds.length === 0 
-                  ? "Aucune élection" 
-                  : selectedElectionIds.length === electionsList.length 
-                    ? "Toutes les élections" 
-                    : `${selectedElectionIds.length} élection(s) sélectionnée(s)`}
-              </span>
-              <ChevronDown className="w-4 h-4 ml-2 text-slate-400 transition-transform duration-300" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
-            </button>
+          {/* Dropdown multi-élections : uniquement pour super-admin et admin */}
+          {!isOperational && (
+            <div className="relative z-40" ref={dropdownRef}>
+              <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="flex items-center justify-between w-full sm:w-[320px] px-5 py-3.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-2xl shadow-sm text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all duration-300"
+              >
+                <span className="truncate flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-indigo-500" />
+                  {selectedElectionIds.length === 0
+                    ? "Aucune élection"
+                    : selectedElectionIds.length === electionsList.length
+                      ? "Toutes les élections"
+                      : `${selectedElectionIds.length} élection(s) sélectionnée(s)`}
+                </span>
+                <ChevronDown className="w-4 h-4 ml-2 text-slate-400 transition-transform duration-300" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
+              </button>
 
-            {isOpen && (
-              <div className="absolute right-0 mt-2 w-full sm:w-[340px] rounded-2xl shadow-xl bg-white border border-slate-200/85 text-slate-800 z-50 max-h-80 overflow-y-auto p-2.5 scrollbar-thin animate-scale-in">
-                <div className="p-1 space-y-1.5">
-                  <label className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
-                    <input 
-                      type="checkbox" 
-                      className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-300 bg-white"
-                      checked={selectedElectionIds.length === electionsList.length && electionsList.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedElectionIds(electionsList.map(el => el.id));
-                        } else {
-                          setSelectedElectionIds([]);
-                        }
-                      }}
-                    />
-                    <span className="text-sm font-bold text-slate-700">Toutes les élections</span>
-                  </label>
-                  <div className="border-t border-slate-100 my-1.5"></div>
-                  {electionsList.map((election) => (
-                    <label key={election.id} className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
-                      <input 
-                        type="checkbox" 
+              {isOpen && (
+                <div className="absolute right-0 mt-2 w-full sm:w-[340px] rounded-2xl shadow-xl bg-white border border-slate-200/85 text-slate-800 z-50 max-h-80 overflow-y-auto p-2.5 scrollbar-thin animate-scale-in">
+                  <div className="p-1 space-y-1.5">
+                    <label className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
+                      <input
+                        type="checkbox"
                         className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-300 bg-white"
-                        checked={selectedElectionIds.includes(election.id)}
+                        checked={selectedElectionIds.length === electionsList.length && electionsList.length > 0}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setSelectedElectionIds([...selectedElectionIds, election.id]);
+                            setSelectedElectionIds(electionsList.map(el => el.id));
                           } else {
-                            setSelectedElectionIds(selectedElectionIds.filter(id => id !== election.id));
+                            setSelectedElectionIds([]);
                           }
                         }}
                       />
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-bold text-slate-700 truncate max-w-[250px]">{election.title}</span>
-                        <span className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${election.status === 'Terminée' ? 'bg-emerald-500' : 'bg-indigo-400'}`}></span>
-                          {election.type} • {election.status}
-                        </span>
-                      </div>
+                      <span className="text-sm font-bold text-slate-700">Toutes les élections</span>
                     </label>
-                  ))}
+                    <div className="border-t border-slate-100 my-1.5"></div>
+                    {electionsList.map((election) => (
+                      <label key={election.id} className="flex items-center space-x-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          className="rounded text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 border-slate-300 bg-white"
+                          checked={selectedElectionIds.includes(election.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedElectionIds([...selectedElectionIds, election.id]);
+                            } else {
+                              setSelectedElectionIds(selectedElectionIds.filter(id => id !== election.id));
+                            }
+                          }}
+                        />
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-bold text-slate-700 truncate max-w-[250px]">{election.title}</span>
+                          <span className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5">
+                            <span className={`w-2 h-2 rounded-full ${election.status === 'Terminée' ? 'bg-emerald-500' : 'bg-indigo-400'}`}></span>
+                            {election.type} • {election.status}
+                          </span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
+
+          {/* Pour les rôles opérationnels : affichage fixe du nom de l'élection */}
+          {isOperational && electionsList.length > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-2xl shadow-sm text-sm">
+              <Layers className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+              <span className="font-bold text-slate-700 truncate max-w-[260px]">
+                {electionsList.length === 1
+                  ? electionsList[0].title
+                  : `${electionsList.length} élections assignées`}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* INTERACTIVE TABS */}
@@ -1213,48 +1247,74 @@ const DashboardModernSimple = () => {
           <CardHeader className="pb-3 border-b border-slate-50">
             <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
               <Zap className="w-5 h-5 text-amber-500 fill-amber-100" />
-              Actions Rapides & Administration
+              Actions Rapides
             </CardTitle>
             <CardDescription className="text-xs text-slate-500">
-              Accédez directement aux principales interfaces métiers
+              Accédez directement aux interfaces disponibles pour votre profil
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-6 pt-6">
-            <Button
-              onClick={() => navigate('/voters')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-blue-50/30 hover:bg-blue-50 border border-blue-100/50 hover:border-blue-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-              variant="outline"
-            >
-              <UserPlus className="w-6 h-6 text-blue-600" />
-              <span className="text-xs font-bold text-blue-800">Gestion Électeurs</span>
-            </Button>
-            
-            <Button
-              onClick={() => navigate('/elections')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-emerald-50/30 hover:bg-emerald-50 border border-emerald-100/50 hover:border-emerald-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-              variant="outline"
-            >
-              <Plus className="w-6 h-6 text-emerald-700" />
-              <span className="text-xs font-bold text-emerald-800">Nouvelle Élection</span>
-            </Button>
-            
-            <Button
-              onClick={() => navigate('/results')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-amber-50/30 hover:bg-amber-50 border border-amber-100/50 hover:border-amber-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-              variant="outline"
-            >
-              <FileText className="w-6 h-6 text-amber-600" />
-              <span className="text-xs font-bold text-amber-800">Saisie PV</span>
-            </Button>
-            
-            <Button
-              onClick={() => navigate('/users')}
-              className="h-22 flex flex-col items-center justify-center space-y-2 bg-purple-50/30 hover:bg-purple-50 border border-purple-100/50 hover:border-purple-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-              variant="outline"
-            >
-              <Settings className="w-6 h-6 text-purple-600" />
-              <span className="text-xs font-bold text-purple-800">Configuration</span>
-            </Button>
+            {/* Gestion Électeurs — super-admin uniquement */}
+            {can('view:voters') && (
+              <Button
+                onClick={() => navigate('/voters')}
+                className="h-22 flex flex-col items-center justify-center space-y-2 bg-blue-50/30 hover:bg-blue-50 border border-blue-100/50 hover:border-blue-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
+                variant="outline"
+              >
+                <UserPlus className="w-6 h-6 text-blue-600" />
+                <span className="text-xs font-bold text-blue-800">Gestion Électeurs</span>
+              </Button>
+            )}
+
+            {/* Élections — super-admin + admin */}
+            {can('elections:manage') && (
+              <Button
+                onClick={() => navigate('/elections')}
+                className="h-22 flex flex-col items-center justify-center space-y-2 bg-emerald-50/30 hover:bg-emerald-50 border border-emerald-100/50 hover:border-emerald-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
+                variant="outline"
+              >
+                <Plus className="w-6 h-6 text-emerald-700" />
+                <span className="text-xs font-bold text-emerald-800">Nouvelle Élection</span>
+              </Button>
+            )}
+
+            {/* Résultats / Saisie PV — tous les rôles */}
+            {can('view:results') && (
+              <Button
+                onClick={() => navigate('/results')}
+                className="h-22 flex flex-col items-center justify-center space-y-2 bg-amber-50/30 hover:bg-amber-50 border border-amber-100/50 hover:border-amber-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
+                variant="outline"
+              >
+                <FileText className="w-6 h-6 text-amber-600" />
+                <span className="text-xs font-bold text-amber-800">
+                  {can('results:submit') ? 'Saisie PV' : can('results:validate') ? 'Validation PV' : 'Résultats'}
+                </span>
+              </Button>
+            )}
+
+            {/* Gestion utilisateurs — super-admin + admin */}
+            {can('view:users') && (
+              <Button
+                onClick={() => navigate('/users')}
+                className="h-22 flex flex-col items-center justify-center space-y-2 bg-purple-50/30 hover:bg-purple-50 border border-purple-100/50 hover:border-purple-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
+                variant="outline"
+              >
+                <Settings className="w-6 h-6 text-purple-600" />
+                <span className="text-xs font-bold text-purple-800">Gestion Utilisateurs</span>
+              </Button>
+            )}
+
+            {/* Élections (lecture seule) — rôles opérationnels */}
+            {!can('elections:manage') && can('view:elections') && (
+              <Button
+                onClick={() => navigate('/elections')}
+                className="h-22 flex flex-col items-center justify-center space-y-2 bg-slate-50/30 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
+                variant="outline"
+              >
+                <Calendar className="w-6 h-6 text-slate-500" />
+                <span className="text-xs font-bold text-slate-600">Mes Élections</span>
+              </Button>
+            )}
           </CardContent>
         </Card>
 
