@@ -1088,7 +1088,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       votes_expressed: (selectedPVData.votes_expressed || 0)
                     });
                     setEditMode(true);
-                  }} variant="outline">
+                  }} variant="outline" className="border-amber-400 text-amber-700 hover:bg-amber-50 hover:border-amber-500">
                     Modifier
                   </Button>
                 )}
@@ -1166,7 +1166,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         onClick={() => setShowResetConfirm(true)}
         disabled={resetting}
         variant="outline"
-        className="border-orange-300 text-orange-700 hover:bg-orange-50"
+        className="border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400"
       >
         <RotateCcw className="w-4 h-4 mr-2" />
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
