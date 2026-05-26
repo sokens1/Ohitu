@@ -775,6 +775,7 @@ const ElectionResults: React.FC = () => {
         .select(`
           id,
           bureau_id,
+          college_type,
           total_registered,
           total_voters,
           votes_expressed,
@@ -786,6 +787,14 @@ const ElectionResults: React.FC = () => {
       if (pvsDataError) {
         console.error('❌ Erreur chargement PV:', pvsDataError);
       }
+
+      // Mapping pv_id → college_type pour le calcul des sièges par collège
+      const pvToCollegeType = new Map<string, string>(
+        (pvsData || []).map((pv: any) => [String(pv.id), pv.college_type || ''])
+      );
+
+      // Données electoral_colleges partagées (sièges par collège + calcul détail)
+      let electoralCollegesForPro: any[] = [];
 
       console.log('📊 [ElectionResults] PV data chargés:', pvsData);
       
@@ -911,68 +920,67 @@ const ElectionResults: React.FC = () => {
 
       let filteredSummaryData = Array.from(candidateVotesMap.values());
 
-      // Calculer les sièges (Quotient électoral + Plus forte moyenne) pour les élections professionnelles
-      // Implémentation des Articles 17 et 18 de l'Arrêté n°000147/MTEFP/SG/DGTMOE/DTR
+      // Calculer les sièges par collège (Art. 17 quotient + Art. 18 plus forte moyenne)
+      // Même méthode que l'admin (PublishSection) : application par collège puis sommation
       if (isProfessional) {
-        const totalSeats = Number(election.seats_available) || Number((election as any).configuration?.seatsAvailable) || Number((election as any).configuration?.nb_sieges) || 0;
-        if (totalSeats > 0 && totalVotesCast > 0) {
-           const electoralQuotient = totalVotesCast / totalSeats;
-           let allocatedSeats = 0;
-           
-           // --- ARTICLE 17 : Attribution par quotient électoral ---
-           filteredSummaryData.forEach(c => {
-             c.seats = Math.floor(c.total_votes / electoralQuotient);
-             allocatedSeats += c.seats;
-           });
+        const { data: ecRows } = await supabase
+          .from('electoral_colleges')
+          .select('name, college_type, seats_to_fill')
+          .eq('election_id', id);
+        electoralCollegesForPro = ecRows || [];
 
-           // --- ARTICLE 18 : Attribution des sièges restants par plus forte moyenne ---
-           const remainingSeats = totalSeats - allocatedSeats;
-           
-           for (let tour = 0; tour < remainingSeats; tour++) {
-             let maxAverage = -1;
-             let tieList: typeof filteredSummaryData = [];
-             
-             filteredSummaryData.forEach(c => {
-               const average = c.total_votes / (c.seats + 1);
-               if (average > maxAverage) {
-                 maxAverage = average;
-                 tieList = [c];
-               } else if (average === maxAverage) {
-                 tieList.push(c);
-               }
-             });
-             
-             let winner = tieList[0];
-             
-             if (tieList.length > 1) {
-               if (tour < remainingSeats - 1) {
-                 // Ce n'est PAS le dernier siège à attribuer
-                 winner = tieList[0];
-               } else {
-                 // C'est le DERNIER siège : départage par le plus grand nombre de voix
-                 let maxVotes = -1;
-                 let tieVotesList: typeof filteredSummaryData = [];
-                 
-                 tieList.forEach(c => {
-                   if (c.total_votes > maxVotes) {
-                     maxVotes = c.total_votes;
-                     tieVotesList = [c];
-                   } else if (c.total_votes === maxVotes) {
-                     tieVotesList.push(c);
-                   }
-                 });
-                 
-                 // En cas d'égalité parfaite (même moyenne et même voix),
-                 // la loi exige un départage manuel par ancienneté puis âge.
-                 // Le système informatique attribue par défaut au premier de la liste.
-                 winner = tieVotesList[0];
-               }
-             }
-             
-             if (winner) {
-               winner.seats += 1;
-             }
-           }
+        const seatsPerCollegeType = new Map<string, number>(
+          electoralCollegesForPro.map((ec: any) => [ec.college_type, Number(ec.seats_to_fill) || 0])
+        );
+
+        // Agréger votes par (college_type, syndicat) via le college_type du PV
+        const votesPerCollegeSyndicat = new Map<string, Map<string, number>>();
+        (candidateResultsData || []).forEach((cr: any) => {
+          const colType = pvToCollegeType.get(String(cr.pv_id)) || '';
+          if (!colType) return;
+          const syndicat = ((cr.candidates?.party || '').split(' — ')[0] || '').trim() || String(cr.candidate_id);
+          if (!votesPerCollegeSyndicat.has(colType)) votesPerCollegeSyndicat.set(colType, new Map());
+          const m = votesPerCollegeSyndicat.get(colType)!;
+          m.set(syndicat, (m.get(syndicat) || 0) + (Number(cr.votes) || 0));
+        });
+
+        // Réinitialiser les sièges
+        filteredSummaryData.forEach(c => { c.seats = 0; });
+
+        // --- ARTICLE 17 (quotient) + ARTICLE 18 (plus forte moyenne) par collège ---
+        for (const [colType, syndicatMap] of votesPerCollegeSyndicat) {
+          const totalCollegeSeats = seatsPerCollegeType.get(colType) || 0;
+          if (totalCollegeSeats <= 0) continue;
+          const entries = Array.from(syndicatMap.entries());
+          const totalColVotes = entries.reduce((s, [, v]) => s + v, 0);
+          if (totalColVotes <= 0) continue;
+
+          const quotient = totalColVotes / totalCollegeSeats;
+          let allocated = 0;
+          const colSeats = new Map<string, number>();
+          const remainders: { syndicat: string; rem: number; votes: number }[] = [];
+
+          entries.forEach(([syndicat, votes]) => {
+            const floor = Math.floor(votes / quotient);
+            colSeats.set(syndicat, floor);
+            allocated += floor;
+            remainders.push({ syndicat, rem: votes / quotient - floor, votes });
+          });
+
+          // Plus forte moyenne pour les sièges restants (Art. 18)
+          remainders.sort((a, b) => b.rem !== a.rem ? b.rem - a.rem : b.votes - a.votes);
+          let i = 0;
+          while (allocated < totalCollegeSeats && i < remainders.length) {
+            colSeats.set(remainders[i].syndicat, (colSeats.get(remainders[i].syndicat) || 0) + 1);
+            allocated++;
+            i++;
+          }
+
+          // Cumuler les sièges par syndicat toutes collèges confondus
+          for (const [syndicat, seats] of colSeats) {
+            const entry = filteredSummaryData.find(c => c.candidate_id === syndicat);
+            if (entry) entry.seats = (entry.seats || 0) + seats;
+          }
         }
       }
 
@@ -1005,7 +1013,13 @@ const ElectionResults: React.FC = () => {
             colleges: Array.from(c.colleges),
             logo: logosMap.get(c.candidate_id) || undefined
           }))
-          .sort((a, b) => b.total_votes - a.total_votes)
+          .sort((a, b) => {
+            // Pour les élections pro : sièges desc, puis votes desc (identique au tri admin)
+            if (isProfessional) {
+              if ((b.seats || 0) !== (a.seats || 0)) return (b.seats || 0) - (a.seats || 0);
+            }
+            return b.total_votes - a.total_votes;
+          })
           .map((c, idx) => ({
             ...c,
             rank: (c.total_votes > 0 && (election.status === 'Terminée' || election.status === 'En cours')) ? idx + 1 : 0
@@ -1032,10 +1046,8 @@ const ElectionResults: React.FC = () => {
             (votesByCollegeSyndicat[college][syndicat] || 0) + (Number(cr.votes) || 0);
         });
 
-        const { data: electoralColleges } = await supabase
-          .from('electoral_colleges')
-          .select('name, college_type, seats_to_fill')
-          .eq('election_id', electionId);
+        // Réutiliser les données déjà chargées lors du calcul des sièges
+        const electoralColleges = electoralCollegesForPro;
 
         const collegeLabels = new Set<string>();
         (electoralColleges || []).forEach((ec: { name?: string }) => {
