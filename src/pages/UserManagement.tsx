@@ -49,20 +49,21 @@ interface Election {
 }
 
 // Rôles que l'admin peut attribuer à ses sous-utilisateurs
-const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string }[] = [
+const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
   { value: 'validateur',   label: 'Validateur' },
   { value: 'agent-saisie', label: 'Agent de Saisie' },
   { value: 'observateur',  label: 'Observateur' },
+  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
 ];
 
 // Tous les rôles (super-admin seulement)
-const ALL_ROLES: { value: UserRole; label: string }[] = [
+const ALL_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
   { value: 'super-admin',      label: 'Super Administrateur' },
   { value: 'admin',            label: 'Administrateur' },
   { value: 'validateur',       label: 'Validateur' },
   { value: 'agent-saisie',     label: 'Agent de Saisie' },
   { value: 'observateur',      label: 'Observateur' },
-  { value: 'president-bureau', label: 'Président de Bureau' },
+  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
 ];
 
 const ROLE_BADGE: Record<UserRole, string> = {
@@ -184,7 +185,11 @@ const UserManagement = () => {
   const [fRole, setFRole] = useState<UserRole>('observateur');
   const [fActive, setFActive] = useState(true);
   const [fElectionIds, setFElectionIds] = useState<string[]>([]);
+  const [fCenterIds, setFCenterIds] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
+
+  // Centres disponibles pour l'assignation du validateur
+  const [availableCenters, setAvailableCenters] = useState<{ id: string; name: string }[]>([]);
 
   // États d'opération
   const [creating, setCreating] = useState(false);
@@ -273,7 +278,8 @@ const UserManagement = () => {
   const resetForm = () => {
     setFName(''); setFEmail(''); setFPassword('');
     setFRole('observateur'); setFActive(true);
-    setFElectionIds([]);
+    setFElectionIds([]); setFCenterIds([]);
+    setAvailableCenters([]);
     setShowPassword(false);
   };
 
@@ -286,8 +292,33 @@ const UserManagement = () => {
       ? u.assigned_election_ids
       : u.assigned_election_id ? [u.assigned_election_id] : [];
     setFElectionIds(ids);
+    // Centres assignés (validateur)
+    setFCenterIds((u as any).assigned_center_ids ?? []);
     setShowEditModal(true);
   };
+
+  // Charger les centres disponibles quand le rôle est validateur et que des élections sont sélectionnées
+  useEffect(() => {
+    const loadCenters = async () => {
+      if (fRole !== 'validateur' || fElectionIds.length === 0) {
+        setAvailableCenters([]);
+        return;
+      }
+      const { data: ecRows } = await supabase
+        .from('election_centers')
+        .select('center_id')
+        .in('election_id', fElectionIds);
+      const centerIds = Array.from(new Set((ecRows || []).map((r: any) => r.center_id).filter(Boolean)));
+      if (centerIds.length === 0) { setAvailableCenters([]); return; }
+      const { data: centersData } = await supabase
+        .from('voting_centers')
+        .select('id, name')
+        .in('id', centerIds)
+        .order('name');
+      setAvailableCenters(centersData || []);
+    };
+    loadCenters();
+  }, [fRole, fElectionIds]);
 
   // ── Création via l'endpoint serveur (évite la limite de taux de auth.signUp) ─
   const handleCreate = async () => {
@@ -320,6 +351,7 @@ const UserManagement = () => {
           is_active: fActive,
           assigned_election_id: fElectionIds[0] ?? null,
           assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
+          assigned_center_ids: fRole === 'validateur' && fCenterIds.length > 0 ? fCenterIds : null,
           created_by: currentUser?.id || null,
         }),
       });
@@ -373,6 +405,7 @@ const UserManagement = () => {
           is_active: fActive,
           assigned_election_id: fElectionIds[0] ?? null,
           assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
+          assigned_center_ids: fRole === 'validateur' && fCenterIds.length > 0 ? fCenterIds : null,
         })
         .eq('id', editingUser.id);
 
@@ -461,8 +494,41 @@ const UserManagement = () => {
           label={isAdmin ? 'Élections assignées (obligatoire)' : 'Élections assignées (optionnel)'}
           elections={allElections}
           selected={fElectionIds}
-          onChange={setFElectionIds}
+          onChange={ids => { setFElectionIds(ids); setFCenterIds([]); }}
         />
+      )}
+
+      {/* Établissements assignés — validateur uniquement */}
+      {fRole === 'validateur' && availableCenters.length > 0 && (
+        <div className="space-y-2 border-2 border-green-200 rounded-xl p-3 bg-green-50/30">
+          <span className="flex text-xs font-semibold text-green-700 mb-1 items-center gap-1.5">
+            <Shield className="w-3.5 h-3.5" />
+            Établissements assignés (optionnel — laissez vide pour tous)
+          </span>
+          <div className="max-h-44 overflow-y-auto rounded-lg border border-green-100 divide-y bg-white">
+            {availableCenters.map(c => (
+              <label key={c.id} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-green-50 transition-colors text-sm">
+                <input
+                  type="checkbox"
+                  checked={fCenterIds.includes(c.id)}
+                  onChange={() => setFCenterIds(prev =>
+                    prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+                  )}
+                  className="h-4 w-4 rounded accent-green-700"
+                />
+                <span className="truncate text-gray-800">{c.name}</span>
+                {fCenterIds.includes(c.id) && (
+                  <CheckCircle className="ml-auto h-3.5 w-3.5 text-green-700 flex-shrink-0" />
+                )}
+              </label>
+            ))}
+          </div>
+          {fCenterIds.length > 0 && (
+            <p className="text-xs text-green-600 font-medium">
+              {fCenterIds.length} établissement{fCenterIds.length > 1 ? 's' : ''} sélectionné{fCenterIds.length > 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
       )}
 
       {/* Compte actif */}
