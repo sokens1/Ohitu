@@ -194,6 +194,13 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [rejectComment, setRejectComment] = useState('');
   const [rejecting, setRejecting] = useState(false);
 
+  // Rétractation
+  const [retracting, setRetracting] = useState(false);
+
+  // PV verrouillé : validé ou publié — seul "Se rétracter" reste actif
+  const selectedPVStatus = pvs.find(p => p.id === selectedPV)?.status;
+  const isLocked = selectedPVStatus === 'validated' || selectedPVStatus === 'published';
+
   // Helpers d'upload (alignés avec PVEntrySection)
   const ensureBucketExists = async (bucket: string) => {
     try {
@@ -1096,8 +1103,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   ) : null
                 )}
 
+              {/* isLocked : PV validé ou publié — seule l'action "Se rétracter" reste disponible */}
               <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-6">
-                {!editMode && !readOnly && (
+                {!editMode && !readOnly && !isLocked && (
                   <Button onClick={() => {
                     setEditValues({
                       total_registered: (editValues.total_registered || 0),
@@ -1110,7 +1118,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     Modifier
                   </Button>
                 )}
-                {editMode && (
+                {editMode && !isLocked && (
                   <Button onClick={async () => {
                     if (!selectedPV) return;
                     if (!validateEditValues()) {
@@ -1180,7 +1188,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     {saving ? 'Enregistrement…' : 'Enregistrer'}
                   </Button>
                 )}
-      {!readOnly && <Button
+      {!readOnly && !isLocked && <Button
         onClick={() => setShowResetConfirm(true)}
         disabled={resetting}
         variant="outline"
@@ -1190,8 +1198,48 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
       </Button>}
 
-                {/* Boutons d'action — masqués pour l'observateur */}
-                {!readOnly && <>
+                {/* Se rétracter — admin + validateur uniquement, PV validé ou rejeté (anomalie) */}
+                {!readOnly
+                  && (role === 'super-admin' || role === 'admin' || role === 'validateur')
+                  && (selectedPVData?.status === 'validated' || selectedPVData?.status === 'anomaly')
+                  && (
+                  <Button
+                    variant="outline"
+                    disabled={retracting}
+                    className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400"
+                    onClick={async () => {
+                      if (!selectedPV) return;
+                      setRetracting(true);
+                      try {
+                        const { error } = await supabase
+                          .from('procès_verbaux')
+                          .update({
+                            status: 'entered',
+                            validated_by: null,
+                            validated_at: null,
+                            rejection_comment: null,
+                          })
+                          .eq('id', selectedPV);
+                        if (error) { toast.error('Échec de la rétractation'); return; }
+                        setPvs(prev => prev.map(p =>
+                          p.id === selectedPV
+                            ? { ...p, status: 'entered', validated_by: null, validated_at: null }
+                            : p
+                        ));
+                        toast.success('Rétractation effectuée — PV remis en attente de validation');
+                        setDetailOpen(false);
+                      } finally {
+                        setRetracting(false);
+                      }
+                    }}
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    {retracting ? 'Rétractation…' : 'Se rétracter'}
+                  </Button>
+                )}
+
+                {/* Boutons d'action — masqués pour l'observateur et pour les PV verrouillés */}
+                {!readOnly && !isLocked && <>
                 {/* <Button onClick={async () => {
                   if (!selectedPV) return;
                   if (!confirm('Supprimer ce PV ? Cette action est irréversible.')) return;
