@@ -20,6 +20,8 @@ interface Candidate {
   college?: string;
   titulaires?: any[];
   suppleants?: any[];
+  unionLogo?: string | null;
+  unionId?: string | null;
 }
 
 interface EditCandidateModalProps {
@@ -53,15 +55,18 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
     political: { file: File | null; preview: string };
     tete: { file: File | null; preview: string };
     suppleant: { file: File | null; preview: string };
+    logo: { file: File | null; preview: string };
   }>({
     political: { file: null, preview: candidate.photo || '' },
     tete: { file: null, preview: candidate.titulaires?.[0]?.photo || '' },
-    suppleant: { file: null, preview: candidate.suppleants?.[0]?.photo || '' }
+    suppleant: { file: null, preview: candidate.suppleants?.[0]?.photo || '' },
+    logo: { file: null, preview: candidate.unionLogo || '' },
   });
 
   const politicalFileInputRef = useRef<HTMLInputElement>(null);
   const teteFileInputRef = useRef<HTMLInputElement>(null);
   const suppleantFileInputRef = useRef<HTMLInputElement>(null);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -72,7 +77,7 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
     }));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'political' | 'tete' | 'suppleant') => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'political' | 'tete' | 'suppleant' | 'logo') => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -137,6 +142,7 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
       if (isPro) {
         let tetePhotoUrl = formData.teteDeListePhoto;
         let suppleantPhotoUrl = formData.suppleantPhoto;
+        let logoUrl = candidate.unionLogo || '';
 
         if (files.tete.file) {
           const path = `tete_${Date.now()}_${files.tete.file.name}`;
@@ -145,6 +151,16 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
         if (files.suppleant.file) {
           const path = `suppleant_${Date.now()}_${files.suppleant.file.name}`;
           suppleantPhotoUrl = await uploadFile(files.suppleant.file, path);
+        }
+        if (files.logo.file && candidate.unionId) {
+          const path = `logos/union_${candidate.unionId}_${Date.now()}_${files.logo.file.name}`;
+          logoUrl = await uploadFile(files.logo.file, path);
+          const acronym = candidate.party?.split(' — ')[0]?.trim();
+          if (acronym) {
+            await supabase.from('unions').update({ logo: logoUrl }).eq('acronym', acronym);
+          } else {
+            await supabase.from('unions').update({ logo: logoUrl }).eq('id', candidate.unionId);
+          }
         }
 
         // Mettre à jour union_lists
@@ -167,7 +183,8 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
           ...candidate,
           college: formData.college,
           titulaires: [{ name: formData.teteDeListeName.trim(), photo: tetePhotoUrl, role: 'Tête de liste' }],
-          suppleants: [{ name: formData.suppleantName.trim(), photo: suppleantPhotoUrl, role: 'Suppléant' }]
+          suppleants: [{ name: formData.suppleantName.trim(), photo: suppleantPhotoUrl, role: 'Suppléant' }],
+          unionLogo: logoUrl || candidate.unionLogo,
         };
 
         onUpdate(updatedCandidate);
@@ -246,7 +263,40 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                 <div className="p-3 bg-purple-50 rounded-lg text-xs text-purple-800 border border-purple-100">
                   Syndicat : <strong>{formData.name}</strong> ({formData.party})
                 </div>
-                
+
+                {/* Logo du syndicat */}
+                <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                  <div className="flex-shrink-0">
+                    <div className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 bg-white overflow-hidden flex items-center justify-center">
+                      {files.logo.preview ? (
+                        <img src={files.logo.preview} alt="Logo" className="w-full h-full object-contain p-1" />
+                      ) : (
+                        <span className="text-2xl font-bold text-gray-300 uppercase">{formData.party?.charAt(0) || 'S'}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-gray-700 mb-1">Logo du syndicat</p>
+                    <p className="text-[10px] text-gray-400 mb-2">Ce logo sera affiché sur toutes les cartes de ce syndicat</p>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      ref={logoFileInputRef}
+                      onChange={(e) => handleFileChange(e, 'logo')}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => logoFileInputRef.current?.click()}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <Upload className="w-3 h-3" /> {files.logo.preview ? 'Changer le logo' : 'Uploader un logo'}
+                    </Button>
+                  </div>
+                </div>
+
                 <FloatingSelect
                   label="Collège électoral"
                   value={formData.college}

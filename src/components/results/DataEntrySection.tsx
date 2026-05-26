@@ -102,7 +102,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         // Prédicat : pseudo-entrée collège
         const isCollegeEntry = (b: any) =>
           b.name?.startsWith?.('College -') ||
-          (b.college != null && (b.seats_to_fill ?? 0) > 0);
+          (b.college != null && b.college !== 'general');
 
         // Étape 3 : récupérer les PV pour tous les bureaux (physiques ET pseudo-entrées)
         const allBureauIds = (bureauxData || []).map((b: any) => String(b.id));
@@ -141,19 +141,24 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           const centerBureaux = physicalBureaux.length > 0 ? physicalBureaux : collegeBureaux;
 
           // Fallback centre : si TOUTES les pseudo-entrées collège ont un PV → bureaux physiques héritent du statut
-          const allCollegePvs = collegeBureaux.map((cb: any) => pvMap.get(String(cb.id))).filter(Boolean);
+          const allCollegePvs = collegeBureaux.map((cb: any) => {
+            const cbKey = toRawKey(cb.college_type || cb.college);
+            return pvMap.get(String(cb.id)) || (cbKey ? pvByCollegeType.get(`${centerId}_${cbKey}`) : null);
+          }).filter(Boolean);
           const allCollegesSubmitted = collegeBureaux.length > 0 && allCollegePvs.length === collegeBureaux.length;
           const centreRepresentativePv = allCollegesSubmitted ? allCollegePvs[0] : null;
 
           const bureaux = centerBureaux.map((bureau: any) => {
             const bureauIdStr = String(bureau.id);
             const bureauCt = toRawKey(bureau.college_type || bureau.college);
+            const directPv = pvMap.get(bureauIdStr);
+            const isPartialPhysicalCollegePv = directPv && !isCollegeEntry(bureau) && directPv.college_type && collegeBureaux.length > 0;
             // Ordre de priorité :
-            // 1. PV direct (bureau physique saisi avec le nouvel UI)
+            // 1. PV direct complet (bureau physique saisi complètement)
             // 2. PV par centreId+collegeType (PV saisi via pseudo-entrée ancienne UI)
             // 3. Fallback centre : tous les collèges saisis → bureau physique considéré saisi
-            const pv = pvMap.get(bureauIdStr)
-              || (bureauCt ? pvByCollegeType.get(`${centerId}_${bureauCt}`) : null)
+            const pv = (!isPartialPhysicalCollegePv ? directPv : null)
+              || (isCollegeEntry(bureau) && bureauCt ? pvByCollegeType.get(`${centerId}_${bureauCt}`) : null)
               || (!isCollegeEntry(bureau) ? centreRepresentativePv : null);
             return {
               id: bureau.id.toString(),
@@ -172,15 +177,21 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
             };
           }) || [];
 
-          const bureauxSaisis = bureaux.filter((b: any) => 
-            b.status === 'entered' || b.status === 'validated' || b.status === 'anomaly' || b.status === 'published'
-          ).length;
+          const enteredStatuses = ['entered', 'saisi', 'validated', 'validé', 'anomaly', 'published'];
+          const electorsEntered = bureaux.reduce((sum: number, b: any) => {
+            const entered = enteredStatuses.includes(b.status);
+            return sum + (entered ? Number(b.registered_voters || 0) : 0);
+          }, 0);
+          const totalElectors = bureaux.reduce((sum: number, b: any) => sum + Number(b.registered_voters || 0), 0);
+          const bureauxSaisis = bureaux.filter((b: any) => enteredStatuses.includes(b.status)).length;
 
           return {
             id: center.id.toString(),
             name: center.name,
             totalBureaux: bureaux.length,
             bureauxSaisis,
+            electorsEntered,
+            totalElectors,
             status: bureaux.length > 0 && bureauxSaisis === bureaux.length ? 'completed' :
                    bureauxSaisis > 0 ? 'in-progress' : 'pending',
             bureaux
@@ -374,7 +385,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                     {getCenterStatusIcon(center.status)}
                     <div>
                       <h3 className="font-semibold text-gray-900">
-                        {center.name} ({center.bureauxSaisis} / {center.totalBureaux} saisis)
+                        {center.name} ({center.electorsEntered.toLocaleString()} / {center.totalElectors.toLocaleString()} électeurs saisis)
                       </h3>
                       <div className="flex items-center space-x-2 mt-1">
                         {center.status === 'completed' ? (
@@ -383,7 +394,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                           <Badge className="bg-blue-100 text-blue-800 text-xs">⏳ En cours</Badge>
                         )}
                         <Progress 
-                          value={(center.bureauxSaisis / center.totalBureaux) * 100} 
+                          value={center.totalElectors > 0 ? (center.electorsEntered / center.totalElectors) * 100 : 0} 
                           className="w-32 h-2"
                         />
                       </div>

@@ -646,7 +646,6 @@ const UserManagement = () => {
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
         <DialogContent
           className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto"
-          aria-describedby={undefined}
         >
           <DialogHeader className="pb-2 border-b">
             <DialogTitle className="text-lg font-semibold text-[#1B2E5A]">
@@ -697,7 +696,6 @@ const UserManagement = () => {
       <Dialog open={showEditModal} onOpenChange={v => { setShowEditModal(v); if (!v) setEditingUser(null); }}>
         <DialogContent
           className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto"
-          aria-describedby={undefined}
         >
           <DialogHeader className="pb-2 border-b">
             <DialogTitle className="text-lg font-semibold text-[#1B2E5A]">
@@ -747,7 +745,7 @@ const UserManagement = () => {
 
       {/* Modal Suppression */}
       <Dialog open={showDeleteModal} onOpenChange={v => { setShowDeleteModal(v); if (!v) setDeletingUser(null); }}>
-        <DialogContent className="max-w-md" aria-describedby={undefined}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <AlertCircle className="h-5 w-5" />

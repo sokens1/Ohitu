@@ -200,7 +200,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         if (!centersResult.error && centersData && centersData.length > 0) {
           const isCollegeEntry = (b: any) =>
             b.name?.startsWith?.('College -') ||
-            (b.college != null && (b.seats_to_fill ?? 0) > 0);
+            (b.college != null && b.college !== 'general');
 
           for (const link of centersData) {
             const center = (link as any).voting_centers;
@@ -253,20 +253,41 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             .from('procès_verbaux')
             .select('bureau_id, college_type, total_voters')
             .eq('election_id', selectedElection)
-            .in('status', ['entered', 'validated', 'published']);
+            .in('status', ['entered', 'saisi', 'validated', 'published']);
 
-          // Construire la map inverse : pseudo-entry id → center_id
+          // Construire la map inverse : pseudo-entry id → center_id + college_key
           const pseudoToCenterMap = new Map<string, string>();
+          const pseudoToCollegeKeyMap = new Map<string, string>();
           collegesMap.forEach((pseudos, centerId) => {
-            pseudos.forEach((p: any) => pseudoToCenterMap.set(p.id, centerId));
+            pseudos.forEach((p: any) => {
+              const bureauId = String(p.id);
+              pseudoToCenterMap.set(bureauId, centerId);
+              pseudoToCollegeKeyMap.set(bureauId, toRawCollegeKey(p.college_type || p.college) || 'general');
+            });
           });
 
           const doneKeys = new Set<string>();
           const votersMap = new Map<string, number>();
           (existingPVs || []).forEach((pv: any) => {
-            const centerId = pseudoToCenterMap.get(pv.bureau_id);
-            if (centerId && pv.bureau_id) doneKeys.add(`${centerId}_${pv.bureau_id}`);
-            if (pv.bureau_id) votersMap.set(String(pv.bureau_id), Number(pv.total_voters) || 0);
+            const bureauId = String(pv.bureau_id);
+            if (pv.bureau_id) votersMap.set(bureauId, Number(pv.total_voters) || 0);
+
+            const centerId = pseudoToCenterMap.get(bureauId);
+            const collegeKey = toRawCollegeKey(pv.college_type || pseudoToCollegeKeyMap.get(bureauId)) || 'general';
+
+            if (centerId) {
+              doneKeys.add(`${centerId}_${bureauId}`);
+              doneKeys.add(`${centerId}_${collegeKey}`);
+            } else {
+              const physical = physicalBureaux.find((b: any) => String(b.id) === bureauId);
+              if (physical && physical.center_id) {
+                const physicalCenterId = String(physical.center_id);
+                doneKeys.add(`${physicalCenterId}_${bureauId}`);
+                if (pv.college_type) {
+                  doneKeys.add(`${physicalCenterId}_${collegeKey}`);
+                }
+              }
+            }
           });
           setSubmittedColleges(doneKeys);
           setSubmittedVotersMap(votersMap);
@@ -592,20 +613,20 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       const null_votes = parseInt(formData.bulletinsNuls) || 0;
       const votes_expressed = parseInt(formData.suffragesExprimes) || 0;
 
-      // Empêcher une double saisie: si un PV existe déjà pour (election_id, bureau_id), on met à jour au lieu d'insérer
-      const { data: existingPv, error: findPvErr } = await supabase
-        .from('procès_verbaux')
-        .select('id')
-        .eq('election_id', selectedElection)
-        .eq('bureau_id', bureauId)
-        .limit(1)
-        .maybeSingle();
-      if (findPvErr) throw findPvErr;
-
       // Pour les élections pro, le collège vient directement du formData
       const collegeType = isProfessionalElection(electionInfo?.type)
         ? (formData.college || null)
         : (votingBureaux.find(b => b.id === bureauId)?.college_type ?? null);
+
+      // Empêcher une double saisie : PV pour (election_id, bureau_id [, college_type pour pro])
+      let pvFindQuery = supabase
+        .from('procès_verbaux')
+        .select('id')
+        .eq('election_id', selectedElection)
+        .eq('bureau_id', bureauId);
+      if (collegeType) pvFindQuery = pvFindQuery.eq('college_type', collegeType);
+      const { data: existingPv, error: findPvErr } = await pvFindQuery.limit(1).maybeSingle();
+      if (findPvErr) throw findPvErr;
 
       let pv;
       if (existingPv?.id) {
@@ -847,9 +868,15 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                                   !o.pseudos.some((sp: any) => String(sp.id) === String(b.id))
                                 ),
                               ];
-                              const alreadyDone = allBForOption.length > 0
-                                ? allBForOption.every((b: any) => submittedColleges.has(`${formData.centre}_${String(b.id)}`))
-                                : submittedColleges.has(`${formData.centre}_${o.key}`);
+                              const collegeDoneKey = `${formData.centre}_${o.key}`;
+                              const collegePseudoDone = o.pseudos.some((p: any) =>
+                                submittedColleges.has(`${formData.centre}_${String(p.id)}`)
+                              );
+                              const collegePhysicalDone = allBForOption.length > 0 && allBForOption.every((b: any) =>
+                                submittedColleges.has(`${formData.centre}_${String(b.id)}`) ||
+                                submittedColleges.has(`${formData.centre}_${toRawCollegeKey(b.college_type || b.college) || 'general'}`)
+                              );
+                              const alreadyDone = submittedColleges.has(collegeDoneKey) || collegePseudoDone || collegePhysicalDone;
                               return (
                                 <SelectItem key={o.key} value={o.key} disabled={alreadyDone}>
                                   <span className="flex items-center gap-2">
@@ -892,7 +919,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             </SelectTrigger>
                             <SelectContent>
                               {allBureauxForCollege.map((b: any) => {
-                                const bureauDone = submittedColleges.has(`${formData.centre}_${String(b.id)}`);
+                                const bureauDone = submittedColleges.has(`${formData.centre}_${String(b.id)}`) ||
+                                  submittedColleges.has(`${formData.centre}_${toRawCollegeKey(b.college_type || b.college) || 'general'}`);
                                 return (
                                   <SelectItem key={b.id} value={String(b.id)} disabled={bureauDone}>
                                     <span className="flex items-center gap-2">
@@ -1113,14 +1141,29 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         }
 
         // ── Candidats visibles : collège sélectionné + établissement ────────
-        const visibleCandidates = isPro
+        const rawVisibleCandidates = isPro
           ? candidatesData.filter(c => {
               const collegeMatch = !effectiveCollegeType || c.college_type === effectiveCollegeType;
-              // Si le candidat a un établissement renseigné, ne l'afficher que pour cet établissement
               const etabMatch = !c.etablissement || c.etablissement.toLowerCase() === selectedCenterName;
               return collegeMatch && etabMatch;
             })
           : candidatesData;
+
+        // Déduplication par syndicat (clé = party avant " — ") pour éviter les doublons
+        // quand plusieurs titulaires existent pour le même syndicat+collège (cas multi-sièges).
+        // On conserve le premier id (vote reference) et on agrège les noms des titulaires.
+        const visibleCandidates = isPro ? (() => {
+          const syndicatMap = new Map<string, any>();
+          rawVisibleCandidates.forEach(c => {
+            const key = (c.party?.split(' — ')[0] || c.name || '').trim();
+            if (!syndicatMap.has(key)) {
+              syndicatMap.set(key, { ...c, allNames: [c.name] });
+            } else {
+              syndicatMap.get(key).allNames.push(c.name);
+            }
+          });
+          return Array.from(syndicatMap.values());
+        })() : rawVisibleCandidates;
 
         // Grouper par collège (uniquement les collèges présents dans les candidats visibles)
         const collegeGroups = isPro
@@ -1171,14 +1214,26 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         </div>
                         {groupCandidates.map(candidate => {
                           const syndicat = candidate.party?.split(' — ')[0] || '';
+                          const hasMultiple = Array.isArray(candidate.allNames) && candidate.allNames.length > 1;
                           return (
                             <div key={candidate.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center justify-between gap-4">
                               <div className="flex-1 min-w-0">
                                 <p className="font-bold text-blue-700 text-sm truncate">{syndicat}</p>
-                                <p className="text-sm text-gray-900 mt-0.5">
-                                  <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
-                                  <span className="font-semibold">{candidate.name}</span>
-                                </p>
+                                {hasMultiple ? (
+                                  <div className="mt-1 space-y-0.5">
+                                    {(candidate.allNames as string[]).map((n, i) => (
+                                      <p key={i} className="text-xs text-gray-600">
+                                        <span className="text-gray-400 font-medium">#{i + 1} </span>
+                                        <span className="font-semibold">{n}</span>
+                                      </p>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-gray-900 mt-0.5">
+                                    <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
+                                    <span className="font-semibold">{candidate.name}</span>
+                                  </p>
+                                )}
                                 {candidate.suppleant && (
                                   <p className="text-xs text-gray-500 mt-0.5">
                                     <span className="font-medium">Suppléant : </span>{candidate.suppleant}

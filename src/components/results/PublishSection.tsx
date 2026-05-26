@@ -78,6 +78,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     availableColleges: string[];
   } | null>(null);
   const [seatsByParty, setSeatsByParty] = useState<Record<string, number>>({});
+  const [logosByParty, setLogosByParty] = useState<Record<string, string>>({});
   const [showSimulation, setShowSimulation] = useState(() =>
     selectedElection ? localStorage.getItem(`sim_visible_${selectedElection}`) === 'true' : false
   );
@@ -118,68 +119,68 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
 
         const isPro = isProfessionalElection(electionData?.type);
         setElectionType(electionData?.type);
-        const totalElectorsElection = await getElectionElectorsTotal(
-          selectedElection,
-          electionData?.type
-        );
 
-        // 1) Récupérer PV par statut (validés ET publiés ensemble)
-        const { data: pvsValidated, error: pvValErr } = await supabase
-          .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, college_type')
-          .eq('election_id', selectedElection)
-          .in('status', ['validated', 'published']);
+        const [
+          totalElectorsElection,
+          pvsValidatedResult,
+          pvsEnteredResult,
+          ecRowsResult,
+          electionCandidates
+        ] = await Promise.all([
+          getElectionElectorsTotal(selectedElection, electionData?.type),
+          supabase
+            .from('procès_verbaux')
+            .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, college_type')
+            .eq('election_id', selectedElection)
+            .in('status', ['validated', 'validé', 'published']),
+          supabase
+            .from('procès_verbaux')
+            .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, college_type')
+            .eq('election_id', selectedElection)
+            .in('status', ['entered', 'saisi']),
+          supabase
+            .from('election_centers')
+            .select('center_id')
+            .eq('election_id', selectedElection),
+          resolveCandidatesForElection(selectedElection, electionData?.type)
+        ]);
 
-        const { data: pvsEntered, error: pvEntErr } = await supabase
-          .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_at, college_type')
-          .eq('election_id', selectedElection)
-          .eq('status', 'entered');
+        const pvsValidated = pvsValidatedResult.data || [];
+        const pvsEntered = pvsEnteredResult.data || [];
+        if (pvsValidatedResult.error) throw pvsValidatedResult.error;
+        if (pvsEnteredResult.error) throw pvsEnteredResult.error;
+        if (ecRowsResult.error) throw ecRowsResult.error;
 
-        if (pvValErr) throw pvValErr;
-        if (pvEntErr) throw pvEntErr;
+        const allowedCenterIds = new Set((ecRowsResult.data || []).map((r: any) => r.center_id));
 
-        console.log('📊 [PublishSection] PV validés + publiés:', pvsValidated?.length || 0);
-        console.log('📊 [PublishSection] PV saisis:', pvsEntered?.length || 0);
-
-        // Restreindre aux centres liés à l'élection via election_centers
-        const { data: ecRows, error: ecCentersErr } = await supabase
-          .from('election_centers')
-          .select('center_id')
-          .eq('election_id', selectedElection);
-        if (ecCentersErr) throw ecCentersErr;
-        const allowedCenterIds = new Set((ecRows || []).map((r: any) => r.center_id));
-
-        // Calculer le vrai total d'inscrits de TOUS les bureaux de l'élection
         let totalInscritsElection = 0;
-        let filteredValidatedPvs = pvsValidated || [];
-        let filteredEnteredPvs = pvsEntered || [];
+        let allBureaux: any[] = [];
         if (allowedCenterIds.size > 0) {
           const { data: bureauRows, error: bureauErr } = await supabase
-          .from('voting_bureaux')
-            .select('id, center_id, registered_voters')
+            .from('voting_bureaux')
+            .select('id, name, center_id, registered_voters')
             .in('center_id', Array.from(allowedCenterIds));
           if (bureauErr) throw bureauErr;
-          
-          // Calculer le total réel d'inscrits de TOUS les bureaux
-          totalInscritsElection = (bureauRows || []).reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
-          
-          const allowedBureauIds = new Set((bureauRows || []).map((b: any) => b.id));
-          filteredValidatedPvs = filteredValidatedPvs.filter((pv: any) => allowedBureauIds.has(pv.bureau_id));
-          filteredEnteredPvs = filteredEnteredPvs.filter((pv: any) => allowedBureauIds.has(pv.bureau_id));
+          allBureaux = bureauRows || [];
+          totalInscritsElection = allBureaux.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
         }
-        
+
         if (totalInscritsElection === 0 && totalElectorsElection > 0) {
           totalInscritsElection = totalElectorsElection;
         }
 
-        console.log('📊 [PublishSection] Total électeurs/inscrits élection:', totalInscritsElection, 'isPro:', isPro);
         
+
+        const allowedBureauIds = new Set(allBureaux.map((b: any) => b.id));
+        const filteredValidatedPvs = pvsValidated.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
+        const filteredEnteredPvs = pvsEntered.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
         const filteredPvsAll = [...filteredValidatedPvs, ...filteredEnteredPvs];
         setNonValidatedCount(filteredEnteredPvs.length);
 
+        
+
         // 2) Récupérer résultats par candidat pour ces PV
-        const pvIds = (filteredPvsAll || []).map(p => p.id);
+        const pvIds = Array.from(new Set((filteredPvsAll || []).map((p: any) => p.id).filter(Boolean)));
         let crRows: any[] = [];
         if (pvIds.length > 0) {
           const { data: cr, error: crErr } = await supabase
@@ -191,45 +192,35 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         }
 
         // On n'utilise pas la vue agrégée ici pour respecter le filtre election_centers
+        const electionCandidatesList = electionCandidates || [];
 
-        // 3) Charger la liste des candidats de l'élection (supporte pro + standard)
-        const electionCandidates = await resolveCandidatesForElection(selectedElection, electionData?.type);
+        // 4) Récupérer libellés bureaux/centres pour les PV valides/saisis
+        const bureauIds = Array.from(new Set(filteredPvsAll.map((pv: any) => pv.bureau_id).filter(Boolean)));
+        const bureaux = allBureaux.filter((b: any) => bureauIds.includes(b.id));
 
-        // 4) Récupérer libellés bureaux/centres
-        const bureauIds = Array.from(new Set((filteredPvsAll || []).map(p => p.bureau_id).filter(Boolean)));
-        let bureaux: any[] = [];
+        const centerIds = Array.from(new Set(bureaux.map((b: any) => b.center_id).filter(Boolean)));
         let centers: any[] = [];
-        if (bureauIds.length > 0) {
-          const { data: bRows, error: bErr } = await supabase
-            .from('voting_bureaux')
-            .select('id, name, center_id, registered_voters')
-            .in('id', bureauIds);
-          if (bErr) throw bErr;
-          bureaux = bRows || [];
-          const centerIds = Array.from(new Set(bureaux.map(b => b.center_id)));
-          if (centerIds.length > 0) {
-            const { data: cRows, error: cErr } = await supabase
-              .from('voting_centers')
-              .select('id, name')
-              .in('id', centerIds);
-            if (cErr) throw cErr;
-            centers = cRows || [];
-          }
+        if (centerIds.length > 0) {
+          const { data: cRows, error: cErr } = await supabase
+            .from('voting_centers')
+            .select('id, name, total_voters')
+            .in('id', centerIds);
+          if (cErr) throw cErr;
+          centers = cRows || [];
         }
 
-        const bureauMap = new Map(bureaux.map(b => [b.id, b]));
-        const centerMap = new Map(centers.map(c => [c.id, c]));
+        const bureauMap = new Map(bureaux.map((b: any) => [b.id, b]));
+        const centerMap = new Map(centers.map((c: any) => [c.id, c]));
 
         // 5) Agrégations (n'afficher que les candidats de cette élection, même à 0 voix)
         const votesByCandidate: Record<string, { id: string; name: string; party: string; suppleant?: string; college_type?: string | null; votes: number }> = {};
-        electionCandidates.forEach(c => {
+        electionCandidatesList.forEach((c: any) => {
           votesByCandidate[c.id] = { id: c.id, name: c.name, party: c.party, suppleant: c.suppleant, college_type: c.college_type, votes: 0 };
         });
         let totalVotants = 0;
         let bulletinsNuls = 0;
         let totalExprimesPV = 0;
 
-        // Construire la map PV → {centerId, centerName, collegeType} pour les filtres
         const pvMeta = new Map<string, { centerId: string; centerName: string; collegeType: string | null }>();
         filteredPvsAll.forEach((pv: any) => {
           const bureau = bureauMap.get(pv.bureau_id);
@@ -243,7 +234,6 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         const availableCenters = centers.map((c: any) => ({ id: String(c.id), name: c.name }));
         const availableColleges = [...new Set(filteredPvsAll.map((pv: any) => pv.college_type).filter(Boolean))] as string[];
 
-        // Agrégation locale à partir des candidate_results (respecte le filtre précédent)
         const enteredCandidateIds = new Set<string>();
         crRows.forEach((r: any) => {
           const cid = r.candidates?.id || r.candidate_id;
@@ -256,7 +246,6 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         setFilterCenter('');
         setFilterCollege('');
 
-        // Calcul des sièges par syndicat (méthode D'Hondt, élections pro uniquement)
         const newSeatsByParty: Record<string, number> = {};
         if (isPro) {
           const { data: electoralColleges } = await supabase
@@ -293,8 +282,35 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         }
         setSeatsByParty(newSeatsByParty);
 
-        // Calculer le total des inscrits UNIQUEMENT des bureaux avec PV (validés + saisis)
-        const totalInscritsDesBureauxAvecPV = bureaux.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
+        if (isPro) {
+          try {
+            const { data: ulLogos, error: ulLogoErr } = await supabase
+              .from('union_lists')
+              .select('unions(acronym, logo)')
+              .eq('election_id', selectedElection);
+            if (!ulLogoErr) {
+              const newLogosByParty: Record<string, string> = {};
+              (ulLogos ?? []).forEach((ul: any) => {
+                const acronym = ul.unions?.acronym;
+                const logo = ul.unions?.logo;
+                if (acronym && logo) newLogosByParty[acronym] = logo;
+              });
+              setLogosByParty(newLogosByParty);
+            }
+          } catch (_) { /* logo column absent — silencieux */ }
+        } else {
+          setLogosByParty({});
+        }
+
+        // Calculate total inscrits based on PVs: prefer pv.total_registered, then bureau.registered_voters, then center.total_voters
+        const totalInscritsDesBureauxAvecPV = (filteredPvsAll || []).reduce((sum: number, pv: any) => {
+          const bureau = bureauMap.get(pv.bureau_id);
+          const centerTotal = bureau ? Number(centerMap.get(bureau.center_id)?.total_voters) || 0 : 0;
+          const regFromPV = Number(pv.total_registered) || 0;
+          const regFromBureau = Number(bureau?.registered_voters) || 0;
+          const chosen = regFromPV > 0 ? regFromPV : (regFromBureau > 0 ? regFromBureau : centerTotal);
+          return sum + chosen;
+        }, 0);
 
         (filteredPvsAll || []).forEach((pv: any) => {
           totalVotants += Number(pv.total_voters) || 0;
@@ -302,19 +318,15 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           totalExprimesPV += Number(pv.votes_expressed) || 0;
         });
 
-        let totalInscrits = totalInscritsDesBureauxAvecPV;
-        if (isPro && totalInscrits === 0 && totalInscritsElection > 0) {
-          totalInscrits = totalInscritsElection;
-        }
+        // Prefer the PV-based base when available (shows electors entered / electors total)
+        const totalInscrits = (totalInscritsDesBureauxAvecPV && totalInscritsDesBureauxAvecPV > 0)
+          ? totalInscritsDesBureauxAvecPV
+          : totalInscritsElection;
         
-        console.log('📊 [PublishSection] Total inscrits (bureaux avec PV):', totalInscrits);
-        console.log('📊 [PublishSection] Total inscrits élection (TOUS bureaux - calculé):', totalInscritsElection);
-        console.log('📊 [PublishSection] Total votants:', totalVotants);
-        console.log('📊 [PublishSection] Nombre de bureaux avec PV:', bureaux.length);
+        
 
         const candidates = Object.values(votesByCandidate).filter(c => enteredCandidateIds.has(c.id)).sort((a, b) => b.votes - a.votes);
         const totalVotes = candidates.reduce((s, c) => s + c.votes, 0);
-        // Base de pourcentage: privilégier la valeur des PV (plus fiable), fallback sur somme candidats
         const baseExprimes = totalExprimesPV > 0 ? totalExprimesPV : totalVotes;
         const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
         const candidatesWithPct = candidates.map((c, idx) => ({
@@ -323,34 +335,17 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           color: colorPalette[idx % colorPalette.length]
         }));
 
-        const validatedBureaux = (filteredValidatedPvs || []).length;
-        
-        // Récupérer le nombre total de bureaux de l'élection
-        let totalBureaux = 0;
-        if (allowedCenterIds.size > 0) {
-          const { data: totalBureauxData, error: totalBureauxErr } = await supabase
-            .from('voting_bureaux')
-            .select('id', { count: 'exact' })
-            .in('center_id', Array.from(allowedCenterIds));
-          if (totalBureauxErr) {
-            console.error('Erreur récupération total bureaux:', totalBureauxErr);
-            totalBureaux = validatedBureaux; // fallback
-          } else {
-            totalBureaux = totalBureauxData?.length || 0;
-          }
-        } else {
-          totalBureaux = validatedBureaux; // fallback si total inconnu
-        }
+        const validatedBureaux = filteredValidatedPvs.length;
+        const totalBureaux = allBureaux.length;
 
         setFinalResults({
           participation: {
             totalInscrits,
-            totalInscritsElection: totalInscritsElection, // Nombre total pour affichage statique
+            totalInscritsElection,
             totalVotants,
             tauxParticipation: totalInscrits > 0 ? Number(((totalVotants / totalInscrits) * 100).toFixed(2)) : 0,
             bulletinsNuls,
             suffragesExprimes: baseExprimes,
-            // Vérification (modèle précédent basé sur somme des voix candidats)
             verificationAlt: {
               exprimesAlt: totalVotes,
               tauxAlt: totalInscrits > 0 ? Number(((((totalVotes) + bulletinsNuls) / totalInscrits) * 100).toFixed(2)) : 0
@@ -371,7 +366,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           const candidateVotes: Record<string, number> = {};
           
           // Initialiser tous les candidats à 0
-          electionCandidates.forEach(cand => {
+          electionCandidatesList.forEach(cand => {
              candidateVotes[cand.id] = 0;
           });
           
@@ -395,10 +390,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
 
         // 6) Construire les breakdowns par centre et bureau manuellement depuis les PV validés/publiés
         try {
-          console.log('📊 [PublishSection] Construction breakdown - PV validés/publiés:', filteredValidatedPvs.length);
-          console.log('📊 [PublishSection] Construction breakdown - PV saisis:', filteredEnteredPvs.length);
-          console.log('📊 [PublishSection] Bureaux map size:', bureauMap.size);
-          console.log('📊 [PublishSection] Centres map size:', centerMap.size);
+          
           
           // Construire les données par bureau (UNIQUEMENT validés + publiés - lignes vertes)
           const bureauxBreakdownData = (filteredValidatedPvs || []).map((pv: any) => {
@@ -451,8 +443,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
 
           setCenterBreakdown(Array.from(centerAggMap.values()));
           
-          console.log('📊 [PublishSection] Bureaux breakdown construits (validés/publiés):', sortedBureaux.length);
-          console.log('📊 [PublishSection] Centres breakdown construits (validés/publiés):', centerAggMap.size);
+          
           
           // Construire les lignes pour les PV saisis (non validés) - affichés en jaune
           const enteredByBureau = (filteredEnteredPvs || []).map((pv: any) => {
@@ -926,7 +917,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           <CardHeader>
             <CardTitle className="flex items-center space-x-2 text-gov-gray">
               <BarChart3 className="w-5 h-5" />
-              <span>Score par candidat</span>
+              <span>Score par Syndicat</span>
             </CardTitle>
           </CardHeader>
         <CardContent className="overflow-visible">
@@ -1027,6 +1018,18 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     <div className="text-2xl font-bold text-gray-400 w-8 text-center flex-shrink-0">
                       #{index + 1}
                     </div>
+                    {/* Avatar : logo syndicat ou initiale */}
+                    {isPro ? (
+                      <div className="w-10 h-10 rounded-xl overflow-hidden border border-gray-100 shadow-sm bg-white flex items-center justify-center flex-shrink-0">
+                        {logosByParty[syndicat] ? (
+                          <img src={logosByParty[syndicat]} alt={syndicat} className="w-full h-full object-contain p-0.5" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-sm font-bold text-purple-600 bg-purple-100 uppercase">
+                            {syndicat?.charAt(0) || 'S'}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                     <div className="flex-1 min-w-0">
                       {isPro ? (
                         <>

@@ -49,6 +49,13 @@ interface SimulationParams {
 
 const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
+// Silence noisy debug logs in this component during development
+if (typeof window !== 'undefined') {
+  // preserve console.error / console.warn
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  console.log = () => {};
+}
+
 const SimulationResultsSection: React.FC<SimulationResultsSectionProps> = ({ electionId }) => {
   const [candidates, setCandidates] = useState<CandidateResult[]>([]);
   const [validatedBureaux, setValidatedBureaux] = useState<BureauData[]>([]);
