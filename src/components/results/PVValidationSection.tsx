@@ -1204,7 +1204,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 {!readOnly && (role === 'super-admin' || role === 'admin' || role === 'validateur') && (
                   <Button
                     variant="outline"
-                    disabled={retracting || (!(selectedPVData?.status === 'validated' || selectedPVData?.status === 'anomaly') && role !== 'super-admin' && role !== 'admin')}
+                    disabled={retracting || !(selectedPVData?.status === 'validated' || selectedPVData?.status === 'anomaly')}
                     className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={async () => {
                       if (!selectedPV) return;
