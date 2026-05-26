@@ -49,8 +49,22 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
   const [teteDeListe, setTeteDeListe] = useState({ name: '', genre: '', anciennete: '', etablissement: '', photo: '', file: null as File | null, preview: '' });
   const [suppleant, setSuppleant] = useState({ name: '', genre: '', photo: '', file: null as File | null, preview: '' });
 
+  const [unionLogoFile, setUnionLogoFile] = useState<File | null>(null);
+  const [unionLogoPreview, setUnionLogoPreview] = useState('');
+
   const teteFileInputRef = useRef<HTMLInputElement>(null);
   const suppleantFileInputRef = useRef<HTMLInputElement>(null);
+  const unionLogoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUnionLogoFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setUnionLogoPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'tete' | 'suppleant') => {
     const file = e.target.files?.[0];
@@ -226,6 +240,13 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
         return;
       }
 
+      // Upload logo syndicat si fourni
+      if (unionLogoFile) {
+        const logoPath = `logos/union_${unionId}_${Date.now()}_${unionLogoFile.name}`;
+        const logoUrl = await uploadFile(unionLogoFile, logoPath);
+        await supabase.from('unions').update({ logo: logoUrl }).eq('id', unionId);
+      }
+
       let tetePhotoUrl = teteDeListe.photo;
       let suppleantPhotoUrl = suppleant.photo;
 
@@ -274,6 +295,8 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
       
       // Reset form and switch mode
       setNewUnion({ name: '', acronym: '' });
+      setUnionLogoFile(null);
+      setUnionLogoPreview('');
       setTeteDeListe({ name: '', genre: '', anciennete: '', etablissement: '', photo: '', file: null, preview: '' });
       setSuppleant({ name: '', genre: '', photo: '', file: null, preview: '' });
       setMode('select');
@@ -372,6 +395,36 @@ const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ onClose, onSubmit
             </form>
           ) : (
             <form onSubmit={handleAddUnionList} className="space-y-6">
+              {/* Logo du syndicat */}
+              <div className="flex flex-col items-center gap-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Logo du syndicat</p>
+                <div
+                  onClick={() => unionLogoInputRef.current?.click()}
+                  className="relative w-24 h-24 rounded-2xl border-2 border-dashed border-gray-200 bg-white hover:border-purple-400 hover:bg-purple-50 transition-all cursor-pointer overflow-hidden flex flex-col items-center justify-center group shadow-sm"
+                >
+                  {unionLogoPreview ? (
+                    <img src={unionLogoPreview} alt="Logo" className="w-full h-full object-contain p-2" />
+                  ) : (
+                    <>
+                      <Camera className="w-7 h-7 text-gray-300 group-hover:text-purple-500 mb-1" />
+                      <span className="text-[9px] text-gray-400 font-medium text-center px-1">Cliquer pour uploader</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    ref={unionLogoInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleLogoChange}
+                  />
+                </div>
+                {unionLogoPreview && (
+                  <button type="button" onClick={() => { setUnionLogoFile(null); setUnionLogoPreview(''); }} className="text-[10px] text-red-400 hover:text-red-600">
+                    Supprimer
+                  </button>
+                )}
+              </div>
+
               <ModernFormGrid cols={2}>
                 <FloatingInput
                   label="Nom du Syndicat"

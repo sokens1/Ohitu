@@ -98,6 +98,7 @@ interface ElectionData {
   title: string;
   election_date: string;
   status: string;
+  type?: string;
   description?: string;
   localisation?: string;
   is_published?: boolean;
@@ -115,6 +116,7 @@ interface CandidateResult {
   rank: number;
   seats?: number;
   colleges?: string[];
+  logo?: string;
 }
 
 interface ElectionResults {
@@ -242,9 +244,16 @@ const CandidateCard: React.FC<{
 
         <div className="relative z-10">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white ${getRankColor()} shadow-lg group-hover:scale-110 transition-transform duration-300`}>
-              <div className="scale-75 sm:scale-100">{getRankIcon()}</div>
-            </div>
+            {/* Logo syndicat si disponible, sinon badge de rang */}
+            {candidate.logo ? (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-gray-200 shadow-md bg-white flex-shrink-0 group-hover:scale-110 transition-transform duration-300">
+                <img src={candidate.logo} alt={candidate.candidate_name} className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white ${getRankColor()} shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                <div className="scale-75 sm:scale-100">{getRankIcon()}</div>
+              </div>
+            )}
             {isWinner && (
               <div className="flex items-center text-yellow-600">
                 <Star className="w-4 h-4 sm:w-5 sm:h-5 mr-1" />
@@ -967,6 +976,22 @@ const ElectionResults: React.FC = () => {
         }
       }
 
+      // Charger les logos syndicats pour les élections pro
+      const logosMap = new Map<string, string>();
+      if (isProfessional) {
+        try {
+          const { data: ulLogos } = await supabase
+            .from('union_lists')
+            .select('unions(acronym, logo)')
+            .eq('election_id', id);
+          (ulLogos ?? []).forEach((ul: any) => {
+            if (ul.unions?.acronym && ul.unions?.logo) {
+              logosMap.set(ul.unions.acronym, ul.unions.logo);
+            }
+          });
+        } catch (_) { /* colonne logo absente — silencieux */ }
+      }
+
       // Format final des candidats
       const finalCandidates: CandidateResult[] = filteredSummaryData
           .map(c => ({
@@ -977,7 +1002,8 @@ const ElectionResults: React.FC = () => {
             percentage: totalVotesCast > 0 ? (100 * (c.total_votes || 0)) / totalVotesCast : 0,
             rank: 0,
             seats: c.seats,
-            colleges: Array.from(c.colleges)
+            colleges: Array.from(c.colleges),
+            logo: logosMap.get(c.candidate_id) || undefined
           }))
           .sort((a, b) => b.total_votes - a.total_votes)
           .map((c, idx) => ({

@@ -10,6 +10,7 @@ import DataEntrySection from '@/components/results/DataEntrySection';
 import PVValidationSection from '@/components/results/PVValidationSection';
 import PublishSection from '@/components/results/PublishSection';
 import { useRBAC } from '@/hooks/useRBAC';
+import { getElectionElectorsTotal } from '@/utils/electionCalculations';
 
 // ─── Types internes ───────────────────────────────────────────────────────────
 interface ElectionOption { id: string; name: string; }
@@ -113,21 +114,55 @@ const Results = () => {
     if (!selectedElection) return;
 
     const fetchGlobalStats = async () => {
+      // Récupérer PVs avec champs utiles
       const { data: pvData } = await supabase
         .from('procès_verbaux')
-        .select('status')
+        .select('id, status, bureau_id, total_voters, college_type')
         .eq('election_id', selectedElection);
 
-      const { data: bureauxData } = await supabase
-        .from('voting_bureaux')
-        .select('id')
-        .eq('election_id', selectedElection);
+      // Total électeurs élection (dénominateur)
+      const totalElectors = await getElectionElectorsTotal(selectedElection);
 
-      const totalBureaux = bureauxData?.length ?? 0;
-      const pvsSaisis    = pvData?.filter((pv: { status: string }) => pv.status === 'saisi').length ?? 0;
-      const pvsEnAttente = pvData?.filter((pv: { status: string }) => pv.status === 'en_attente').length ?? 0;
-      const tauxSaisie   = totalBureaux > 0 ? Math.round((pvsSaisis / totalBureaux) * 100) : 0;
+      // Statuts considérés comme saisis
+      const enteredStatuses = ['entered','saisi','validated','validé'];
 
+      // Calculer électeurs saisis : priorité pv.total_voters, fallback sera calculé plus bas
+      const pvs = pvData || [];
+      let electorsEntered = 0;
+      let bureauxSaisis = 0;
+      for (const pv of pvs) {
+        if (enteredStatuses.includes(String(pv.status))) {
+          bureauxSaisis += 1;
+          const tv = Number(pv.total_voters) || 0;
+          electorsEntered += tv;
+        }
+      }
+
+      // Si aucun total_voters présent sur PVs, essayer d'utiliser registered_voters depuis voting_bureaux
+      if (electorsEntered === 0 && pvs.length > 0) {
+        const bureauIds = pvs.map((pv: any) => String(pv.bureau_id)).filter(Boolean);
+        if (bureauIds.length > 0) {
+          const { data: bureaux } = await supabase
+            .from('voting_bureaux')
+            .select('id, registered_voters')
+            .in('id', bureauIds);
+          const bureauxMap = new Map((bureaux || []).map((b: any) => [String(b.id), Number(b.registered_voters) || 0]));
+          electorsEntered = 0;
+          bureauxSaisis = 0;
+          for (const pv of pvs) {
+            if (enteredStatuses.includes(String(pv.status))) {
+              const bid = String(pv.bureau_id);
+              const rv = bureauxMap.get(bid) || 0;
+              electorsEntered += rv;
+              bureauxSaisis += 1;
+            }
+          }
+        }
+      }
+
+      const tauxSaisie = totalElectors > 0 ? Math.round((electorsEntered / totalElectors) * 100) : 0;
+
+      // Voix/candidate stats unchanged
       const { data: ecData } = await supabase
         .from('election_candidates')
         .select('candidate_id')
@@ -150,7 +185,7 @@ const Results = () => {
         }
       }
 
-      setGlobalStats({ tauxSaisie, bureauxSaisis: pvsSaisis, totalBureaux, voixNotreCanidat, ecartDeuxieme, anomaliesDetectees: 0, pvsEnAttente });
+      setGlobalStats({ tauxSaisie, bureauxSaisis, totalBureaux: totalElectors, voixNotreCanidat, ecartDeuxieme, anomaliesDetectees: 0, pvsEnAttente: pvs.filter((pv: any) => pv.status === 'en_attente').length || 0 });
     };
 
     fetchGlobalStats();

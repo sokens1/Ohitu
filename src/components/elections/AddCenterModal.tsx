@@ -58,7 +58,7 @@ interface AddCenterModalProps {
 }
 
 const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEditSubmit, editingCenter, electionId, enterpriseId, electionType }) => {
-  console.log('AddCenterModal - electionType:', electionType);
+  
   const isPro = electionType?.trim() === 'Élection Professionnelle';
   const isEditing = !!editingCenter;
   const [mode, setMode] = useState<'select' | 'create'>(isEditing ? 'create' : 'select');
@@ -128,14 +128,11 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
     if (isEditing && editingCenter && isPro && electionId) {
       const loadBureaux = async () => {
         try {
-          console.log('🔍 Chargement des bureaux pour:', editingCenter.id, electionId);
           const { data: bureaux, error } = await supabase
             .from('voting_bureaux')
             .select('*')
             .eq('center_id', editingCenter.id)
             .eq('election_id', electionId);
-
-          console.log('📊 Bureaux chargés:', bureaux);
 
           if (error) {
             console.error('Erreur Supabase:', error);
@@ -173,7 +170,7 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
               }
             });
 
-            console.log('✅ Collèges et bureaux extraits:', { encadrementData, cadreData, maitiseData, executionData, manualBureaux });
+            
 
             setNewProSite(prev => ({
               ...prev,

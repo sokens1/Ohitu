@@ -98,6 +98,8 @@ interface Candidate {
   college?: string;
   titulaires?: any[];
   suppleants?: any[];
+  unionLogo?: string | null;
+  unionId?: string | null;
 }
 
 interface ElectionDetailViewProps {
@@ -246,28 +248,39 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const fetchCandidates = useCallback(async () => {
       try {
         if (election.type === 'Élection Professionnelle') {
-          const { data, error } = await supabase
+          // Tentative avec logo (nécessite ALTER TABLE unions ADD COLUMN logo TEXT)
+          let rawData: any[] | null = null;
+          let hasLogo = true;
+
+          const { data: dataWithLogo, error: errWithLogo } = await supabase
             .from('union_lists')
-            .select(`
-              id,
-              college,
-              titulaires,
-              suppleants,
-              unions(id, name, acronym)
-            `)
+            .select(`id, college, titulaires, suppleants, unions(id, name, acronym, logo)`)
             .eq('election_id', election.id);
 
-          if (error) throw error;
+          if (errWithLogo) {
+            // Colonne logo absente ou erreur PostgREST — fallback sans logo
+            hasLogo = false;
+            const { data: dataNoLogo, error: errNoLogo } = await supabase
+              .from('union_lists')
+              .select(`id, college, titulaires, suppleants, unions(id, name, acronym)`)
+              .eq('election_id', election.id);
+            if (errNoLogo) throw errNoLogo;
+            rawData = dataNoLogo;
+          } else {
+            rawData = dataWithLogo;
+          }
 
-          const transformed: Candidate[] = data?.map((list: any) => ({
+          const transformed: Candidate[] = (rawData ?? []).map((list: any) => ({
             id: list.id,
             name: list.unions?.name || 'Syndicat inconnu',
             party: list.unions?.acronym || 'Indépendant',
             isOurCandidate: false,
             college: list.college,
             titulaires: list.titulaires || [],
-            suppleants: list.suppleants || []
-          })) || [];
+            suppleants: list.suppleants || [],
+            unionLogo: hasLogo ? (list.unions?.logo || null) : null,
+            unionId: list.unions?.id || null,
+          }));
 
           console.log(`📋 ${transformed.length} listes syndicales chargées pour l'élection`);
           setCandidates(transformed);
@@ -1651,16 +1664,23 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     <CardContent className="p-3 sm:p-4">
                       <div className="flex flex-col items-center text-center space-y-4 pt-2">
                         <div className="relative">
-                          {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] ? (
-                            <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-3xl overflow-hidden shadow-xl border-4 border-white bg-purple-50 group-hover:scale-105 transition-transform duration-500">
-                              {candidate.titulaires[0].photo ? (
-                                <img src={candidate.titulaires[0].photo} alt="Head" className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-4xl font-bold text-purple-600 bg-purple-100 uppercase">
-                                  {candidate.titulaires[0].name?.charAt(0) || 'T'}
+                          {election.type === 'Élection Professionnelle' ? (
+                            <>
+                              <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-3xl overflow-hidden shadow-xl border-4 border-white bg-purple-50 group-hover:scale-105 transition-transform duration-500">
+                                {candidate.titulaires?.[0]?.photo ? (
+                                  <img src={candidate.titulaires[0].photo} alt="Head" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-4xl font-bold text-purple-600 bg-purple-100 uppercase">
+                                    {candidate.titulaires?.[0]?.name?.charAt(0) || candidate.party?.charAt(0) || 'S'}
+                                  </div>
+                                )}
+                              </div>
+                              {candidate.unionLogo && (
+                                <div className="absolute -bottom-2 -right-2 w-10 h-10 rounded-xl bg-white shadow-lg border-2 border-white overflow-hidden">
+                                  <img src={candidate.unionLogo} alt="Logo syndicat" className="w-full h-full object-contain p-0.5" />
                                 </div>
                               )}
-                            </div>
+                            </>
                           ) : (
                             <InitialsAvatar
                               name={candidate.name}
@@ -1836,16 +1856,23 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           />
                         )}
                         <div className="relative flex-shrink-0">
-                          {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] ? (
-                            <div className="w-10 h-10 rounded-full overflow-hidden shadow-sm border-2 border-white bg-purple-50">
-                              {candidate.titulaires[0].photo ? (
-                                <img src={candidate.titulaires[0].photo} alt="Head" className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-sm font-bold text-purple-600 bg-purple-100 uppercase">
-                                  {candidate.titulaires[0].name?.charAt(0) || 'T'}
+                          {election.type === 'Élection Professionnelle' ? (
+                            <>
+                              <div className="w-10 h-10 rounded-full overflow-hidden shadow-sm border-2 border-white bg-purple-100">
+                                {candidate.titulaires?.[0]?.photo ? (
+                                  <img src={candidate.titulaires[0].photo} alt="Head" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-sm font-bold text-purple-600 uppercase">
+                                    {candidate.titulaires?.[0]?.name?.charAt(0) || candidate.party?.charAt(0) || 'S'}
+                                  </div>
+                                )}
+                              </div>
+                              {candidate.unionLogo && (
+                                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-md bg-white shadow border border-gray-100 overflow-hidden">
+                                  <img src={candidate.unionLogo} alt="Logo" className="w-full h-full object-contain" />
                                 </div>
                               )}
-                            </div>
+                            </>
                           ) : (
                             <InitialsAvatar
                               name={candidate.name}
