@@ -1242,8 +1242,8 @@ const DashboardModernSimple = () => {
           </TabsContent>
         </Tabs>
 
-        {/* WORKFLOW QUICK ACTIONS PANEL */}
-        <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
+        {/* WORKFLOW QUICK ACTIONS PANEL — commenté temporairement */}
+        {/* <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
           <CardHeader className="pb-3 border-b border-slate-50">
             <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
               <Zap className="w-5 h-5 text-amber-500 fill-amber-100" />
@@ -1254,69 +1254,40 @@ const DashboardModernSimple = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-6 pt-6">
-            {/* Gestion Électeurs — super-admin uniquement */}
             {can('view:voters') && (
-              <Button
-                onClick={() => navigate('/voters')}
-                className="h-22 flex flex-col items-center justify-center space-y-2 bg-blue-50/30 hover:bg-blue-50 border border-blue-100/50 hover:border-blue-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-                variant="outline"
-              >
+              <Button onClick={() => navigate('/voters')} className="h-22 flex flex-col items-center justify-center space-y-2 bg-blue-50/30 hover:bg-blue-50 border border-blue-100/50 hover:border-blue-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow" variant="outline">
                 <UserPlus className="w-6 h-6 text-blue-600" />
                 <span className="text-xs font-bold text-blue-800">Gestion Électeurs</span>
               </Button>
             )}
-
-            {/* Élections — super-admin + admin */}
             {can('elections:manage') && (
-              <Button
-                onClick={() => navigate('/elections')}
-                className="h-22 flex flex-col items-center justify-center space-y-2 bg-emerald-50/30 hover:bg-emerald-50 border border-emerald-100/50 hover:border-emerald-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-                variant="outline"
-              >
+              <Button onClick={() => navigate('/elections')} className="h-22 flex flex-col items-center justify-center space-y-2 bg-emerald-50/30 hover:bg-emerald-50 border border-emerald-100/50 hover:border-emerald-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow" variant="outline">
                 <Plus className="w-6 h-6 text-emerald-700" />
                 <span className="text-xs font-bold text-emerald-800">Nouvelle Élection</span>
               </Button>
             )}
-
-            {/* Résultats / Saisie PV — tous les rôles */}
             {can('view:results') && (
-              <Button
-                onClick={() => navigate('/results')}
-                className="h-22 flex flex-col items-center justify-center space-y-2 bg-amber-50/30 hover:bg-amber-50 border border-amber-100/50 hover:border-amber-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-                variant="outline"
-              >
+              <Button onClick={() => navigate('/results')} className="h-22 flex flex-col items-center justify-center space-y-2 bg-amber-50/30 hover:bg-amber-50 border border-amber-100/50 hover:border-amber-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow" variant="outline">
                 <FileText className="w-6 h-6 text-amber-600" />
                 <span className="text-xs font-bold text-amber-800">
                   {can('results:submit') ? 'Saisie PV' : can('results:validate') ? 'Validation PV' : 'Résultats'}
                 </span>
               </Button>
             )}
-
-            {/* Gestion utilisateurs — super-admin + admin */}
             {can('view:users') && (
-              <Button
-                onClick={() => navigate('/users')}
-                className="h-22 flex flex-col items-center justify-center space-y-2 bg-purple-50/30 hover:bg-purple-50 border border-purple-100/50 hover:border-purple-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-                variant="outline"
-              >
+              <Button onClick={() => navigate('/users')} className="h-22 flex flex-col items-center justify-center space-y-2 bg-purple-50/30 hover:bg-purple-50 border border-purple-100/50 hover:border-purple-200 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow" variant="outline">
                 <Settings className="w-6 h-6 text-purple-600" />
                 <span className="text-xs font-bold text-purple-800">Gestion Utilisateurs</span>
               </Button>
             )}
-
-            {/* Élections (lecture seule) — rôles opérationnels */}
             {!can('elections:manage') && can('view:elections') && (
-              <Button
-                onClick={() => navigate('/elections')}
-                className="h-22 flex flex-col items-center justify-center space-y-2 bg-slate-50/30 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow"
-                variant="outline"
-              >
+              <Button onClick={() => navigate('/elections')} className="h-22 flex flex-col items-center justify-center space-y-2 bg-slate-50/30 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-2xl transition-all duration-300 hover:scale-[1.02] shadow-sm hover:shadow" variant="outline">
                 <Calendar className="w-6 h-6 text-slate-500" />
                 <span className="text-xs font-bold text-slate-600">Mes Élections</span>
               </Button>
             )}
           </CardContent>
-        </Card>
+        </Card> */}
 
       </div>
     </Layout>
