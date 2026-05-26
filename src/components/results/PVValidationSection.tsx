@@ -153,9 +153,11 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   );
 };
 
-interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; }
+import type { ResultsFilters } from './ResultsFilterBar';
 
-const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false }) => {
+interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; filters?: ResultsFilters; }
+
+const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false, filters }) => {
   const { role } = useRBAC();
   const { user } = useAuth();
   const isObserver = role === 'observateur';
@@ -166,9 +168,6 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [comment, setComment] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'entered' | 'validated' | 'anomaly' | 'published'>('all');
-  const [search, setSearch] = useState('');
-  const [centerFilter, setCenterFilter] = useState<string>('all');
-  const [collegeFilter, setCollegeFilter] = useState<string>('all');
   const [loading, setLoading] = useState(false);
   const [pvs, setPvs] = useState<any[]>([]);
   const [bureauxMap, setBureauxMap] = useState<Map<string, { id: string; name: string; center_id: string }>>(new Map());
@@ -391,17 +390,17 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
     return enriched.filter(e => {
       if (filter !== 'all' && e.status !== filter) return false;
-      if (centerFilter !== 'all' && e.centerId !== centerFilter) return false;
-      if (collegeFilter !== 'all' && e.college_type !== collegeFilter) return false;
-      if (search.trim()) {
-        const q = search.trim().toLowerCase();
+      if (filters?.centerId && e.centerId !== filters.centerId) return false;
+      if (filters?.collegeType && e.college_type !== filters.collegeType) return false;
+      if (filters?.search?.trim()) {
+        const q = filters.search.trim().toLowerCase();
         if (!e.bureauLabel.toLowerCase().includes(q) &&
             !e.centerName.toLowerCase().includes(q) &&
             !e.bureauName.toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [pvs, bureauxMap, centersMap, filter, centerFilter, collegeFilter, search, observerOpinions]);
+  }, [pvs, bureauxMap, centersMap, filter, filters, observerOpinions]);
 
   const getStatusLabel = (status: string) => {
     switch (status) {

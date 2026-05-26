@@ -10,6 +10,7 @@ import DataEntrySection from '@/components/results/DataEntrySection';
 import PVValidationSection from '@/components/results/PVValidationSection';
 import PublishSection from '@/components/results/PublishSection';
 import DocumentsSection from '@/components/results/DocumentsSection';
+import ResultsFilterBar, { ResultsFilters, EMPTY_FILTERS } from '@/components/results/ResultsFilterBar';
 import { useRBAC } from '@/hooks/useRBAC';
 import { getElectionElectorsTotal } from '@/utils/electionCalculations';
 
@@ -55,6 +56,7 @@ const Results = () => {
     voixNotreCanidat: 0, ecartDeuxieme: 0, anomaliesDetectees: 0, pvsEnAttente: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState<ResultsFilters>(EMPTY_FILTERS);
 
   // ── Chargement des élections ───────────────────────────────────────────────
   // Règle : seul le super-admin voit toutes les élections.
@@ -105,6 +107,7 @@ const Results = () => {
     if (isGlobalAdmin && selectedElection) {
       localStorage.setItem('results_selected_election', selectedElection);
     }
+    setFilters(EMPTY_FILTERS); // Réinitialiser les filtres à chaque changement d'élection
   }, [selectedElection, isGlobalAdmin]);
 
   useEffect(() => {
@@ -274,6 +277,13 @@ const Results = () => {
           </Card>
         </div>
 
+        {/* Barre de filtres partagée */}
+        <ResultsFilterBar
+          selectedElection={selectedElection}
+          filters={filters}
+          onChange={setFilters}
+        />
+
         {/* Onglets — seuls ceux autorisés sont affichés */}
         <Card className="gov-card">
           <CardContent className="p-0">
@@ -304,19 +314,19 @@ const Results = () => {
 
               <div className="p-3 sm:p-4 lg:p-6">
                 <TabsContent value="entry" className="space-y-6 mt-0">
-                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} />
+                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} filters={filters} />
                 </TabsContent>
 
                 <TabsContent value="validation" className="space-y-6 mt-0">
-                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} />
+                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} filters={filters} />
                 </TabsContent>
 
                 <TabsContent value="publish" className="space-y-6 mt-0">
-                  <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} />
+                  <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} filters={filters} />
                 </TabsContent>
 
                 <TabsContent value="documents" className="space-y-6 mt-0">
-                  <DocumentsSection selectedElection={selectedElection} />
+                  <DocumentsSection selectedElection={selectedElection} filters={filters} />
                 </TabsContent>
               </div>
             </Tabs>

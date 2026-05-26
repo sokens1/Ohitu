@@ -12,6 +12,7 @@ import {
   CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { toast } from 'sonner';
+import type { ResultsFilters } from './ResultsFilterBar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface EstablishmentDocument {
@@ -48,6 +49,7 @@ interface ReviewState {
 
 interface Props {
   selectedElection: string;
+  filters?: ResultsFilters;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,7 +83,7 @@ function FileIcon({ name }: { name: string | null }) {
 }
 
 // ─── Composant principal ───────────────────────────────────────────────────────
-const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
+const DocumentsSection: React.FC<Props> = ({ selectedElection, filters }) => {
   const { user } = useAuth();
   const { can } = useRBAC();
 
@@ -320,8 +322,20 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     );
   }
 
+  // ── Filtrage partagé ────────────────────────────────────────────────────────
+  const searchQ = filters?.search?.trim().toLowerCase() ?? '';
+  const activeCenterId  = filters?.centerId    ?? '';
+  const activeCollege   = filters?.collegeType ?? '';
+
+  const matchesFilters = (center: Center) => {
+    if (activeCenterId && center.id !== activeCenterId) return false;
+    if (searchQ && !center.name.toLowerCase().includes(searchQ)) return false;
+    return true;
+  };
+
   // ── Vue président d'établissement ───────────────────────────────────────────
   if (canUpload) {
+    const filteredCenters = centers.filter(matchesFilters);
     return (
       <div className="space-y-4">
         <input
@@ -336,14 +350,20 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
           Joignez les documents pour vos établissements. Formats acceptés : image (JPG, PNG…) ou PDF.
         </p>
 
-        {centers.length === 0 && (
-          <div className="text-center text-gray-400 py-10">Aucun établissement assigné.</div>
+        {filteredCenters.length === 0 && (
+          <div className="text-center text-gray-400 py-10">
+            {centers.length === 0 ? 'Aucun établissement assigné.' : 'Aucun résultat pour ces filtres.'}
+          </div>
         )}
 
-        {centers.map(center => {
-          const colleges = center.assignedColleges.length > 0
+        {filteredCenters.map(center => {
+          const allColleges: (string | null)[] = center.assignedColleges.length > 0
             ? center.assignedColleges
             : [null]; // null = tous les collèges
+          // Filtre par collège si actif
+          const colleges = activeCollege
+            ? allColleges.filter(c => c === activeCollege)
+            : allColleges;
 
           return (
             <Card key={center.id} className="border border-teal-100">
@@ -417,10 +437,15 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   }
 
   // ── Vue admin / agent-saisie : liste tous les documents ─────────────────────
-  const docsByCenter = centers.map(center => ({
-    center,
-    docs: docs.filter(d => d.center_id === center.id),
-  }));
+  const docsByCenter = centers
+    .filter(matchesFilters)
+    .map(center => ({
+      center,
+      docs: docs.filter(d =>
+        d.center_id === center.id &&
+        (!activeCollege || d.college_type === activeCollege)
+      ),
+    }));
 
   return (
     <div className="space-y-4">
