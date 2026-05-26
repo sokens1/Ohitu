@@ -100,6 +100,7 @@ interface Candidate {
   suppleants?: any[];
   unionLogo?: string | null;
   unionId?: string | null;
+  seatsToFill?: number;
 }
 
 interface ElectionDetailViewProps {
@@ -270,6 +271,16 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             rawData = dataWithLogo;
           }
 
+          // Récupérer les sièges par collège
+          const { data: electoralColleges } = await supabase
+            .from('electoral_colleges')
+            .select('college_type, seats_to_fill')
+            .eq('election_id', election.id);
+
+          const seatsMap = new Map<string, number>(
+            (electoralColleges || []).map((ec: any) => [String(ec.college_type), Number(ec.seats_to_fill) || 1])
+          );
+
           const transformed: Candidate[] = (rawData ?? []).map((list: any) => ({
             id: list.id,
             name: list.unions?.name || 'Syndicat inconnu',
@@ -280,6 +291,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             suppleants: list.suppleants || [],
             unionLogo: hasLogo ? (list.unions?.logo || null) : null,
             unionId: list.unions?.id || null,
+            seatsToFill: seatsMap.get(list.college) || 1,
           }));
 
           console.log(`📋 ${transformed.length} listes syndicales chargées pour l'élection`);
@@ -739,7 +751,18 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   };
 
   const handleUpdateCandidate = (updatedCandidate: Candidate) => {
-    setCandidates(candidates.map(c => c.id === updatedCandidate.id ? updatedCandidate : c));
+    setCandidates(candidates.map(c => {
+      if (c.id === updatedCandidate.id) return updatedCandidate;
+      // Propager le nouveau logo à toutes les cartes du même syndicat
+      if (
+        updatedCandidate.unionLogo &&
+        updatedCandidate.party &&
+        c.party === updatedCandidate.party
+      ) {
+        return { ...c, unionLogo: updatedCandidate.unionLogo };
+      }
+      return c;
+    }));
     setShowEditCandidate(false);
     setSelectedCandidate(null);
     if (onDataChange) {
@@ -1720,20 +1743,58 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           )}
                         </div>
 
-                        {election.type === 'Élection Professionnelle' && candidate.suppleants?.[0] && (
-                          <div className="w-full mt-2 pt-3 border-t border-gray-100 flex flex-col items-center justify-center gap-2">
-                            <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 border-2 border-white shadow-sm">
-                              {candidate.suppleants[0].photo ? (
-                                <img src={candidate.suppleants[0].photo} alt="Deputy" className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-[11px] font-bold text-blue-600">S</div>
-                              )}
+                        {election.type === 'Élection Professionnelle' && (
+                          (candidate.titulaires?.length || 0) > 1 ? (
+                            // Collège multi-sièges : deux colonnes côte à côte
+                            <div className="w-full mt-2 pt-3 border-t border-gray-100">
+                              <div className="grid grid-cols-2 gap-x-2">
+                                <p className="text-[9px] font-black text-purple-700 uppercase text-center mb-1.5">Titulaires</p>
+                                <p className="text-[9px] font-black text-blue-700 uppercase text-center mb-1.5">Suppléants</p>
+                                {(candidate.titulaires || []).map((t: any, i: number) => {
+                                  const s = candidate.suppleants?.[i];
+                                  return (
+                                    <React.Fragment key={i}>
+                                      <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                                        <div className="w-6 h-6 rounded-full overflow-hidden bg-purple-100 flex-shrink-0 flex items-center justify-center">
+                                          {t.photo
+                                            ? <img src={t.photo} alt="" className="w-full h-full object-cover" />
+                                            : <span className="text-[8px] font-bold text-purple-600">{t.name?.charAt(0) || 'T'}</span>}
+                                        </div>
+                                        <p className="text-[9px] font-bold text-gray-700 truncate leading-tight">{t.name}</p>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                                        {s && (
+                                          <>
+                                            <div className="w-6 h-6 rounded-full overflow-hidden bg-blue-100 flex-shrink-0 flex items-center justify-center">
+                                              {s.photo
+                                                ? <img src={s.photo} alt="" className="w-full h-full object-cover" />
+                                                : <span className="text-[8px] font-bold text-blue-600">{s.name?.charAt(0) || 'S'}</span>}
+                                            </div>
+                                            <p className="text-[9px] font-bold text-gray-700 truncate leading-tight">{s.name}</p>
+                                          </>
+                                        )}
+                                      </div>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </div>
                             </div>
-                            <div className="text-center">
-                              <p className="text-[9px] font-black text-gray-400 uppercase leading-none">Suppléant</p>
-                              <p className="text-[10px] font-bold text-gray-700 break-words">{candidate.suppleants[0].name}</p>
+                          ) : candidate.suppleants?.[0] ? (
+                            // Collège 1 siège : affichage simple existant
+                            <div className="w-full mt-2 pt-3 border-t border-gray-100 flex flex-col items-center justify-center gap-2">
+                              <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 border-2 border-white shadow-sm">
+                                {candidate.suppleants[0].photo ? (
+                                  <img src={candidate.suppleants[0].photo} alt="Deputy" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-[11px] font-bold text-blue-600">S</div>
+                                )}
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[9px] font-black text-gray-400 uppercase leading-none">Suppléant</p>
+                                <p className="text-[10px] font-bold text-gray-700 break-words">{candidate.suppleants[0].name}</p>
+                              </div>
                             </div>
-                          </div>
+                          ) : null
                         )}
 
                         {canManage && (

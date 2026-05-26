@@ -325,7 +325,7 @@ const ElectionResults: React.FC = () => {
   const [results, setResults] = useState<ElectionResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'center' | 'bureau' | 'college'>('bureau');
+  const [viewMode, setViewMode] = useState<'center' | 'college'>('center');
   const [centerRows, setCenterRows] = useState<any[]>([]);
   const [bureauRows, setBureauRows] = useState<any[]>([]);
   const [collegeDetailRows, setCollegeDetailRows] = useState<CollegeDetailRow[]>([]);
@@ -2529,11 +2529,10 @@ const ElectionResults: React.FC = () => {
                     {/* <div className="mt-2 text-sm text-gov-gray">Voix: {c.total_votes.toLocaleString()} • Part: {c.percentage.toFixed(1)}%</div> */}
                   </div>
                   <Tabs defaultValue="center">
-                    <TabsList className={`grid w-full ${results.election?.type === 'Élection Professionnelle' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                    <TabsList className={`grid w-full ${results.election?.type === 'Élection Professionnelle' ? 'grid-cols-2' : 'grid-cols-1'}`}>
                       <TabsTrigger value="center" className="text-xs sm:text-sm">
                         {results.election?.type === 'Élection Professionnelle' ? 'Par établissement' : 'Par centre'}
                       </TabsTrigger>
-                      <TabsTrigger value="bureau" className="text-xs sm:text-sm">Par bureau</TabsTrigger>
                       {results.election?.type === 'Élection Professionnelle' && (
                         <TabsTrigger value="college" className="text-xs sm:text-sm">Par collège</TabsTrigger>
                       )}
@@ -2637,47 +2636,7 @@ const ElectionResults: React.FC = () => {
                         </div>
                       )}
                     </TabsContent>
-                    <TabsContent value="bureau">
-                      {hasCandidateBureauData() ? (
-                        <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 mt-3 -mx-4 sm:-mx-6 lg:-mx-8">
-                          <table className="min-w-full min-w-[500px] bg-white border">
-                            <thead className="bg-slate-100 text-gov-dark">
-                              <tr>
-                                <th className="text-left px-2 sm:px-3 py-2 border text-xs sm:text-sm whitespace-nowrap">Centre</th>
-                                <th className="text-left px-2 sm:px-3 py-2 border text-xs sm:text-sm whitespace-nowrap">Bureau</th>
-                                <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Voix</th>
-                                <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Score</th>
-                                <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Abstention</th>
-                              </tr>
-                            </thead>
-                            <tbody className="text-xs sm:text-sm">
-                              {getSortedCandidateBureaux().map((b, idx) => (
-                                <tr key={idx} className="odd:bg-white even:bg-slate-50">
-                                  <td className="px-2 sm:px-3 py-2 border whitespace-nowrap">{b.center_name || centerNameById[b.center_id] || b.center_id}</td>
-                                  <td className="px-2 sm:px-3 py-2 border whitespace-nowrap">{b.bureau_name}</td>
-                                  <td className="px-2 sm:px-3 py-2 border text-right">{b.candidate_votes ?? '-'}</td>
-                                  <td className="px-2 sm:px-3 py-2 border text-right">{typeof b.candidate_percentage === 'number' ? `${Math.min(Math.max(b.candidate_percentage, 0), 100).toFixed(2)}%` : '-'}</td>
-                                  <td className="px-2 sm:px-3 py-2 border text-right">{typeof b.candidate_participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.candidate_participation_pct, 0), 100)).toFixed(2)}%` : '-'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className="mt-6 p-8 text-center">
-                          <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                            <Target className="w-8 h-8 text-gray-400" />
-                          </div>
-                          <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                            Aucune donnée par bureau
-                          </h3>
-                          <p className="text-gray-600 text-sm">
-                            Les résultats détaillés par bureau de vote ne sont pas encore disponibles pour ce candidat.
-                          </p>
-                        </div>
-                      )}
-                    </TabsContent>
-                    
+
                     {results.election?.type === 'Élection Professionnelle' && (
                     <TabsContent value="college">
                       {hasCandidateBureauData() ? (
@@ -2757,17 +2716,7 @@ const ElectionResults: React.FC = () => {
                       {results.election?.type === 'Élection Professionnelle' ? 'Étab.' : 'Centres'}
                     </span>
                   </button>
-                  <button
-                    onClick={() => setViewMode('bureau')}
-                    className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'bureau'
-                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
-                      : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
-                      }`}
-                  >
-                    <Target className="w-3 h-3 sm:w-4 sm:h-4" />
-                    <span className="hidden sm:inline">Par bureau</span>
-                    <span className="sm:hidden">Bureaux</span>
-                  </button>
+
                   {isProResults && (
                     <button
                       onClick={() => setViewMode('college')}
@@ -2874,7 +2823,7 @@ const ElectionResults: React.FC = () => {
                     </table>
                   </div>
                 </div>
-              ) : viewMode === 'center' ? (
+              ) : (
                 <div className="space-y-3 sm:space-y-4 lg:space-y-6">
                   {(getSortedAndGroupedData() as CenterGroup[]).map((group, idx) => {
                     const c = group.center;
@@ -3018,132 +2967,6 @@ const ElectionResults: React.FC = () => {
                   {(getSortedAndGroupedData() as CenterGroup[]).length === 0 && (
                     <div className="text-center text-gov-gray">Aucun centre à afficher.</div>
                   )}
-                </div>
-              ) : (
-                <div className="bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-                  <div className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 bg-gradient-to-r from-gray-50 to-blue-50 border-b border-gray-200">
-                    <h3 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-800 flex items-center gap-1.5 sm:gap-2">
-                      <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-blue-600" />
-                      Vue détaillée par bureau
-                    </h3>
-                    <p className="text-[10px] sm:text-xs lg:text-sm text-gray-600 mt-0.5 sm:mt-1">
-                      Tous les bureaux de vote avec leurs statistiques complètes
-                    </p>
-                  </div>
-                  <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
-                    <table className="w-full min-w-[600px]">
-                      <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
-                        <tr>
-                          <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
-                            <div className="flex items-center gap-1">
-                              <Building className="w-2 h-2" />
-                              <span className="hidden sm:inline">
-                                {results.election?.type === 'Élection Professionnelle' ? 'Établissement' : 'Centre'}
-                              </span>
-                              <span className="sm:hidden">
-                                {results.election?.type === 'Élection Professionnelle' ? 'Étab.' : 'Cent.'}
-                              </span>
-                            </div>
-                          </th>
-                          <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
-                            <div className="flex items-center gap-1">
-                              <Target className="w-2 h-2" />
-                              <span className="hidden sm:inline">Bureau</span>
-                              <span className="sm:hidden">Bur.</span>
-                            </div>
-                          </th>
-                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1">
-                              <Users className="w-2 h-2" />
-                              <span>{electorsLabel}</span>
-                            </div>
-                          </th>
-                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1">
-                              <Vote className="w-2 h-2" />
-                              <span>Votants</span>
-                            </div>
-                          </th>
-                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1">
-                              <BarChart3 className="w-2 h-2" />
-                              <span>Suf. Exp</span>
-                            </div>
-                          </th>
-                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1">
-                              <TrendingUp className="w-2 h-2" />
-                              <span>Abstention</span>
-                            </div>
-                          </th>
-                          {/* <th className="text-right px-3 sm:px-6 py-3 sm:py-4 font-semibold text-xs sm:text-sm">
-                         <div className="flex items-center justify-end gap-1 sm:gap-2">
-                           <Target className="w-3 h-3 sm:w-4 sm:h-4" />
-                           Score
-                         </div>
-                       </th> */}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {(getSortedAndGroupedData() as BureauData[]).map((b, idx) => (
-                          <tr key={`${b.center_id}-${b.bureau_number}-${idx}`} className="hover:bg-blue-50 transition-colors duration-200">
-                            <td className="px-2 py-2 font-medium text-gray-800 text-[8px] sm:text-xs">
-                              <div className="flex items-center gap-1">
-                                <Building className="w-2 h-2 text-blue-600" />
-                                <span className="truncate">{b.center_name || centerNameById[b.center_id] || b.center_id}</span>
-                              </div>
-                            </td>
-                            <td className="px-2 py-2 text-[8px] sm:text-xs">
-                              <div className="flex items-center gap-1">
-                                <Target className="w-2 h-2 text-blue-600" />
-                                <span className="truncate whitespace-nowrap">{b.bureau_name}</span>
-                              </div>
-                            </td>
-                            <td className="px-2 py-2 text-right text-[8px] sm:text-xs">
-                              <span className="font-bold text-gray-800">{b.total_registered?.toLocaleString() ?? '-'}</span>
-                            </td>
-                            <td className="px-2 py-2 text-right text-[8px] sm:text-xs">
-                              <span className="font-bold text-gray-800">{b.total_voters?.toLocaleString() ?? '-'}</span>
-                            </td>
-                            <td className="px-2 py-2 text-right text-[8px] sm:text-xs">
-                              <span className="font-bold text-blue-600">{b.total_expressed_votes?.toLocaleString?.() || b.total_expressed_votes}</span>
-                            </td>
-                            <td className="px-2 py-2 text-right text-[8px] sm:text-xs">
-                              <span className={`px-1 py-0.5 rounded-full text-[8px] font-bold ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
-                                typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-green-100 text-green-800'
-                                }`}>
-                                {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : (b.participation_pct || '-')}
-                              </span>
-                            </td>
-                            {/* <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
-                           <div className="flex flex-col items-end">
-                             <span className={`px-2 sm:px-3 py-1 rounded-full text-xs font-bold ${
-                               typeof b.score_pct === 'number' && b.score_pct >= 50 ? 'bg-blue-100 text-blue-800' :
-                               typeof b.score_pct === 'number' && b.score_pct >= 30 ? 'bg-indigo-100 text-indigo-800' :
-                               'bg-gray-100 text-gray-800'
-                             }`}>
-                               {typeof b.score_pct === 'number' ? `${Math.min(Math.max(b.score_pct, 0), 100).toFixed(1)}%` : (b.score_pct || '-')}
-                             </span>
-                             <span className="text-xs text-gray-500 mt-1 hidden sm:block">score</span>
-                           </div>
-                         </td> */}
-                          </tr>
-                        ))}
-                        {(getSortedAndGroupedData() as BureauData[]).length === 0 && (
-                          <tr>
-                            <td className="px-2 sm:px-6 py-6 sm:py-8 lg:py-12 text-center text-gray-500 text-[10px] sm:text-sm lg:text-base" colSpan={6}>
-                              <div className="flex flex-col items-center gap-1.5 sm:gap-2 lg:gap-3">
-                                <BarChart3 className="w-6 h-6 sm:w-8 sm:h-8 lg:w-12 lg:h-12 text-gray-400" />
-                                <span className="text-sm sm:text-base lg:text-lg font-medium">Aucun bureau à afficher</span>
-                                <span className="text-[10px] sm:text-xs lg:text-sm">Les données des bureaux ne sont pas encore disponibles</span>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
               )}
             </div>

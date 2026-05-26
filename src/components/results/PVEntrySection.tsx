@@ -77,6 +77,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   const [centerCollegesMap, setCenterCollegesMap] = useState<Map<string, any[]>>(new Map());
   // Clés "centreId_bureauId" des PV déjà soumis pour cette élection
   const [submittedColleges, setSubmittedColleges] = useState<Set<string>>(new Set());
+  // Clés "bureauId_collegeKey" pour tracker les PV soumis par bureau physique et collège
+  const [submittedBureauColleges, setSubmittedBureauColleges] = useState<Set<string>>(new Set());
   // Nb votants déjà saisis par bureauId (pour pré-remplir le champ votants)
   const [submittedVotersMap, setSubmittedVotersMap] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -267,6 +269,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
           });
 
           const doneKeys = new Set<string>();
+          const bcDoneKeys = new Set<string>();
           const votersMap = new Map<string, number>();
           (existingPVs || []).forEach((pv: any) => {
             const bureauId = String(pv.bureau_id);
@@ -274,6 +277,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
 
             const centerId = pseudoToCenterMap.get(bureauId);
             const collegeKey = toRawCollegeKey(pv.college_type || pseudoToCollegeKeyMap.get(bureauId)) || 'general';
+
+            if (bureauId && collegeKey) {
+              bcDoneKeys.add(`${bureauId}_${collegeKey}`);
+            }
 
             if (centerId) {
               doneKeys.add(`${centerId}_${bureauId}`);
@@ -290,6 +297,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             }
           });
           setSubmittedColleges(doneKeys);
+          setSubmittedBureauColleges(bcDoneKeys);
           setSubmittedVotersMap(votersMap);
         }
 
@@ -919,8 +927,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             </SelectTrigger>
                             <SelectContent>
                               {allBureauxForCollege.map((b: any) => {
-                                const bureauDone = submittedColleges.has(`${formData.centre}_${String(b.id)}`) ||
-                                  submittedColleges.has(`${formData.centre}_${toRawCollegeKey(b.college_type || b.college) || 'general'}`);
+                                const bureauDone = formData.college
+                                  ? submittedBureauColleges.has(`${String(b.id)}_${formData.college}`)
+                                  : submittedColleges.has(`${formData.centre}_${String(b.id)}`) ||
+                                    submittedColleges.has(`${formData.centre}_${toRawCollegeKey(b.college_type || b.college) || 'general'}`);
                                 return (
                                   <SelectItem key={b.id} value={String(b.id)} disabled={bureauDone}>
                                     <span className="flex items-center gap-2">
