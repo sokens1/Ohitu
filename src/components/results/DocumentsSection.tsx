@@ -1,9 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -82,7 +82,7 @@ function FileIcon({ name }: { name: string | null }) {
 // ─── Composant principal ───────────────────────────────────────────────────────
 const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const { user } = useAuth();
-  const { can, role } = useRBAC();
+  const { can } = useRBAC();
 
   const canUpload   = can('documents:upload');
   const canReview   = can('documents:review');
@@ -133,7 +133,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
       const builtCenters: Center[] = centerIds.map(cid => ({
         id: cid,
-        name: centerMap.get(cid) ?? cid,
+        name: (centerMap.get(cid) ?? cid) as string,
         assignedColleges: user?.assigned_center_colleges?.[cid] ?? [],
       }));
       setCenters(builtCenters);
@@ -183,25 +183,21 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
     try {
       const ext = file.name.split('.').pop() ?? 'bin';
-      const path = `${selectedElection}/${centerId}/${docType}_${Date.now()}.${ext}`;
+      // Stocké dans pv-uploads (bucket existant) sous establishment-docs/
+      const path = `establishment-docs/${selectedElection}/${centerId}/${docType}_${Date.now()}.${ext}`;
 
-      // Upload dans le bucket
       const { error: upErr } = await supabase.storage
-        .from('establishment-docs')
+        .from('pv-uploads')
         .upload(path, file, { upsert: false });
 
       if (upErr) {
         const msg = (upErr as any)?.message ?? '';
-        if (msg.toLowerCase().includes('bucket')) {
-          toast.error("Bucket 'establishment-docs' introuvable. Veuillez le créer dans Supabase Storage.");
-        } else {
-          toast.error(`Échec upload : ${msg}`);
-        }
+        toast.error(`Échec upload : ${msg || 'erreur inconnue'}`);
         return;
       }
 
       const { data: urlData } = supabase.storage
-        .from('establishment-docs')
+        .from('pv-uploads')
         .getPublicUrl(path);
 
       // Upsert en base (1 document par centre+collège+type)
@@ -253,14 +249,14 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   // ── Téléchargement ──────────────────────────────────────────────────────────
   const handleDownload = async (doc: EstablishmentDocument) => {
     try {
-      // Extraire le path depuis l'URL publique
+      // Extraire le path depuis l'URL publique (bucket pv-uploads)
       const url = new URL(doc.file_url);
-      const parts = url.pathname.split('/establishment-docs/');
+      const parts = url.pathname.split('/pv-uploads/');
       const filePath = parts[1];
       if (!filePath) { window.open(doc.file_url, '_blank'); return; }
 
       const { data, error } = await supabase.storage
-        .from('establishment-docs')
+        .from('pv-uploads')
         .download(filePath);
 
       if (error || !data) { window.open(doc.file_url, '_blank'); return; }
