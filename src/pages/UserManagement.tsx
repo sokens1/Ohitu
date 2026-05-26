@@ -301,10 +301,13 @@ const UserManagement = () => {
     setShowEditModal(true);
   };
 
-  // Charger les centres + collèges disponibles pour le validateur
+  // Rôles qui peuvent être assignés à des établissements + collèges
+  const ROLES_WITH_CENTERS: UserRole[] = ['validateur', 'agent-saisie', 'president-etablissement'];
+
+  // Charger les centres + collèges disponibles
   useEffect(() => {
     const loadCentersAndColleges = async () => {
-      if (fRole !== 'validateur' || fElectionIds.length === 0) {
+      if (!ROLES_WITH_CENTERS.includes(fRole) || fElectionIds.length === 0) {
         setAvailableCenters([]); setAvailableColleges([]); return;
       }
       // Centres liés aux élections sélectionnées
@@ -377,8 +380,8 @@ const UserManagement = () => {
           is_active: fActive,
           assigned_election_id: fElectionIds[0] ?? null,
           assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
-          assigned_center_ids: fRole === 'validateur' ? Object.keys(fCenterColleges) : null,
-          assigned_center_colleges: fRole === 'validateur' && Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null,
+          assigned_center_ids: ROLES_WITH_CENTERS.includes(fRole) ? Object.keys(fCenterColleges) : null,
+          assigned_center_colleges: ROLES_WITH_CENTERS.includes(fRole) && Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null,
           created_by: currentUser?.id || null,
         }),
       });
@@ -423,21 +426,40 @@ const UserManagement = () => {
     }
     setUpdating(true);
     try {
+      // Payload de base (colonnes toujours présentes)
+      const updatePayload: Record<string, unknown> = {
+        name: fName.trim(),
+        email: fEmail.trim(),
+        role: fRole,
+        is_active: fActive,
+        assigned_election_id: fElectionIds[0] ?? null,
+        assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
+      };
+
+      // Colonnes optionnelles (nécessitent la migration 20260526_multi_observer_validator_centers)
+      if (ROLES_WITH_CENTERS.includes(fRole)) {
+        updatePayload.assigned_center_ids   = Object.keys(fCenterColleges);
+        updatePayload.assigned_center_colleges = Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null;
+      } else {
+        updatePayload.assigned_center_ids   = null;
+        updatePayload.assigned_center_colleges = null;
+      }
+
       const { error } = await supabase
         .from('users')
-        .update({
-          name: fName.trim(),
-          email: fEmail.trim(),
-          role: fRole,
-          is_active: fActive,
-          assigned_election_id: fElectionIds[0] ?? null,
-          assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
-          assigned_center_ids: fRole === 'validateur' ? Object.keys(fCenterColleges) : null,
-          assigned_center_colleges: fRole === 'validateur' && Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null,
-        })
+        .update(updatePayload)
         .eq('id', editingUser.id);
 
-      if (error) { toast.error('Échec de la mise à jour'); return; }
+      if (error) {
+        console.error('Erreur mise à jour utilisateur:', error);
+        const msg = (error as any)?.message ?? '';
+        if (msg.includes('column') && msg.includes('does not exist')) {
+          toast.error('Colonnes manquantes en base — appliquez la migration SQL dans Supabase.');
+        } else {
+          toast.error(`Échec de la mise à jour : ${msg || 'erreur inconnue'}`);
+        }
+        return;
+      }
 
       if (fPassword && fPassword.length >= 6) {
         const { error: pwdError } = await supabase.auth.admin.updateUserById(editingUser.id, { password: fPassword });
@@ -522,17 +544,23 @@ const UserManagement = () => {
           label={isAdmin ? 'Élections assignées (obligatoire)' : 'Élections assignées (optionnel)'}
           elections={allElections}
           selected={fElectionIds}
-          onChange={ids => { setFElectionIds(ids); setFCenterIds([]); }}
+          onChange={ids => { setFElectionIds(ids); setFCenterColleges({}); }}
         />
       )}
 
-      {/* Établissements + collèges assignés — validateur uniquement */}
-      {fRole === 'validateur' && availableCenters.length > 0 && (
-        <div className="space-y-2 border-2 border-green-200 rounded-xl p-3 bg-green-50/30">
-          <span className="flex text-xs font-semibold text-green-700 mb-1 items-center gap-1.5">
+      {/* Établissements + collèges assignés — validateur, agent-saisie, président d'établissement */}
+      {ROLES_WITH_CENTERS.includes(fRole) && availableCenters.length > 0 && (() => {
+        const cfg = fRole === 'validateur'
+          ? { border: 'border-green-200', bg: 'bg-green-50/30', text: 'text-green-700', sub: 'text-green-600', chip: 'border-green-600 bg-green-600', chipOff: 'border-green-200 bg-white text-green-700 hover:bg-green-100', accent: 'accent-green-700', rowHover: 'hover:bg-green-50', rowBorder: 'border-green-100', colBg: 'bg-green-50/50 border-green-100' }
+          : fRole === 'agent-saisie'
+          ? { border: 'border-yellow-200', bg: 'bg-yellow-50/30', text: 'text-yellow-700', sub: 'text-yellow-600', chip: 'border-yellow-600 bg-yellow-500', chipOff: 'border-yellow-200 bg-white text-yellow-700 hover:bg-yellow-100', accent: 'accent-yellow-600', rowHover: 'hover:bg-yellow-50', rowBorder: 'border-yellow-100', colBg: 'bg-yellow-50/50 border-yellow-100' }
+          : { border: 'border-teal-200', bg: 'bg-teal-50/30', text: 'text-teal-700', sub: 'text-teal-600', chip: 'border-teal-600 bg-teal-600', chipOff: 'border-teal-200 bg-white text-teal-700 hover:bg-teal-100', accent: 'accent-teal-700', rowHover: 'hover:bg-teal-50', rowBorder: 'border-teal-100', colBg: 'bg-teal-50/50 border-teal-100' };
+        return (
+        <div className={`space-y-2 border-2 ${cfg.border} rounded-xl p-3 ${cfg.bg}`}>
+          <span className={`flex text-xs font-semibold ${cfg.text} mb-1 items-center gap-1.5`}>
             <Shield className="w-3.5 h-3.5" />
             Établissements &amp; Collèges assignés
-            <span className="ml-auto text-[10px] font-normal text-green-600 italic">
+            <span className={`ml-auto text-[10px] font-normal ${cfg.sub} italic`}>
               vide = tous les établissements / collèges
             </span>
           </span>
@@ -562,21 +590,21 @@ const UserManagement = () => {
               };
 
               return (
-                <div key={c.id} className="rounded-xl border border-green-100 bg-white overflow-hidden">
+                <div key={c.id} className={`rounded-xl border ${cfg.rowBorder} bg-white overflow-hidden`}>
                   {/* Ligne centre */}
-                  <label className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-green-50 transition-colors">
+                  <label className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer ${cfg.rowHover} transition-colors`}>
                     <input
                       type="checkbox"
                       checked={isSelected}
                       onChange={toggleCenter}
-                      className="h-4 w-4 rounded accent-green-700 flex-shrink-0"
+                      className={`h-4 w-4 rounded ${cfg.accent} flex-shrink-0`}
                     />
                     <span className="truncate text-sm font-medium text-gray-800">{c.name}</span>
                     {isSelected && selectedColleges.length === 0 && (
-                      <span className="ml-auto text-[10px] text-green-600 italic whitespace-nowrap flex-shrink-0">tous les collèges</span>
+                      <span className={`ml-auto text-[10px] ${cfg.sub} italic whitespace-nowrap flex-shrink-0`}>tous les collèges</span>
                     )}
                     {isSelected && selectedColleges.length > 0 && (
-                      <span className="ml-auto text-[10px] text-green-700 font-semibold whitespace-nowrap flex-shrink-0">
+                      <span className={`ml-auto text-[10px] ${cfg.text} font-semibold whitespace-nowrap flex-shrink-0`}>
                         {selectedColleges.length} collège{selectedColleges.length > 1 ? 's' : ''}
                       </span>
                     )}
@@ -584,14 +612,14 @@ const UserManagement = () => {
 
                   {/* Collèges (visibles seulement si le centre est sélectionné) */}
                   {isSelected && availableColleges.length > 0 && (
-                    <div className="px-3 pb-2 pt-0.5 bg-green-50/50 border-t border-green-100 flex flex-wrap gap-2">
+                    <div className={`px-3 pb-2 pt-0.5 ${cfg.colBg} border-t flex flex-wrap gap-2`}>
                       {availableColleges.map(col => (
                         <label
                           key={col.value}
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer text-xs font-medium transition-all ${
                             selectedColleges.includes(col.value)
-                              ? 'border-green-600 bg-green-600 text-white'
-                              : 'border-green-200 bg-white text-green-700 hover:bg-green-100'
+                              ? `${cfg.chip} text-white`
+                              : cfg.chipOff
                           }`}
                         >
                           <input
@@ -611,12 +639,13 @@ const UserManagement = () => {
           </div>
 
           {Object.keys(fCenterColleges).length > 0 && (
-            <p className="text-xs text-green-600 font-medium pt-0.5">
+            <p className={`text-xs ${cfg.sub} font-medium pt-0.5`}>
               {Object.keys(fCenterColleges).length} établissement{Object.keys(fCenterColleges).length > 1 ? 's' : ''} sélectionné{Object.keys(fCenterColleges).length > 1 ? 's' : ''}
             </p>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* Compte actif */}
       <div className="flex items-center gap-3 px-1 py-2 bg-gray-50 rounded-xl border border-gray-200">
