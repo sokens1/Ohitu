@@ -1103,10 +1103,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   ) : null
                 )}
 
-              {/* isLocked : PV validé ou publié — seule l'action "Se rétracter" reste disponible */}
+              {/* isLocked : PV validé ou publié — boutons grisés, seul "Se rétracter" reste actif */}
               <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-6">
-                {!editMode && !readOnly && !isLocked && (
-                  <Button onClick={() => {
+                {!editMode && !readOnly && (
+                  <Button disabled={isLocked} onClick={() => {
                     setEditValues({
                       total_registered: (editValues.total_registered || 0),
                       total_voters: (selectedPVData.total_voters || 0),
@@ -1114,12 +1114,12 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       votes_expressed: (selectedPVData.votes_expressed || 0)
                     });
                     setEditMode(true);
-                  }} variant="outline" className="border-amber-400 text-amber-700 hover:bg-amber-50 hover:border-amber-500">
+                  }} variant="outline" className="border-amber-400 text-amber-700 hover:bg-amber-50 hover:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed">
                     Modifier
                   </Button>
                 )}
-                {editMode && !isLocked && (
-                  <Button onClick={async () => {
+                {editMode && (
+                  <Button disabled={isLocked} onClick={async () => {
                     if (!selectedPV) return;
                     if (!validateEditValues()) {
                       toast.error("Veuillez corriger les incohérences avant d'enregistrer.");
@@ -1184,15 +1184,15 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     finally {
                       setSaving(false);
                     }
-                  }} className="bg-green-600 hover:bg-green-700 text-white">
+                  }} className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed">
                     {saving ? 'Enregistrement…' : 'Enregistrer'}
                   </Button>
                 )}
-      {!readOnly && !isLocked && <Button
+      {!readOnly && <Button
         onClick={() => setShowResetConfirm(true)}
-        disabled={resetting}
+        disabled={resetting || isLocked}
         variant="outline"
-        className="border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400"
+        className="border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <RotateCcw className="w-4 h-4 mr-2" />
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
@@ -1238,30 +1238,19 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   </Button>
                 )}
 
-                {/* Boutons d'action — masqués pour l'observateur et pour les PV verrouillés */}
-                {!readOnly && !isLocked && <>
-                {/* <Button onClick={async () => {
-                  if (!selectedPV) return;
-                  if (!confirm('Supprimer ce PV ? Cette action est irréversible.')) return;
-                  const { error: crErr } = await supabase.from('candidate_results').delete().eq('pv_id', selectedPV);
-                  if (crErr) { console.error(crErr); return; }
-                  const { error: pvErr } = await supabase.from('procès_verbaux').delete().eq('id', selectedPV);
-                  if (pvErr) { console.error(pvErr); return; }
-                  setPvs(prev => prev.filter(p => p.id !== selectedPV));
-                  setDetailOpen(false);
-                }} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
-                  Supprimer
-                </Button> */}
+                {/* Boutons d'action — masqués pour l'observateur, grisés si PV verrouillé */}
+                {!readOnly && <>
                 {/* Rejeter — renvoie le PV en saisie avec commentaire obligatoire */}
                 <Button
                   variant="outline"
-                  className="border-orange-400 text-orange-700 hover:bg-orange-50"
-                  onClick={() => { setRejectComment(''); setShowRejectDialog(true); }}
+                  disabled={isLocked}
+                  className="border-orange-400 text-orange-700 hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => { if (!isLocked) { setRejectComment(''); setShowRejectDialog(true); } }}
                 >
                   <XCircle className="w-4 h-4 mr-2" /> Rejeter
                 </Button>
-                <Button onClick={async () => {
-                  if (!selectedPV) return;
+                <Button disabled={isLocked} onClick={async () => {
+                  if (!selectedPV || isLocked) return;
                   const { data: { user: authUser } } = await supabase.auth.getUser();
                   const { error } = await supabase
                     .from('procès_verbaux')
@@ -1271,7 +1260,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
                     setDetailOpen(false);
                   }
-                }} className="bg-green-600 hover:bg-green-700 text-white">
+                }} className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed">
                   <CheckCircle className="w-4 h-4 mr-2" /> Valider
                 </Button>
                 </>}
