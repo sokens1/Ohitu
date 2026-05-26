@@ -185,11 +185,13 @@ const UserManagement = () => {
   const [fRole, setFRole] = useState<UserRole>('observateur');
   const [fActive, setFActive] = useState(true);
   const [fElectionIds, setFElectionIds] = useState<string[]>([]);
-  const [fCenterIds, setFCenterIds] = useState<string[]>([]);
+  /** map centerId → college_types[] (vide = tous les collèges du centre) */
+  const [fCenterColleges, setFCenterColleges] = useState<Record<string, string[]>>({});
   const [showPassword, setShowPassword] = useState(false);
 
-  // Centres disponibles pour l'assignation du validateur
+  // Centres + collèges disponibles pour l'assignation du validateur
   const [availableCenters, setAvailableCenters] = useState<{ id: string; name: string }[]>([]);
+  const [availableColleges, setAvailableColleges] = useState<{ value: string; label: string }[]>([]);
 
   // États d'opération
   const [creating, setCreating] = useState(false);
@@ -278,8 +280,8 @@ const UserManagement = () => {
   const resetForm = () => {
     setFName(''); setFEmail(''); setFPassword('');
     setFRole('observateur'); setFActive(true);
-    setFElectionIds([]); setFCenterIds([]);
-    setAvailableCenters([]);
+    setFElectionIds([]); setFCenterColleges({});
+    setAvailableCenters([]); setAvailableColleges([]);
     setShowPassword(false);
   };
 
@@ -287,37 +289,58 @@ const UserManagement = () => {
     setEditingUser(u);
     setFName(u.name); setFEmail(u.email);
     setFPassword(''); setFRole(u.role); setFActive(u.isActive);
-    // Charger les élections assignées (multi ou simple)
     const ids = u.assigned_election_ids?.length
       ? u.assigned_election_ids
       : u.assigned_election_id ? [u.assigned_election_id] : [];
     setFElectionIds(ids);
-    // Centres assignés (validateur)
-    setFCenterIds((u as any).assigned_center_ids ?? []);
+    // Centres + collèges assignés (validateur)
+    setFCenterColleges((u as any).assigned_center_colleges ?? {});
     setShowEditModal(true);
   };
 
-  // Charger les centres disponibles quand le rôle est validateur et que des élections sont sélectionnées
+  // Charger les centres + collèges disponibles pour le validateur
   useEffect(() => {
-    const loadCenters = async () => {
+    const loadCentersAndColleges = async () => {
       if (fRole !== 'validateur' || fElectionIds.length === 0) {
-        setAvailableCenters([]);
-        return;
+        setAvailableCenters([]); setAvailableColleges([]); return;
       }
+      // Centres liés aux élections sélectionnées
       const { data: ecRows } = await supabase
         .from('election_centers')
         .select('center_id')
         .in('election_id', fElectionIds);
       const centerIds = Array.from(new Set((ecRows || []).map((r: any) => r.center_id).filter(Boolean)));
-      if (centerIds.length === 0) { setAvailableCenters([]); return; }
+      if (centerIds.length === 0) { setAvailableCenters([]); setAvailableColleges([]); return; }
       const { data: centersData } = await supabase
         .from('voting_centers')
         .select('id, name')
         .in('id', centerIds)
         .order('name');
       setAvailableCenters(centersData || []);
+
+      // Collèges distincts dans ces élections
+      const { data: collegesData } = await supabase
+        .from('electoral_colleges')
+        .select('college_type')
+        .in('election_id', fElectionIds);
+      const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
+      const COLLEGE_LABELS: Record<string, string> = {
+        cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+      };
+      const colleges = distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }));
+      // Fallback si aucun collège en base
+      setAvailableColleges(
+        colleges.length > 0
+          ? colleges
+          : [
+              { value: 'cadres',   label: 'Cadres' },
+              { value: 'employes', label: 'Maîtrise' },
+              { value: 'ouvriers', label: 'Exécution' },
+              { value: 'general',  label: 'Encadrement' },
+            ]
+      );
     };
-    loadCenters();
+    loadCentersAndColleges();
   }, [fRole, fElectionIds]);
 
   // ── Création via l'endpoint serveur (évite la limite de taux de auth.signUp) ─
@@ -351,7 +374,8 @@ const UserManagement = () => {
           is_active: fActive,
           assigned_election_id: fElectionIds[0] ?? null,
           assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
-          assigned_center_ids: fRole === 'validateur' && fCenterIds.length > 0 ? fCenterIds : null,
+          assigned_center_ids: fRole === 'validateur' ? Object.keys(fCenterColleges) : null,
+          assigned_center_colleges: fRole === 'validateur' && Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null,
           created_by: currentUser?.id || null,
         }),
       });
@@ -405,7 +429,8 @@ const UserManagement = () => {
           is_active: fActive,
           assigned_election_id: fElectionIds[0] ?? null,
           assigned_election_ids: fElectionIds.length > 0 ? fElectionIds : null,
-          assigned_center_ids: fRole === 'validateur' && fCenterIds.length > 0 ? fCenterIds : null,
+          assigned_center_ids: fRole === 'validateur' ? Object.keys(fCenterColleges) : null,
+          assigned_center_colleges: fRole === 'validateur' && Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null,
         })
         .eq('id', editingUser.id);
 
@@ -498,34 +523,93 @@ const UserManagement = () => {
         />
       )}
 
-      {/* Établissements assignés — validateur uniquement */}
+      {/* Établissements + collèges assignés — validateur uniquement */}
       {fRole === 'validateur' && availableCenters.length > 0 && (
         <div className="space-y-2 border-2 border-green-200 rounded-xl p-3 bg-green-50/30">
           <span className="flex text-xs font-semibold text-green-700 mb-1 items-center gap-1.5">
             <Shield className="w-3.5 h-3.5" />
-            Établissements assignés (optionnel — laissez vide pour tous)
+            Établissements &amp; Collèges assignés
+            <span className="ml-auto text-[10px] font-normal text-green-600 italic">
+              vide = tous les établissements / collèges
+            </span>
           </span>
-          <div className="max-h-44 overflow-y-auto rounded-lg border border-green-100 divide-y bg-white">
-            {availableCenters.map(c => (
-              <label key={c.id} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-green-50 transition-colors text-sm">
-                <input
-                  type="checkbox"
-                  checked={fCenterIds.includes(c.id)}
-                  onChange={() => setFCenterIds(prev =>
-                    prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+
+          <div className="space-y-1 max-h-72 overflow-y-auto pr-0.5">
+            {availableCenters.map(c => {
+              const isSelected = c.id in fCenterColleges;
+              const selectedColleges = fCenterColleges[c.id] ?? [];
+
+              const toggleCenter = () => {
+                setFCenterColleges(prev => {
+                  const next = { ...prev };
+                  if (isSelected) { delete next[c.id]; }
+                  else { next[c.id] = []; }
+                  return next;
+                });
+              };
+
+              const toggleCollege = (val: string) => {
+                setFCenterColleges(prev => {
+                  const list = prev[c.id] ?? [];
+                  return {
+                    ...prev,
+                    [c.id]: list.includes(val) ? list.filter(v => v !== val) : [...list, val],
+                  };
+                });
+              };
+
+              return (
+                <div key={c.id} className="rounded-xl border border-green-100 bg-white overflow-hidden">
+                  {/* Ligne centre */}
+                  <label className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-green-50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={toggleCenter}
+                      className="h-4 w-4 rounded accent-green-700 flex-shrink-0"
+                    />
+                    <span className="truncate text-sm font-medium text-gray-800">{c.name}</span>
+                    {isSelected && selectedColleges.length === 0 && (
+                      <span className="ml-auto text-[10px] text-green-600 italic whitespace-nowrap flex-shrink-0">tous les collèges</span>
+                    )}
+                    {isSelected && selectedColleges.length > 0 && (
+                      <span className="ml-auto text-[10px] text-green-700 font-semibold whitespace-nowrap flex-shrink-0">
+                        {selectedColleges.length} collège{selectedColleges.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </label>
+
+                  {/* Collèges (visibles seulement si le centre est sélectionné) */}
+                  {isSelected && availableColleges.length > 0 && (
+                    <div className="px-3 pb-2 pt-0.5 bg-green-50/50 border-t border-green-100 flex flex-wrap gap-2">
+                      {availableColleges.map(col => (
+                        <label
+                          key={col.value}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer text-xs font-medium transition-all ${
+                            selectedColleges.includes(col.value)
+                              ? 'border-green-600 bg-green-600 text-white'
+                              : 'border-green-200 bg-white text-green-700 hover:bg-green-100'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedColleges.includes(col.value)}
+                            onChange={() => toggleCollege(col.value)}
+                            className="sr-only"
+                          />
+                          {col.label}
+                        </label>
+                      ))}
+                    </div>
                   )}
-                  className="h-4 w-4 rounded accent-green-700"
-                />
-                <span className="truncate text-gray-800">{c.name}</span>
-                {fCenterIds.includes(c.id) && (
-                  <CheckCircle className="ml-auto h-3.5 w-3.5 text-green-700 flex-shrink-0" />
-                )}
-              </label>
-            ))}
+                </div>
+              );
+            })}
           </div>
-          {fCenterIds.length > 0 && (
-            <p className="text-xs text-green-600 font-medium">
-              {fCenterIds.length} établissement{fCenterIds.length > 1 ? 's' : ''} sélectionné{fCenterIds.length > 1 ? 's' : ''}
+
+          {Object.keys(fCenterColleges).length > 0 && (
+            <p className="text-xs text-green-600 font-medium pt-0.5">
+              {Object.keys(fCenterColleges).length} établissement{Object.keys(fCenterColleges).length > 1 ? 's' : ''} sélectionné{Object.keys(fCenterColleges).length > 1 ? 's' : ''}
             </p>
           )}
         </div>
