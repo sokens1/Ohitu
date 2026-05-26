@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -388,7 +389,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                 className="text-blue-600 hover:text-blue-700 h-7 px-2"
                                 onClick={() => window.open(existing.file_url, '_blank')}
                               >
-                                <Eye className="w-3.5 h-3.5 mr-1" /> Voir
+                                <Eye className="w-3.5 h-3.5 mr-1" /> 
                               </Button>
                             )}
                             <Button
@@ -505,7 +506,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                             className="text-blue-600 hover:text-blue-700 h-7 px-2"
                             onClick={() => window.open(doc.file_url, '_blank')}
                           >
-                            <Eye className="w-3.5 h-3.5 mr-1" /> Voir
+                            <Eye className="w-3.5 h-3.5 mr-1" /> 
                           </Button>
                           {canDownload && (
                             <Button
