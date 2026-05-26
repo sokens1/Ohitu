@@ -1174,7 +1174,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
                 {/* Boutons d'action — masqués pour l'observateur */}
                 {!readOnly && <>
-                <Button onClick={async () => {
+                {/* <Button onClick={async () => {
                   if (!selectedPV) return;
                   if (!confirm('Supprimer ce PV ? Cette action est irréversible.')) return;
                   const { error: crErr } = await supabase.from('candidate_results').delete().eq('pv_id', selectedPV);
@@ -1185,7 +1185,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   setDetailOpen(false);
                 }} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
                   Supprimer
-                </Button>
+                </Button> */}
                 {/* Rejeter — renvoie le PV en saisie avec commentaire obligatoire */}
                 <Button
                   variant="outline"
