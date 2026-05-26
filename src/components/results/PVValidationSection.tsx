@@ -25,6 +25,12 @@ import { useRBAC } from '@/hooks/useRBAC';
 import { useAuth } from '@/contexts/AuthContext';
 
 // ── Composant Timeline circuit de validation ──────────────────────────────────
+interface ObserverOpinion {
+  id: string; observer_id: string; observer_name: string;
+  annotation: string | null; conformity: 'conforme' | 'non_conforme' | null;
+  annotated_at_str: string;
+}
+
 interface PVTimelineProps {
   pv: {
     status: string;
@@ -36,6 +42,7 @@ interface PVTimelineProps {
     observer_annotation?: string | null;
     observer_conformity?: 'conforme' | 'non_conforme' | null;
     observer_annotated_at_str?: string;
+    opinions?: ObserverOpinion[];
   };
 }
 
@@ -51,8 +58,21 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   const entryDone = ['entered', 'validated', 'published', 'anomaly'].includes(pv.status);
   const validDone  = ['validated', 'published'].includes(pv.status);
   const isAnomaly  = pv.status === 'anomaly';
-  const hasAnnotation = !!pv.observer_annotation || !!pv.observer_conformity;
-  const conformityLabel = pv.observer_conformity === 'conforme' ? 'Conforme' : pv.observer_conformity === 'non_conforme' ? 'Non conforme' : null;
+
+  // Avis agrégés multi-observateurs
+  const opinions = pv.opinions ?? [];
+  const conformeCount    = opinions.filter(o => o.conformity === 'conforme').length;
+  const nonConformeCount = opinions.filter(o => o.conformity === 'non_conforme').length;
+  const hasAnyOpinion    = opinions.length > 0;
+  const hasNonConforme   = nonConformeCount > 0;
+  const aggConformity    = hasAnyOpinion ? (hasNonConforme ? 'non_conforme' : 'conforme') : null;
+  // Libellé sous le point : "2 conformes, 1 non conforme" ou nom unique
+  const aggSublabel = hasAnyOpinion
+    ? (opinions.length === 1
+        ? opinions[0].observer_name
+        : `${conformeCount} conforme${conformeCount > 1 ? 's' : ''} · ${nonConformeCount} non conforme${nonConformeCount > 1 ? 's' : ''}`)
+    : null;
+  const conformityLabel  = aggConformity === 'conforme' ? 'Conforme' : aggConformity === 'non_conforme' ? 'Non conforme' : null;
 
   const steps = [
     {
@@ -76,17 +96,17 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
       description: 'Validateur',
     },
     {
-      label: conformityLabel ?? (hasAnnotation ? 'Annoté' : 'Observation'),
-      sublabel: hasAnnotation ? pv.observer_name : 'Observateur',
-      date: pv.observer_annotated_at_str,
-      icon: hasAnnotation
+      label: conformityLabel ?? (hasAnyOpinion ? 'Observé' : 'Observation'),
+      sublabel: aggSublabel,
+      date: hasAnyOpinion ? opinions[opinions.length - 1].annotated_at_str : undefined,
+      icon: hasAnyOpinion
         ? <PenLine className="w-3.5 h-3.5 text-white" />
         : <Eye className="w-3.5 h-3.5 text-gray-400" />,
-      color: pv.observer_conformity === 'conforme'
+      color: aggConformity === 'conforme'
         ? STEP_COLORS.done
-        : pv.observer_conformity === 'non_conforme'
+        : aggConformity === 'non_conforme'
           ? STEP_COLORS.error
-          : hasAnnotation ? STEP_COLORS.info : STEP_COLORS.pending,
+          : hasAnyOpinion ? STEP_COLORS.info : STEP_COLORS.pending,
       description: '',
       isInfo: true
     },
@@ -162,6 +182,18 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [usersMap, setUsersMap] = useState<Map<string, string>>(new Map());
 
+  // Avis multiples d'observateurs  { pvId -> opinion[] }
+  const [observerOpinions, setObserverOpinions] = useState<Map<string, Array<{
+    id: string; observer_id: string; observer_name: string;
+    annotation: string | null; conformity: 'conforme' | 'non_conforme' | null;
+    annotated_at_str: string;
+  }>>>(new Map());
+
+  // Rejet PV
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [rejectComment, setRejectComment] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+
   // Helpers d'upload (alignés avec PVEntrySection)
   const ensureBucketExists = async (bucket: string) => {
     try {
@@ -210,8 +242,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         if (pvErr) throw pvErr;
         
         // Charger les utilisateurs
-        const { data: usersData } = await supabase.from('users').select('id, name');
+        const { data: usersData } = await supabase.from('users').select('id, name, assigned_center_ids');
         setUsersMap(new Map(usersData?.map(u => [u.id, u.name]) || []));
+
         // Filtrer les PV aux centres liés à l'élection via election_centers
         const bureauIds = Array.from(new Set((pvRows || []).map(r => r.bureau_id).filter(Boolean)));
         if (bureauIds.length) {
@@ -227,17 +260,57 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             .select('center_id')
             .eq('election_id', selectedElection);
           if (ecErr) throw ecErr;
-          const allowedCenterIds = new Set((ecRows || []).map((r: any) => r.center_id));
+          let allowedCenterIds = new Set((ecRows || []).map((r: any) => r.center_id));
+
+          // Si l'utilisateur est validateur avec des centres assignés → filtrer davantage
+          if (user?.role === 'validateur') {
+            const validatorCenterIds = user.assigned_center_ids?.length
+              ? user.assigned_center_ids
+              : (usersData?.find(u => u.id === user.id) as any)?.assigned_center_ids ?? [];
+            if (validatorCenterIds.length > 0) {
+              allowedCenterIds = new Set(
+                [...allowedCenterIds].filter(id => validatorCenterIds.includes(id))
+              );
+            }
+          }
+
           const filteredBureaus = (bureaus || []).filter(b => allowedCenterIds.has(b.center_id));
           const filteredCenterIds = Array.from(new Set(filteredBureaus.map(b => b.center_id)));
           const filteredPvRows = (pvRows || []).filter(r => filteredBureaus.some(b => b.id === r.bureau_id));
           setPvs(filteredPvRows);
+
           const { data: centers, error: cErr } = centerIds.length
             ? await supabase.from('voting_centers').select('id, name').in('id', filteredCenterIds)
             : { data: [], error: null } as any;
           if (cErr) throw cErr;
           setBureauxMap(new Map(filteredBureaus.map(b => [b.id, b])));
           setCentersMap(new Map((centers || []).map(c => [c.id, c])));
+
+          // Charger les avis observateurs pour les PV filtrés
+          if (filteredPvRows.length > 0) {
+            const pvIds = filteredPvRows.map(r => r.id);
+            const { data: opinions } = await supabase
+              .from('pv_observer_opinions')
+              .select('id, pv_id, observer_id, annotation, conformity, annotated_at')
+              .in('pv_id', pvIds)
+              .order('annotated_at', { ascending: true });
+            const opinionsMap = new Map<string, any[]>();
+            (opinions || []).forEach(op => {
+              const list = opinionsMap.get(op.pv_id) || [];
+              list.push({
+                id: op.id,
+                observer_id: op.observer_id,
+                observer_name: usersData?.find(u => u.id === op.observer_id)?.name || op.observer_id,
+                annotation: op.annotation ?? null,
+                conformity: op.conformity ?? null,
+                annotated_at_str: op.annotated_at
+                  ? new Date(op.annotated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(op.annotated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                  : '',
+              });
+              opinionsMap.set(op.pv_id, list);
+            });
+            setObserverOpinions(opinionsMap);
+          }
         } else {
           setBureauxMap(new Map());
           setCentersMap(new Map());
@@ -270,18 +343,20 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
         validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
-        // Données observateur
+        // Données observateur (compatibilité simple + multi-avis)
         college_type: (pv.college_type ?? null) as string | null,
         observer_annotation: pv.observer_annotation ?? null,
         observer_conformity: (pv.observer_conformity ?? null) as 'conforme' | 'non_conforme' | null,
         observer_name: pv.observer_id ? (usersMap.get(pv.observer_id) || pv.observer_id) : null,
         observer_annotated_at_str: pv.observer_annotated_at ? new Date(pv.observer_annotated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.observer_annotated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         bureau_id: pv.bureau_id,
+        // Multi-avis observateurs
+        opinions: observerOpinions.get(pv.id) || [],
       };
     });
     if (filter === 'all') return enriched;
     return enriched.filter(e => e.status === filter);
-  }, [pvs, bureauxMap, centersMap, filter]);
+  }, [pvs, bureauxMap, centersMap, filter, observerOpinions]);
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -329,37 +404,49 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
   const selectedPVData = useMemo(() => filteredPVs.find(pv => pv.id === selectedPV), [filteredPVs, selectedPV]);
 
-  // Synchroniser l'annotation et la conformité avec le PV sélectionné
+  // Synchroniser l'annotation et la conformité avec le PV sélectionné (propre avis de l'observateur)
   useEffect(() => {
-    setObserverAnnotation(selectedPVData?.observer_annotation ?? '');
-    setObserverConformity(selectedPVData?.observer_conformity ?? null);
+    if (!selectedPVData) return;
+    // Chercher l'avis de l'observateur connecté dans la liste multi-avis
+    const myOpinion = selectedPVData.opinions?.find(op => op.observer_id === user?.id);
+    setObserverAnnotation(myOpinion?.annotation ?? selectedPVData.observer_annotation ?? '');
+    setObserverConformity(myOpinion?.conformity ?? selectedPVData.observer_conformity ?? null);
   }, [selectedPVData?.id]);
 
-  // Conformité observateur — enregistre uniquement l'avis, sans modifier le statut du PV
+  // Conformité observateur — upsert dans pv_observer_opinions (multi-avis)
   const submitObserverConformity = async (conformity: 'conforme' | 'non_conforme') => {
     if (!selectedPV || !user) return;
     setSavingAnnotation(true);
     try {
       const now = new Date().toISOString();
       const { error } = await supabase
-        .from('procès_verbaux')
-        .update({
-          observer_annotation: observerAnnotation.trim() || null,
-          observer_conformity: conformity,
+        .from('pv_observer_opinions')
+        .upsert({
+          pv_id: selectedPV,
           observer_id: user.id,
-          observer_annotated_at: now,
-        })
-        .eq('id', selectedPV);
+          annotation: observerAnnotation.trim() || null,
+          conformity,
+          annotated_at: now,
+        }, { onConflict: 'pv_id,observer_id' });
       if (error) { toast.error("Échec de l'enregistrement"); return; }
 
       setObserverConformity(conformity);
-      setPvs(prev => prev.map(p => p.id === selectedPV ? {
-        ...p,
-        observer_annotation: observerAnnotation.trim() || null,
-        observer_conformity: conformity,
-        observer_id: user.id,
-        observer_annotated_at: now,
-      } : p));
+
+      // Mettre à jour la map locale des avis
+      setObserverOpinions(prev => {
+        const next = new Map(prev);
+        const list = (next.get(selectedPV) || []).filter(op => op.observer_id !== user.id);
+        list.push({
+          id: `local_${user.id}`,
+          observer_id: user.id,
+          observer_name: user.name,
+          annotation: observerAnnotation.trim() || null,
+          conformity,
+          annotated_at_str: new Date(now).toLocaleDateString('fr-FR') + ' à ' + new Date(now).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        });
+        next.set(selectedPV, list);
+        return next;
+      });
 
       toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Non conforme');
       setDetailOpen(false);
@@ -882,79 +969,111 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
 
                 {/* ── Annotation observateur ──────────────────────────────── */}
+                {/* ── Avis des observateurs ──────────────────────────────── */}
                 {isObserver ? (
-                  /* ── Formulaire d'annotation observateur — ligne unique ── */
-                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3">
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2 px-1">
-                      Annotation observateur
+                  /* ── Formulaire d'annotation observateur ── */
+                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 space-y-3">
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide px-1">
+                      Mon annotation
                     </p>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Remarque ou observation (optionnel)…"
-                        value={observerAnnotation}
-                        onChange={e => setObserverAnnotation(e.target.value)}
-                        className="flex-1 min-w-0 h-10 px-3 text-sm rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:border-slate-400 focus:bg-white transition"
-                      />
-                      <button
-                        type="button"
-                        disabled={savingAnnotation}
-                        onClick={() => submitObserverConformity('conforme')}
-                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
-                          observerConformity === 'conforme'
-                            ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
-                            : 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                        }`}
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                        Conforme
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingAnnotation}
-                        onClick={() => submitObserverConformity('non_conforme')}
-                        className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
-                          observerConformity === 'non_conforme'
-                            ? 'border-red-600 bg-red-600 text-white shadow-sm'
-                            : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
-                        }`}
-                      >
-                        <XCircle className="w-4 h-4" />
-                        Non conforme
-                      </button>
+                    <div className="space-y-2">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder={observerConformity === 'non_conforme' ? 'Motif obligatoire pour avis non conforme…' : 'Remarque ou observation (optionnel)…'}
+                          value={observerAnnotation}
+                          onChange={e => setObserverAnnotation(e.target.value)}
+                          className={`flex-1 min-w-0 h-10 px-3 text-sm rounded-xl border bg-slate-50 focus:outline-none focus:bg-white transition ${
+                            observerConformity === 'non_conforme' && observerAnnotation.trim().length === 0
+                              ? 'border-red-400 focus:border-red-500'
+                              : 'border-slate-200 focus:border-slate-400'
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          disabled={savingAnnotation}
+                          onClick={() => submitObserverConformity('conforme')}
+                          className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 ${
+                            observerConformity === 'conforme'
+                              ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                              : 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          }`}
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          Conforme
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingAnnotation || observerAnnotation.trim().length === 0}
+                          onClick={() => submitObserverConformity('non_conforme')}
+                          title={observerAnnotation.trim().length === 0 ? 'Veuillez saisir un motif avant de signaler une non-conformité' : ''}
+                          className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
+                            observerConformity === 'non_conforme'
+                              ? 'border-red-600 bg-red-600 text-white shadow-sm'
+                              : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
+                          }`}
+                        >
+                          <XCircle className="w-4 h-4" />
+                          Non conforme
+                        </button>
+                      </div>
+                      {/* Message d'aide pour non conforme */}
+                      {observerAnnotation.trim().length === 0 && (
+                        <p className="text-[11px] text-red-500 px-1 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                          Un motif est requis pour signaler un avis non conforme.
+                        </p>
+                      )}
                     </div>
                     {savingAnnotation && (
-                      <p className="text-xs text-slate-400 mt-2 px-1 animate-pulse">Enregistrement…</p>
+                      <p className="text-xs text-slate-400 px-1 animate-pulse">Enregistrement…</p>
+                    )}
+                    {/* Avis déjà soumis par les autres observateurs */}
+                    {(selectedPVData?.opinions?.length ?? 0) > 1 && (
+                      <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide px-1">Avis des autres observateurs</p>
+                        {selectedPVData!.opinions!.filter(op => op.observer_id !== user?.id).map(op => (
+                          <div key={op.id} className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-100 bg-slate-50 text-xs">
+                            <PenLine className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                            <span className="font-medium text-slate-600 whitespace-nowrap">{op.observer_name}</span>
+                            <span className="text-slate-400 whitespace-nowrap">{op.annotated_at_str}</span>
+                            {op.conformity && (
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ${op.conformity === 'conforme' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                {op.conformity === 'conforme' ? <><CheckCircle className="w-3 h-3" /> Conforme</> : <><XCircle className="w-3 h-3" /> Non conforme</>}
+                              </span>
+                            )}
+                            {op.annotation && <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 ) : (
-                  /* Autres rôles : annotation sur une seule ligne compacte */
-                  (selectedPVData?.observer_annotation || selectedPVData?.observer_conformity) ? (
-                    <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs">
-                      <PenLine className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                      <span className="font-medium text-slate-600 whitespace-nowrap">
-                        {selectedPVData.observer_name ?? 'Observateur'}
-                      </span>
-                      {selectedPVData.observer_annotated_at_str && (
-                        <span className="text-slate-400 whitespace-nowrap">{selectedPVData.observer_annotated_at_str}</span>
-                      )}
-                      {selectedPVData.observer_conformity && (
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${
-                          selectedPVData.observer_conformity === 'conforme'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}>
-                          {selectedPVData.observer_conformity === 'conforme'
-                            ? <><CheckCircle className="w-3 h-3" /> Conforme</>
-                            : <><XCircle className="w-3 h-3" /> Non conforme</>
-                          }
-                        </span>
-                      )}
-                      {selectedPVData.observer_annotation && (
-                        <span className="text-slate-600 italic truncate max-w-xs" title={selectedPVData.observer_annotation}>
-                          "{selectedPVData.observer_annotation}"
-                        </span>
-                      )}
+                  /* Autres rôles : liste de tous les avis */
+                  (selectedPVData?.opinions?.length ?? 0) > 0 ? (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide px-1">
+                        Avis observateurs ({selectedPVData!.opinions!.length})
+                      </p>
+                      {selectedPVData!.opinions!.map(op => (
+                        <div key={op.id} className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs">
+                          <PenLine className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                          <span className="font-medium text-slate-600 whitespace-nowrap">{op.observer_name}</span>
+                          {op.annotated_at_str && <span className="text-slate-400 whitespace-nowrap">{op.annotated_at_str}</span>}
+                          {op.conformity && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${
+                              op.conformity === 'conforme' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                            }`}>
+                              {op.conformity === 'conforme'
+                                ? <><CheckCircle className="w-3 h-3" /> Conforme</>
+                                : <><XCircle className="w-3 h-3" /> Non conforme</>}
+                            </span>
+                          )}
+                          {op.annotation && (
+                            <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   ) : null
                 )}
@@ -1067,15 +1186,23 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 }} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
                   Supprimer
                 </Button>
+                {/* Rejeter — renvoie le PV en saisie avec commentaire obligatoire */}
+                <Button
+                  variant="outline"
+                  className="border-orange-400 text-orange-700 hover:bg-orange-50"
+                  onClick={() => { setRejectComment(''); setShowRejectDialog(true); }}
+                >
+                  <XCircle className="w-4 h-4 mr-2" /> Rejeter
+                </Button>
                 <Button onClick={async () => {
                   if (!selectedPV) return;
-                  const { data: { user } } = await supabase.auth.getUser();
+                  const { data: { user: authUser } } = await supabase.auth.getUser();
                   const { error } = await supabase
                     .from('procès_verbaux')
-                    .update({ status: 'validated', validated_at: new Date().toISOString(), validated_by: user?.id || null })
+                    .update({ status: 'validated', validated_at: new Date().toISOString(), validated_by: authUser?.id || null })
                     .eq('id', selectedPV);
                   if (!error) {
-                    setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: user?.id || null, validated_at: new Date().toISOString() } : p));
+                    setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
                     setDetailOpen(false);
                   }
                 }} className="bg-green-600 hover:bg-green-700 text-white">
@@ -1155,6 +1282,84 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               className="bg-orange-600 hover:bg-orange-700 text-white"
             >
               {resetting ? 'Réinitialisation...' : 'Confirmer la réinitialisation'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog de rejet avec commentaire obligatoire ──────────────────── */}
+      <Dialog open={showRejectDialog} onOpenChange={v => { if (!rejecting) setShowRejectDialog(v); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600">
+              <XCircle className="w-5 h-5" />
+              Rejeter le PV — Renvoi en saisie
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Le PV sera renvoyé à l'agent de saisie pour correction. Un commentaire est obligatoire.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-3 space-y-3">
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-800 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-orange-500" />
+              <span>Le statut passera à <strong>Anomalie</strong>. L'agent de saisie pourra consulter votre commentaire et corriger les données.</span>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">
+                Motif du rejet <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Expliquez pourquoi ce PV est rejeté (obligatoire)…"
+                value={rejectComment}
+                onChange={e => setRejectComment(e.target.value)}
+                className={`w-full rounded-xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 resize-none ${
+                  rejectComment.trim().length === 0 ? 'border-red-300 focus:ring-red-200' : 'border-slate-200 focus:ring-orange-200'
+                }`}
+              />
+              {rejectComment.trim().length === 0 && (
+                <p className="text-xs text-red-500">Le commentaire est requis pour rejeter un PV.</p>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowRejectDialog(false)} disabled={rejecting}>
+              Annuler
+            </Button>
+            <Button
+              disabled={rejecting || rejectComment.trim().length === 0}
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={async () => {
+                if (!selectedPV || rejectComment.trim().length === 0) return;
+                setRejecting(true);
+                try {
+                  const { data: { user: authUser } } = await supabase.auth.getUser();
+                  const { error } = await supabase
+                    .from('procès_verbaux')
+                    .update({
+                      status: 'anomaly',
+                      validated_by: authUser?.id || null,
+                      validated_at: new Date().toISOString(),
+                      rejection_comment: rejectComment.trim(),
+                    })
+                    .eq('id', selectedPV);
+                  if (error) { toast.error('Échec du rejet'); return; }
+                  setPvs(prev => prev.map(p =>
+                    p.id === selectedPV
+                      ? { ...p, status: 'anomaly', validated_by: authUser?.id || null, validated_at: new Date().toISOString() }
+                      : p
+                  ));
+                  toast.success('PV rejeté — renvoyé en saisie');
+                  setShowRejectDialog(false);
+                  setDetailOpen(false);
+                } finally {
+                  setRejecting(false);
+                }
+              }}
+            >
+              {rejecting ? 'Rejet en cours…' : 'Confirmer le rejet'}
             </Button>
           </DialogFooter>
         </DialogContent>
