@@ -2,7 +2,8 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +16,9 @@ import {
   Clock,
   FileText,
   RotateCcw,
-  PenLine
+  PenLine,
+  Search,
+  X as XIcon,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -163,6 +166,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [comment, setComment] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'entered' | 'validated' | 'anomaly' | 'published'>('all');
+  const [search, setSearch] = useState('');
+  const [centerFilter, setCenterFilter] = useState<string>('all');
+  const [collegeFilter, setCollegeFilter] = useState<string>('all');
   const [loading, setLoading] = useState(false);
   const [pvs, setPvs] = useState<any[]>([]);
   const [bureauxMap, setBureauxMap] = useState<Map<string, { id: string; name: string; center_id: string }>>(new Map());
@@ -359,6 +365,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       return {
         id: pv.id,
         status: pv.status,
+        centerId: bureau?.center_id ?? '',
+        centerName: center?.name ?? '',
+        bureauName: bureau?.name ?? '',
         bureauLabel: `${center?.name || 'Centre'} - ${bureau?.name || 'Bureau'}`,
         timestamp: pv.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         total_registered: pv.total_registered,
@@ -370,20 +379,29 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
         validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
-        // Données observateur (compatibilité simple + multi-avis)
         college_type: (pv.college_type ?? null) as string | null,
         observer_annotation: pv.observer_annotation ?? null,
         observer_conformity: (pv.observer_conformity ?? null) as 'conforme' | 'non_conforme' | null,
         observer_name: pv.observer_id ? (usersMap.get(pv.observer_id) || pv.observer_id) : null,
         observer_annotated_at_str: pv.observer_annotated_at ? new Date(pv.observer_annotated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.observer_annotated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         bureau_id: pv.bureau_id,
-        // Multi-avis observateurs
         opinions: observerOpinions.get(pv.id) || [],
       };
     });
-    if (filter === 'all') return enriched;
-    return enriched.filter(e => e.status === filter);
-  }, [pvs, bureauxMap, centersMap, filter, observerOpinions]);
+
+    return enriched.filter(e => {
+      if (filter !== 'all' && e.status !== filter) return false;
+      if (centerFilter !== 'all' && e.centerId !== centerFilter) return false;
+      if (collegeFilter !== 'all' && e.college_type !== collegeFilter) return false;
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        if (!e.bureauLabel.toLowerCase().includes(q) &&
+            !e.centerName.toLowerCase().includes(q) &&
+            !e.bureauName.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [pvs, bureauxMap, centersMap, filter, centerFilter, collegeFilter, search, observerOpinions]);
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -712,13 +730,100 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             </Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2 mb-4">
-            <Button variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')} size="sm">Tous</Button>
-            <Button variant={filter === 'pending' ? 'default' : 'outline'} onClick={() => setFilter('pending')} size="sm">En attente</Button>
-            <Button variant={filter === 'entered' ? 'default' : 'outline'} onClick={() => setFilter('entered')} size="sm">Saisis</Button>
-            <Button variant={filter === 'validated' ? 'default' : 'outline'} onClick={() => setFilter('validated')} size="sm">Validés</Button>
-            <Button variant={filter === 'anomaly' ? 'default' : 'outline'} onClick={() => setFilter('anomaly')} size="sm">Anomalie</Button>
+        <CardContent className="space-y-3">
+          {/* Barre de recherche */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <Input
+              placeholder="Rechercher un bureau ou un établissement…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9 pr-8 h-9 text-sm"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <XIcon className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Filtres en ligne */}
+          <div className="flex flex-wrap gap-2 items-center">
+            {/* Statut */}
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                { value: 'all',       label: 'Tous' },
+                { value: 'pending',   label: 'En attente' },
+                { value: 'entered',   label: 'Saisis' },
+                { value: 'validated', label: 'Validés' },
+                { value: 'anomaly',   label: 'Anomalie' },
+                { value: 'published', label: 'Publiés' },
+              ] as const).map(s => (
+                <Button
+                  key={s.value}
+                  variant={filter === s.value ? 'default' : 'outline'}
+                  onClick={() => setFilter(s.value)}
+                  size="sm"
+                  className="h-7 px-2.5 text-xs"
+                >
+                  {s.label}
+                  {s.value !== 'all' && (
+                    <span className="ml-1 opacity-60 text-[10px]">
+                      {pvs.filter(p => p.status === s.value).length}
+                    </span>
+                  )}
+                </Button>
+              ))}
+            </div>
+
+            {/* Établissement */}
+            {centersMap.size > 1 && (
+              <Select value={centerFilter} onValueChange={setCenterFilter}>
+                <SelectTrigger className="h-7 text-xs w-44">
+                  <SelectValue placeholder="Établissement" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les établissements</SelectItem>
+                  {Array.from(centersMap.values()).map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {/* Collège (élections professionnelles) */}
+            {isProElection && (
+              <Select value={collegeFilter} onValueChange={setCollegeFilter}>
+                <SelectTrigger className="h-7 text-xs w-36">
+                  <SelectValue placeholder="Collège" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les collèges</SelectItem>
+                  {Array.from(new Set(pvs.map((p: any) => p.college_type).filter(Boolean))).map(ct => (
+                    <SelectItem key={ct as string} value={ct as string}>
+                      {ct === 'cadres' ? 'Cadres' : ct === 'employes' ? 'Maîtrise' : ct === 'ouvriers' ? 'Exécution' : ct === 'general' ? 'Encadrement' : ct as string}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {/* Reset filtres */}
+            {(filter !== 'all' || centerFilter !== 'all' || collegeFilter !== 'all' || search) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-gray-500 hover:text-gray-700"
+                onClick={() => { setFilter('all'); setCenterFilter('all'); setCollegeFilter('all'); setSearch(''); }}
+              >
+                <XIcon className="w-3 h-3 mr-1" /> Réinitialiser
+              </Button>
+            )}
+
+            {/* Compteur résultats */}
+            <span className="ml-auto text-xs text-gray-400">
+              {displayedPVs.length} / {pvs.length} PV
+            </span>
           </div>
         </CardContent>
       </Card>
