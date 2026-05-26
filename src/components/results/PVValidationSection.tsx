@@ -197,9 +197,11 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   // Rétractation
   const [retracting, setRetracting] = useState(false);
 
-  // PV verrouillé : validé ou publié — seul "Se rétracter" reste actif
+  // PV verrouillé : validé ou publié — boutons grisés (sauf pour super-admin et admin)
   const selectedPVStatus = pvs.find(p => p.id === selectedPV)?.status;
-  const isLocked = selectedPVStatus === 'validated' || selectedPVStatus === 'published';
+  const isLocked = (selectedPVStatus === 'validated' || selectedPVStatus === 'published')
+    && role !== 'super-admin'
+    && role !== 'admin';
 
   // Helpers d'upload (alignés avec PVEntrySection)
   const ensureBucketExists = async (bucket: string) => {
@@ -1198,15 +1200,12 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
       </Button>}
 
-                {/* Se rétracter — admin + validateur uniquement, PV validé ou rejeté (anomalie) */}
-                {!readOnly
-                  && (role === 'super-admin' || role === 'admin' || role === 'validateur')
-                  && (selectedPVData?.status === 'validated' || selectedPVData?.status === 'anomaly')
-                  && (
+                {/* Se rétracter — admin + validateur uniquement, grisé si PV non validé/rejeté */}
+                {!readOnly && (role === 'super-admin' || role === 'admin' || role === 'validateur') && (
                   <Button
                     variant="outline"
-                    disabled={retracting}
-                    className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400"
+                    disabled={retracting || (!(selectedPVData?.status === 'validated' || selectedPVData?.status === 'anomaly') && role !== 'super-admin' && role !== 'admin')}
+                    className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={async () => {
                       if (!selectedPV) return;
                       setRetracting(true);
@@ -1240,27 +1239,32 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
                 {/* Boutons d'action — masqués pour l'observateur, grisés si PV verrouillé */}
                 {!readOnly && <>
-                {/* Rejeter — renvoie le PV en saisie avec commentaire obligatoire */}
+                {/* Rejeter — grisé pour tous si PV validé ou publié */}
                 <Button
                   variant="outline"
-                  disabled={isLocked}
+                  disabled={isLocked || selectedPVStatus === 'validated' || selectedPVStatus === 'published'}
                   className="border-orange-400 text-orange-700 hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() => { if (!isLocked) { setRejectComment(''); setShowRejectDialog(true); } }}
+                  onClick={() => { setRejectComment(''); setShowRejectDialog(true); }}
                 >
                   <XCircle className="w-4 h-4 mr-2" /> Rejeter
                 </Button>
-                <Button disabled={isLocked} onClick={async () => {
-                  if (!selectedPV || isLocked) return;
-                  const { data: { user: authUser } } = await supabase.auth.getUser();
-                  const { error } = await supabase
-                    .from('procès_verbaux')
-                    .update({ status: 'validated', validated_at: new Date().toISOString(), validated_by: authUser?.id || null })
-                    .eq('id', selectedPV);
-                  if (!error) {
-                    setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
-                    setDetailOpen(false);
-                  }
-                }} className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed">
+                {/* Valider — grisé pour tous si PV validé ou publié */}
+                <Button
+                  disabled={isLocked || selectedPVStatus === 'validated' || selectedPVStatus === 'published'}
+                  onClick={async () => {
+                    if (!selectedPV) return;
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
+                    const { error } = await supabase
+                      .from('procès_verbaux')
+                      .update({ status: 'validated', validated_at: new Date().toISOString(), validated_by: authUser?.id || null })
+                      .eq('id', selectedPV);
+                    if (!error) {
+                      setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
+                      setDetailOpen(false);
+                    }
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <CheckCircle className="w-4 h-4 mr-2" /> Valider
                 </Button>
                 </>}
