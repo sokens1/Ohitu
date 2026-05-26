@@ -5,10 +5,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, FileCheck, Upload, Lock } from 'lucide-react';
+import { FileText, FileCheck, Upload, Lock, Folder } from 'lucide-react';
 import DataEntrySection from '@/components/results/DataEntrySection';
 import PVValidationSection from '@/components/results/PVValidationSection';
 import PublishSection from '@/components/results/PublishSection';
+import DocumentsSection from '@/components/results/DocumentsSection';
 import { useRBAC } from '@/hooks/useRBAC';
 import { getElectionElectorsTotal } from '@/utils/electionCalculations';
 
@@ -27,9 +28,10 @@ interface GlobalStats {
 
 // ─── Définition des onglets disponibles par permission ───────────────────────
 const TAB_DEFS = [
-  { value: 'entry',      icon: FileText,  label: 'Saisir les résultats',   labelShort: 'Saisir',  permission: 'results:entry'    as const },
-  { value: 'validation', icon: FileCheck, label: 'Valider les résultats',  labelShort: 'Valider', permission: 'results:validate' as const },
-  { value: 'publish',    icon: Upload,    label: 'Publier les résultats',   labelShort: 'Publier', permission: 'results:publish'  as const },
+  { value: 'entry',      icon: FileText,  label: 'Saisir les résultats',   labelShort: 'Saisir',    permission: 'results:entry'      as const },
+  { value: 'validation', icon: FileCheck, label: 'Valider les résultats',  labelShort: 'Valider',   permission: 'results:validate'   as const },
+  { value: 'publish',    icon: Upload,    label: 'Publier les résultats',   labelShort: 'Publier',   permission: 'results:publish'    as const },
+  { value: 'documents',  icon: Folder,    label: 'Documents',               labelShort: 'Documents', permission: 'results:documents'  as const },
 ];
 
 // ─── Composant ────────────────────────────────────────────────────────────────
@@ -311,6 +313,10 @@ const Results = () => {
 
                 <TabsContent value="publish" className="space-y-6 mt-0">
                   <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} />
+                </TabsContent>
+
+                <TabsContent value="documents" className="space-y-6 mt-0">
+                  <DocumentsSection selectedElection={selectedElection} />
                 </TabsContent>
               </div>
             </Tabs>

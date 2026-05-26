@@ -50,29 +50,32 @@ interface Election {
 
 // Rôles que l'admin peut attribuer à ses sous-utilisateurs
 const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
-  { value: 'validateur',   label: 'Validateur' },
-  { value: 'agent-saisie', label: 'Agent de Saisie' },
-  { value: 'observateur',  label: 'Observateur' },
+  { value: 'validateur',              label: 'Validateur' },
+  { value: 'agent-saisie',           label: 'Agent de Saisie' },
+  { value: 'observateur',            label: 'Observateur' },
+  { value: 'president-etablissement', label: "Président d'Établissement" },
   // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
 ];
 
 // Tous les rôles (super-admin seulement)
 const ALL_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
-  { value: 'super-admin',      label: 'Super Administrateur' },
-  { value: 'admin',            label: 'Administrateur' },
-  { value: 'validateur',       label: 'Validateur' },
-  { value: 'agent-saisie',     label: 'Agent de Saisie' },
-  { value: 'observateur',      label: 'Observateur' },
+  { value: 'super-admin',             label: 'Super Administrateur' },
+  { value: 'admin',                   label: 'Administrateur' },
+  { value: 'validateur',              label: 'Validateur' },
+  { value: 'agent-saisie',           label: 'Agent de Saisie' },
+  { value: 'observateur',            label: 'Observateur' },
+  { value: 'president-etablissement', label: "Président d'Établissement" },
   // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
 ];
 
 const ROLE_BADGE: Record<UserRole, string> = {
-  'super-admin':      'bg-purple-100 text-purple-800 border-purple-200',
-  'admin':            'bg-blue-100 text-blue-800 border-blue-200',
-  'validateur':       'bg-green-100 text-green-800 border-green-200',
-  'agent-saisie':     'bg-yellow-100 text-yellow-800 border-yellow-200',
-  'observateur':      'bg-gray-100 text-gray-700 border-gray-200',
-  'president-bureau': 'bg-orange-100 text-orange-800 border-orange-200',
+  'super-admin':              'bg-purple-100 text-purple-800 border-purple-200',
+  'admin':                    'bg-blue-100 text-blue-800 border-blue-200',
+  'validateur':               'bg-green-100 text-green-800 border-green-200',
+  'agent-saisie':             'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'observateur':              'bg-gray-100 text-gray-700 border-gray-200',
+  'president-bureau':         'bg-orange-100 text-orange-800 border-orange-200',
+  'president-etablissement':  'bg-teal-100 text-teal-800 border-teal-200',
 };
 
 const getRoleLabel = (role: UserRole): string =>
