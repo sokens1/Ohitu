@@ -107,8 +107,10 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   // Fonction pour charger les résultats (provisoires = entered + validés) et calculer les agrégats
   const loadFinalResults = useCallback(async () => {
       if (!selectedElection) return;
+      let _loadingTimeout: ReturnType<typeof setTimeout> | null = null;
       try {
         setLoading(true);
+        _loadingTimeout = setTimeout(() => setLoading(false), 3000);
 
         // 0) Charger le type de l'élection (pour différencier pro / standard)
         const { data: electionData } = await supabase
@@ -158,7 +160,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         if (allowedCenterIds.size > 0) {
           const { data: bureauRows, error: bureauErr } = await supabase
             .from('voting_bureaux')
-            .select('id, name, center_id, registered_voters')
+            .select('id, name, center_id, registered_voters, college')
             .in('center_id', Array.from(allowedCenterIds));
           if (bureauErr) throw bureauErr;
           allBureaux = bureauRows || [];
@@ -334,7 +336,10 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         }));
 
         const validatedBureaux = filteredValidatedPvs.length;
-        const totalBureaux = allBureaux.length;
+        const physicalBureaux = allBureaux.filter((b: any) =>
+          !b.name?.startsWith?.('College -') && (b.college == null || b.college === '' || b.college === 'general')
+        );
+        const totalBureaux = physicalBureaux.length > 0 ? physicalBureaux.length : allBureaux.length;
 
         setFinalResults({
           participation: {
@@ -518,6 +523,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         setFinalResults(null);
         setDetailedResults([]);
       } finally {
+        if (_loadingTimeout) clearTimeout(_loadingTimeout);
         setLoading(false);
       }
   }, [selectedElection]);

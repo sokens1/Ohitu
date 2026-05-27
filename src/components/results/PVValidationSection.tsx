@@ -837,13 +837,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       </div>
 
       {/* Modal détails PV */}
-      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setEditMode(false); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setEditMode(false); setPreviewOpen(false); } }}>
+        <DialogContent className={`${previewOpen ? 'max-w-7xl' : 'max-w-4xl'} max-h-[90vh] overflow-y-auto transition-all duration-300`}>
           <DialogHeader>
             <DialogTitle>Détails du PV</DialogTitle>
           </DialogHeader>
             {selectedPVData ? (
-              <div className="space-y-6">
+              <div className={previewOpen ? 'flex gap-6 items-start' : ''}>
+              <div className={previewOpen ? 'w-[480px] flex-shrink-0 space-y-6 overflow-y-auto max-h-[75vh] pr-2' : 'space-y-6'}>
 
               {/* ── Timeline circuit de validation ──────────────────────────── */}
               <PVTimeline pv={selectedPVData} />
@@ -1321,23 +1322,31 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 </>}
                 </div>
               </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-      {/* Modal d'aperçu du document */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Aperçu du Document</DialogTitle>
-          </DialogHeader>
-          {previewUrl ? (
-            <div className="w-full h-[75vh]">
-              {previewUrl.toLowerCase().endsWith('.pdf') ? (
-                <iframe src={previewUrl} className="w-full h-full" />
-              ) : (
-                <img src={previewUrl} alt="PV" className="max-w-full max-h-full mx-auto" />
+              {previewOpen && previewUrl && (
+                <div className="flex-1 flex flex-col">
+                  <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                    <h4 className="font-medium text-gray-900 text-sm">Document scanné</h4>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPreviewOpen(false)}
+                      className="text-gray-400 hover:text-gray-600 h-7 w-7 p-0"
+                    >
+                      <XCircle className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <div style={{ height: '70vh' }}>
+                    {previewUrl.toLowerCase().endsWith('.pdf') ? (
+                      <iframe src={previewUrl} className="w-full h-full border-0 rounded-lg shadow-sm" title="Document PV" />
+                    ) : (
+                      <div className="flex items-center justify-center h-full bg-gray-50 rounded-lg border border-gray-200">
+                        <img src={previewUrl} alt="PV" className="max-w-full max-h-full object-contain p-2" />
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
-            </div>
+              </div>
           ) : null}
         </DialogContent>
       </Dialog>
