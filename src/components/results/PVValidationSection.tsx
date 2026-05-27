@@ -759,13 +759,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       </div>
 
       {/* Modal détails PV */}
-      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setEditMode(false); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setEditMode(false); setPreviewOpen(false); } }}>
+        <DialogContent className={`${previewOpen ? 'max-w-7xl' : 'max-w-4xl'} max-h-[90vh] overflow-y-auto transition-all duration-300`}>
           <DialogHeader>
             <DialogTitle>Détails du PV</DialogTitle>
           </DialogHeader>
             {selectedPVData ? (
-              <div className="space-y-6">
+              <div className={previewOpen ? 'flex gap-6 items-start' : ''}>
+              <div className={previewOpen ? 'w-[480px] flex-shrink-0 space-y-6 overflow-y-auto max-h-[75vh] pr-2' : 'space-y-6'}>
 
               {/* ── Timeline circuit de validation ──────────────────────────── */}
               <PVTimeline pv={selectedPVData} />
@@ -1211,81 +1212,32 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 </>}
                 </div>
               </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-      {/* Modal d'aperçu du document — vue côte à côte */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-6xl overflow-hidden p-0">
-          <div className="flex" style={{ height: '85vh' }}>
-            {/* Panneau gauche — données du PV */}
-            <div className="w-72 flex-shrink-0 border-r border-gray-200 flex flex-col bg-white">
-              <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
-                <h2 className="font-semibold text-gray-900 text-sm">Données du PV</h2>
-                {selectedPVData && (
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{selectedPVData.bureauLabel}</p>
-                )}
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {selectedPVData && (
-                  <>
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Participation</p>
-                      <div className="space-y-1.5 text-sm">
-                        <div className="flex justify-between"><span className="text-gray-500">Inscrits</span><span className="font-medium">{selectedPVData.total_registered || 0}</span></div>
-                        <div className="flex justify-between"><span className="text-gray-500">Votants</span><span className="font-medium">{selectedPVData.total_voters || 0}</span></div>
-                        <div className="flex justify-between"><span className="text-gray-500">Bulletins nuls</span><span className="font-medium">{selectedPVData.null_votes || 0}</span></div>
-                        <div className="flex justify-between border-t border-gray-100 pt-1.5"><span className="text-gray-500">Exprimés</span><span className="font-medium">{selectedPVData.votes_expressed || 0}</span></div>
-                      </div>
-                    </div>
-                    {candidateResults.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Résultats candidats</p>
-                        <div className="space-y-1.5">
-                          {candidateResults.map(cr => {
-                            const syndicat = isProElection ? (cr.party?.split(' — ')[0] || '') : '';
-                            return (
-                              <div key={cr.id} className="flex items-center justify-between gap-2">
-                                <div className="min-w-0 flex-1">
-                                  {isProElection ? (
-                                    <p className="font-medium text-blue-700 text-xs truncate">{syndicat}</p>
-                                  ) : (
-                                    <p className="font-medium text-xs truncate">{cr.name}</p>
-                                  )}
-                                </div>
-                                <span className="font-bold text-gray-900 flex-shrink-0 text-sm">{cr.votes}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
+              {previewOpen && previewUrl && (
+                <div className="flex-1 flex flex-col">
+                  <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                    <h4 className="font-medium text-gray-900 text-sm">Document scanné</h4>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPreviewOpen(false)}
+                      className="text-gray-400 hover:text-gray-600 h-7 w-7 p-0"
+                    >
+                      <XCircle className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <div style={{ height: '70vh' }}>
+                    {previewUrl.toLowerCase().endsWith('.pdf') ? (
+                      <iframe src={previewUrl} className="w-full h-full border-0 rounded-lg shadow-sm" title="Document PV" />
+                    ) : (
+                      <div className="flex items-center justify-center h-full bg-gray-50 rounded-lg border border-gray-200">
+                        <img src={previewUrl} alt="PV" className="max-w-full max-h-full object-contain p-2" />
                       </div>
                     )}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Statut</p>
-                      {getPriorityBadge(selectedPVData.status)}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-            {/* Panneau droit — document scanné */}
-            <div className="flex-1 overflow-hidden bg-gray-100 flex items-center justify-center">
-              {previewUrl ? (
-                previewUrl.toLowerCase().endsWith('.pdf') ? (
-                  <iframe src={previewUrl} className="w-full h-full border-0" title="Document PV" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center p-4">
-                    <img src={previewUrl} alt="PV" className="max-w-full max-h-full object-contain rounded shadow-sm" />
                   </div>
-                )
-              ) : (
-                <div className="text-center text-gray-400">
-                  <FileText className="w-12 h-12 mx-auto mb-2" />
-                  <p className="text-sm">Aucun document rattaché</p>
                 </div>
               )}
-            </div>
-          </div>
+              </div>
+          ) : null}
         </DialogContent>
       </Dialog>
 
