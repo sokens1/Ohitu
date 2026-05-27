@@ -53,7 +53,7 @@ const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string; disabled?: boole
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
-  { value: 'president-etablissement', label: "Président d'Établissement" },
+  { value: 'president-etablissement', label: "Président de Bureau" },
   // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
 ];
 
@@ -64,7 +64,7 @@ const ALL_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
-  { value: 'president-etablissement', label: "Président d'Établissement" },
+  { value: 'president-etablissement', label: "Président de Bureau" },
   // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
 ];
 

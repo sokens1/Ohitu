@@ -84,7 +84,7 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
       description: 'Agent de saisie',
     },
     {
-      label: isAnomaly ? 'Anomalie signalée' : (validDone ? 'PV validé' : 'En attente de validation'),
+      label: isAnomaly ? 'Rejeté' : (validDone ? 'PV validé' : 'En attente de validation'),
       sublabel: validDone ? pv.validated_by : (isAnomaly ? pv.validated_by : 'Validateur'),
       date: (validDone || isAnomaly) ? pv.validated_at_str : undefined,
       icon: isAnomaly
@@ -408,7 +408,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       case 'validated':
         return 'Validé';
       case 'anomaly':
-        return 'Anomalie';
+        return 'Rejeté';
       case 'published':
         return 'Publié';
       default:
@@ -735,7 +735,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 { value: 'pending',   label: 'En attente' },
                 { value: 'entered',   label: 'Saisis' },
                 { value: 'validated', label: 'Validés' },
-                { value: 'anomaly',   label: 'Anomalie' },
+                { value: 'anomaly',   label: 'Rejeté' },
                 { value: 'published', label: 'Publiés' },
               ] as const).map(s => (
                 <Button
@@ -795,7 +795,6 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2 flex-wrap gap-1">
-                      {getStatusIcon(pv.status)}
                       <span className="font-medium text-gray-900">{pv.bureauLabel}</span>
                       {pv.college_type && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
@@ -1414,7 +1413,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           <div className="py-3 space-y-3">
             <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-800 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-orange-500" />
-              <span>Le statut passera à <strong>Anomalie</strong>. L'agent de saisie pourra consulter votre commentaire et corriger les données.</span>
+              <span>Le statut passera à <strong>Rejeté</strong>. L'agent de saisie pourra consulter votre commentaire et corriger les données.</span>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-700">

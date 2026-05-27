@@ -250,7 +250,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
       case 'entered':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Saisi</Badge>;
       case 'anomaly':
-        return <Badge className="bg-red-100 text-red-800 border-red-200">🚩 Anomalie</Badge>;
+        return <Badge className="bg-red-100 text-red-800 border-red-200">🚩 Rejeté</Badge>;
       case 'pending':
         return <Badge className="bg-gray-100 text-gray-800 border-gray-200">En attente de saisie</Badge>;
       default:
