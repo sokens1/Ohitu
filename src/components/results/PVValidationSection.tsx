@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +14,8 @@ import {
   Clock,
   FileText,
   RotateCcw,
-  PenLine
+  PenLine,
+  X as XIcon,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -84,7 +84,7 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
       description: 'Agent de saisie',
     },
     {
-      label: isAnomaly ? 'Anomalie signalée' : (validDone ? 'PV validé' : 'En attente de validation'),
+      label: isAnomaly ? 'Rejeté' : (validDone ? 'PV validé' : 'En attente de validation'),
       sublabel: validDone ? pv.validated_by : (isAnomaly ? pv.validated_by : 'Validateur'),
       date: (validDone || isAnomaly) ? pv.validated_at_str : undefined,
       icon: isAnomaly
@@ -150,9 +150,11 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   );
 };
 
-interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; }
+import type { ResultsFilters } from './ResultsFilterBar';
 
-const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false }) => {
+interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; filters?: ResultsFilters; }
+
+const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false, filters }) => {
   const { role } = useRBAC();
   const { user } = useAuth();
   const isObserver = role === 'observateur';
@@ -193,6 +195,15 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
   const [rejecting, setRejecting] = useState(false);
+
+  // Rétractation
+  const [retracting, setRetracting] = useState(false);
+
+  // PV verrouillé : validé ou publié — boutons grisés (sauf pour super-admin et admin)
+  const selectedPVStatus = pvs.find(p => p.id === selectedPV)?.status;
+  const isLocked = (selectedPVStatus === 'validated' || selectedPVStatus === 'published')
+    && role !== 'super-admin'
+    && role !== 'admin';
 
   // Helpers d'upload (alignés avec PVEntrySection)
   const ensureBucketExists = async (bucket: string) => {
@@ -262,21 +273,39 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           if (ecErr) throw ecErr;
           let allowedCenterIds = new Set((ecRows || []).map((r: any) => r.center_id));
 
-          // Si l'utilisateur est validateur avec des centres assignés → filtrer davantage
+          // Si l'utilisateur est validateur avec des centres/collèges assignés → filtrer davantage
           if (user?.role === 'validateur') {
-            const validatorCenterIds = user.assigned_center_ids?.length
-              ? user.assigned_center_ids
-              : (usersData?.find(u => u.id === user.id) as any)?.assigned_center_ids ?? [];
-            if (validatorCenterIds.length > 0) {
+            const centerColleges: Record<string, string[]> =
+              user.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
+                ? user.assigned_center_colleges
+                : ((usersData?.find(u => u.id === user.id) as any)?.assigned_center_colleges ?? {});
+
+            const assignedCenterIds = Object.keys(centerColleges);
+            if (assignedCenterIds.length > 0) {
               allowedCenterIds = new Set(
-                [...allowedCenterIds].filter(id => validatorCenterIds.includes(id))
+                [...allowedCenterIds].filter(id => assignedCenterIds.includes(id))
               );
             }
           }
 
           const filteredBureaus = (bureaus || []).filter(b => allowedCenterIds.has(b.center_id));
           const filteredCenterIds = Array.from(new Set(filteredBureaus.map(b => b.center_id)));
-          const filteredPvRows = (pvRows || []).filter(r => filteredBureaus.some(b => b.id === r.bureau_id));
+
+          // Construire la map centerId → collèges autorisés pour le filtre par collège
+          const centerCollegesFilter: Record<string, string[]> =
+            user?.role === 'validateur' && user.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
+              ? user.assigned_center_colleges
+              : {};
+
+          const filteredPvRows = (pvRows || []).filter(r => {
+            const bureau = filteredBureaus.find(b => b.id === r.bureau_id);
+            if (!bureau) return false;
+            const allowedColleges = centerCollegesFilter[bureau.center_id];
+            // Si pas de filtre collège pour ce centre (tableau vide ou non défini) → tous les collèges autorisés
+            if (!allowedColleges || allowedColleges.length === 0) return true;
+            // Sinon, le college_type du PV doit être dans la liste
+            return !r.college_type || allowedColleges.includes(r.college_type);
+          });
           setPvs(filteredPvRows);
 
           const { data: centers, error: cErr } = centerIds.length
@@ -323,7 +352,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
     };
     load();
-  }, [selectedElection]);
+  }, [selectedElection, user?.id, user?.assigned_center_ids, user?.assigned_center_colleges]);
 
   const displayedPVs = useMemo(() => {
     const enriched = pvs.map(pv => {
@@ -332,6 +361,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       return {
         id: pv.id,
         status: pv.status,
+        centerId: bureau?.center_id ?? '',
+        centerName: center?.name ?? '',
+        bureauName: bureau?.name ?? '',
         bureauLabel: `${center?.name || 'Centre'} - ${bureau?.name || 'Bureau'}`,
         timestamp: pv.entered_at ? new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         total_registered: pv.total_registered,
@@ -343,20 +375,29 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
         validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
-        // Données observateur (compatibilité simple + multi-avis)
         college_type: (pv.college_type ?? null) as string | null,
         observer_annotation: pv.observer_annotation ?? null,
         observer_conformity: (pv.observer_conformity ?? null) as 'conforme' | 'non_conforme' | null,
         observer_name: pv.observer_id ? (usersMap.get(pv.observer_id) || pv.observer_id) : null,
         observer_annotated_at_str: pv.observer_annotated_at ? new Date(pv.observer_annotated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.observer_annotated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         bureau_id: pv.bureau_id,
-        // Multi-avis observateurs
         opinions: observerOpinions.get(pv.id) || [],
       };
     });
-    if (filter === 'all') return enriched;
-    return enriched.filter(e => e.status === filter);
-  }, [pvs, bureauxMap, centersMap, filter, observerOpinions]);
+
+    return enriched.filter(e => {
+      if (filter !== 'all' && e.status !== filter) return false;
+      if (filters?.centerId && e.centerId !== filters.centerId) return false;
+      if (filters?.collegeType && e.college_type !== filters.collegeType) return false;
+      if (filters?.search?.trim()) {
+        const q = filters.search.trim().toLowerCase();
+        if (!e.bureauLabel.toLowerCase().includes(q) &&
+            !e.centerName.toLowerCase().includes(q) &&
+            !e.bureauName.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [pvs, bureauxMap, centersMap, filter, filters, observerOpinions]);
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -367,7 +408,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       case 'validated':
         return 'Validé';
       case 'anomaly':
-        return 'Anomalie';
+        return 'Rejeté';
       case 'published':
         return 'Publié';
       default:
@@ -685,13 +726,51 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             </Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2 mb-4">
-            <Button variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')} size="sm">Tous</Button>
-            <Button variant={filter === 'pending' ? 'default' : 'outline'} onClick={() => setFilter('pending')} size="sm">En attente</Button>
-            <Button variant={filter === 'entered' ? 'default' : 'outline'} onClick={() => setFilter('entered')} size="sm">Saisis</Button>
-            <Button variant={filter === 'validated' ? 'default' : 'outline'} onClick={() => setFilter('validated')} size="sm">Validés</Button>
-            <Button variant={filter === 'anomaly' ? 'default' : 'outline'} onClick={() => setFilter('anomaly')} size="sm">Anomalie</Button>
+        <CardContent className="space-y-3">
+          {/* Filtres statut */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                { value: 'all',       label: 'Tous' },
+                { value: 'pending',   label: 'En attente' },
+                { value: 'entered',   label: 'Saisis' },
+                { value: 'validated', label: 'Validés' },
+                { value: 'anomaly',   label: 'Rejeté' },
+                { value: 'published', label: 'Publiés' },
+              ] as const).map(s => (
+                <Button
+                  key={s.value}
+                  variant={filter === s.value ? 'default' : 'outline'}
+                  onClick={() => setFilter(s.value)}
+                  size="sm"
+                  className="h-7 px-2.5 text-xs"
+                >
+                  {s.label}
+                  {s.value !== 'all' && (
+                    <span className="ml-1 opacity-60 text-[10px]">
+                      {pvs.filter(p => p.status === s.value).length}
+                    </span>
+                  )}
+                </Button>
+              ))}
+            </div>
+
+            {/* Reset filtre statut */}
+            {filter !== 'all' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-gray-500 hover:text-gray-700"
+                onClick={() => setFilter('all')}
+              >
+                <XIcon className="w-3 h-3 mr-1" /> Réinitialiser
+              </Button>
+            )}
+
+            {/* Compteur résultats */}
+            <span className="ml-auto text-xs text-gray-400">
+              {displayedPVs.length} / {pvs.length} PV
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -716,7 +795,6 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2 flex-wrap gap-1">
-                      {getStatusIcon(pv.status)}
                       <span className="font-medium text-gray-900">{pv.bureauLabel}</span>
                       {pv.college_type && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
@@ -1079,9 +1157,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   ) : null
                 )}
 
+              {/* isLocked : PV validé ou publié — boutons grisés, seul "Se rétracter" reste actif */}
               <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-6">
                 {!editMode && !readOnly && (
-                  <Button onClick={() => {
+                  <Button disabled={isLocked} onClick={() => {
                     setEditValues({
                       total_registered: (editValues.total_registered || 0),
                       total_voters: (selectedPVData.total_voters || 0),
@@ -1089,12 +1168,12 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       votes_expressed: (selectedPVData.votes_expressed || 0)
                     });
                     setEditMode(true);
-                  }} variant="outline" className="border-amber-400 text-amber-700 hover:bg-amber-50 hover:border-amber-500">
+                  }} variant="outline" className="border-amber-400 text-amber-700 hover:bg-amber-50 hover:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed">
                     Modifier
                   </Button>
                 )}
                 {editMode && (
-                  <Button onClick={async () => {
+                  <Button disabled={isLocked} onClick={async () => {
                     if (!selectedPV) return;
                     if (!validateEditValues()) {
                       toast.error("Veuillez corriger les incohérences avant d'enregistrer.");
@@ -1159,54 +1238,85 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     finally {
                       setSaving(false);
                     }
-                  }} className="bg-green-600 hover:bg-green-700 text-white">
+                  }} className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed">
                     {saving ? 'Enregistrement…' : 'Enregistrer'}
                   </Button>
                 )}
       {!readOnly && <Button
         onClick={() => setShowResetConfirm(true)}
-        disabled={resetting}
+        disabled={resetting || isLocked}
         variant="outline"
-        className="border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400"
+        className="border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <RotateCcw className="w-4 h-4 mr-2" />
         {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
       </Button>}
 
-                {/* Boutons d'action — masqués pour l'observateur */}
+                {/* Se rétracter — admin + validateur uniquement, grisé si PV non validé/rejeté */}
+                {!readOnly && (role === 'super-admin' || role === 'admin' || role === 'validateur') && (
+                  <Button
+                    variant="outline"
+                    disabled={retracting || !(selectedPVData?.status === 'validated' || selectedPVData?.status === 'anomaly')}
+                    className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={async () => {
+                      if (!selectedPV) return;
+                      setRetracting(true);
+                      try {
+                        const { error } = await supabase
+                          .from('procès_verbaux')
+                          .update({
+                            status: 'entered',
+                            validated_by: null,
+                            validated_at: null,
+                            rejection_comment: null,
+                          })
+                          .eq('id', selectedPV);
+                        if (error) { toast.error('Échec de la rétractation'); return; }
+                        setPvs(prev => prev.map(p =>
+                          p.id === selectedPV
+                            ? { ...p, status: 'entered', validated_by: null, validated_at: null }
+                            : p
+                        ));
+                        toast.success('Rétractation effectuée — PV remis en attente de validation');
+                        setDetailOpen(false);
+                      } finally {
+                        setRetracting(false);
+                      }
+                    }}
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    {retracting ? 'Rétractation…' : 'Se rétracter'}
+                  </Button>
+                )}
+
+                {/* Boutons d'action — masqués pour l'observateur, grisés si PV verrouillé */}
                 {!readOnly && <>
-                {/* <Button onClick={async () => {
-                  if (!selectedPV) return;
-                  if (!confirm('Supprimer ce PV ? Cette action est irréversible.')) return;
-                  const { error: crErr } = await supabase.from('candidate_results').delete().eq('pv_id', selectedPV);
-                  if (crErr) { console.error(crErr); return; }
-                  const { error: pvErr } = await supabase.from('procès_verbaux').delete().eq('id', selectedPV);
-                  if (pvErr) { console.error(pvErr); return; }
-                  setPvs(prev => prev.filter(p => p.id !== selectedPV));
-                  setDetailOpen(false);
-                }} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
-                  Supprimer
-                </Button> */}
-                {/* Rejeter — renvoie le PV en saisie avec commentaire obligatoire */}
+                {/* Rejeter — grisé pour tous si PV validé ou publié */}
                 <Button
                   variant="outline"
-                  className="border-orange-400 text-orange-700 hover:bg-orange-50"
+                  disabled={isLocked || selectedPVStatus === 'validated' || selectedPVStatus === 'published'}
+                  className="border-orange-400 text-orange-700 hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={() => { setRejectComment(''); setShowRejectDialog(true); }}
                 >
                   <XCircle className="w-4 h-4 mr-2" /> Rejeter
                 </Button>
-                <Button onClick={async () => {
-                  if (!selectedPV) return;
-                  const { data: { user: authUser } } = await supabase.auth.getUser();
-                  const { error } = await supabase
-                    .from('procès_verbaux')
-                    .update({ status: 'validated', validated_at: new Date().toISOString(), validated_by: authUser?.id || null })
-                    .eq('id', selectedPV);
-                  if (!error) {
-                    setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
-                    setDetailOpen(false);
-                  }
-                }} className="bg-green-600 hover:bg-green-700 text-white">
+                {/* Valider — grisé pour tous si PV validé ou publié */}
+                <Button
+                  disabled={isLocked || selectedPVStatus === 'validated' || selectedPVStatus === 'published'}
+                  onClick={async () => {
+                    if (!selectedPV) return;
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
+                    const { error } = await supabase
+                      .from('procès_verbaux')
+                      .update({ status: 'validated', validated_at: new Date().toISOString(), validated_by: authUser?.id || null })
+                      .eq('id', selectedPV);
+                    if (!error) {
+                      setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
+                      setDetailOpen(false);
+                    }
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <CheckCircle className="w-4 h-4 mr-2" /> Valider
                 </Button>
                 </>}
@@ -1312,7 +1422,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           <div className="py-3 space-y-3">
             <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-800 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-orange-500" />
-              <span>Le statut passera à <strong>Anomalie</strong>. L'agent de saisie pourra consulter votre commentaire et corriger les données.</span>
+              <span>Le statut passera à <strong>Rejeté</strong>. L'agent de saisie pourra consulter votre commentaire et corriger les données.</span>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-700">
