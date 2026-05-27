@@ -988,7 +988,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
               const isPro = isProfessionalElection(electionType);
               const syndicat = isPro ? (candidate.party?.split(' — ')[0] || candidate.name || '') : '';
               // Détails candidat (titulaire/suppléant) uniquement quand un filtre est actif
-              const showCandidateDetails = !isPro || filterCollege || filterCenter;
+              const showCandidateDetails = !isPro || filters?.collegeType || filters?.centerId;
               return (
                 <div key={candidate.id || index} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl bg-white gap-4">
                   <div className="flex items-center gap-4 flex-1 min-w-0">

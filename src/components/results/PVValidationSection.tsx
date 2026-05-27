@@ -2,8 +2,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +15,6 @@ import {
   FileText,
   RotateCcw,
   PenLine,
-  Search,
   X as XIcon,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -730,25 +727,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {/* Barre de recherche */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-            <Input
-              placeholder="Rechercher un bureau ou un établissement…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="pl-9 pr-8 h-9 text-sm"
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <XIcon className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Filtres en ligne */}
+          {/* Filtres statut */}
           <div className="flex flex-wrap gap-2 items-center">
-            {/* Statut */}
             <div className="flex flex-wrap gap-1.5">
               {([
                 { value: 'all',       label: 'Tous' },
@@ -775,45 +755,13 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               ))}
             </div>
 
-            {/* Établissement */}
-            {centersMap.size > 1 && (
-              <Select value={centerFilter} onValueChange={setCenterFilter}>
-                <SelectTrigger className="h-7 text-xs w-44">
-                  <SelectValue placeholder="Établissement" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les établissements</SelectItem>
-                  {Array.from(centersMap.values()).map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-
-            {/* Collège (élections professionnelles) */}
-            {isProElection && (
-              <Select value={collegeFilter} onValueChange={setCollegeFilter}>
-                <SelectTrigger className="h-7 text-xs w-36">
-                  <SelectValue placeholder="Collège" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les collèges</SelectItem>
-                  {Array.from(new Set(pvs.map((p: any) => p.college_type).filter(Boolean))).map(ct => (
-                    <SelectItem key={ct as string} value={ct as string}>
-                      {ct === 'cadres' ? 'Cadres' : ct === 'employes' ? 'Maîtrise' : ct === 'ouvriers' ? 'Exécution' : ct === 'general' ? 'Encadrement' : ct as string}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-
-            {/* Reset filtres */}
-            {(filter !== 'all' || centerFilter !== 'all' || collegeFilter !== 'all' || search) && (
+            {/* Reset filtre statut */}
+            {filter !== 'all' && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2 text-xs text-gray-500 hover:text-gray-700"
-                onClick={() => { setFilter('all'); setCenterFilter('all'); setCollegeFilter('all'); setSearch(''); }}
+                onClick={() => setFilter('all')}
               >
                 <XIcon className="w-3 h-3 mr-1" /> Réinitialiser
               </Button>
