@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
@@ -35,6 +36,123 @@ const TAB_DEFS = [
   { value: 'documents',  icon: Folder,    label: 'Documents',               labelShort: 'Documents', permission: 'results:documents'  as const },
 ];
 
+// ─── Standalone fetch functions ───────────────────────────────────────────────
+
+async function fetchElectionsFn({
+  isGlobalAdmin,
+  assignedElectionIds,
+}: {
+  isGlobalAdmin: boolean;
+  assignedElectionIds: string[];
+}): Promise<ElectionOption[]> {
+  // Non super-admin sans élection assignée → aucune élection accessible
+  if (!isGlobalAdmin && assignedElectionIds.length === 0) {
+    return [];
+  }
+
+  let query = supabase.from('elections').select('id, title').order('election_date', { ascending: false });
+
+  // Tout rôle non super-admin : restreindre aux élections assignées
+  if (!isGlobalAdmin && assignedElectionIds.length > 0) {
+    query = assignedElectionIds.length === 1
+      ? query.eq('id', assignedElectionIds[0])
+      : query.in('id', assignedElectionIds);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('Erreur chargement élections:', error);
+    return [];
+  }
+
+  return (data ?? []).map(
+    (e: { id: string; title: string }) => ({ id: e.id.toString(), name: e.title })
+  );
+}
+
+async function fetchGlobalStatsFn(selectedElection: string): Promise<GlobalStats> {
+  // Récupérer PVs avec champs utiles
+  const { data: pvData } = await supabase
+    .from('procès_verbaux')
+    .select('id, status, bureau_id, total_voters, college_type')
+    .eq('election_id', selectedElection);
+
+  // Total électeurs élection (dénominateur)
+  const totalElectors = await getElectionElectorsTotal(selectedElection);
+
+  // Statuts considérés comme saisis
+  const enteredStatuses = ['entered', 'saisi', 'validated', 'validé'];
+
+  // Calculer électeurs saisis : priorité pv.total_voters, fallback sera calculé plus bas
+  const pvs = pvData || [];
+  let electorsEntered = 0;
+  let bureauxSaisis = 0;
+  for (const pv of pvs) {
+    if (enteredStatuses.includes(String(pv.status))) {
+      bureauxSaisis += 1;
+      const tv = Number(pv.total_voters) || 0;
+      electorsEntered += tv;
+    }
+  }
+
+  // Si aucun total_voters présent sur PVs, essayer d'utiliser registered_voters depuis voting_bureaux
+  if (electorsEntered === 0 && pvs.length > 0) {
+    const bureauIds = pvs.map((pv: any) => String(pv.bureau_id)).filter(Boolean);
+    if (bureauIds.length > 0) {
+      const { data: bureaux } = await supabase
+        .from('voting_bureaux')
+        .select('id, registered_voters')
+        .in('id', bureauIds);
+      const bureauxMap = new Map((bureaux || []).map((b: any) => [String(b.id), Number(b.registered_voters) || 0]));
+      electorsEntered = 0;
+      bureauxSaisis = 0;
+      for (const pv of pvs) {
+        if (enteredStatuses.includes(String(pv.status))) {
+          const bid = String(pv.bureau_id);
+          const rv = (bureauxMap.get(bid) as number) || 0;
+          electorsEntered += rv;
+          bureauxSaisis += 1;
+        }
+      }
+    }
+  }
+
+  const tauxSaisie = totalElectors > 0 ? Math.round((electorsEntered / totalElectors) * 100) : 0;
+
+  // Voix/candidate stats unchanged
+  const { data: ecData } = await supabase
+    .from('election_candidates')
+    .select('candidate_id')
+    .eq('election_id', selectedElection);
+
+  const candidateIds = (ecData ?? []).map((ec: { candidate_id: string }) => ec.candidate_id);
+  let voixNotreCanidat = 0;
+  let ecartDeuxieme = 0;
+
+  if (candidateIds.length > 0) {
+    const { data: results } = await supabase
+      .from('candidate_results')
+      .select('votes')
+      .in('candidate_id', candidateIds)
+      .order('votes', { ascending: false });
+
+    if (results && results.length > 0) {
+      voixNotreCanidat = results[0].votes ?? 0;
+      ecartDeuxieme = results.length > 1 ? voixNotreCanidat - (results[1].votes ?? 0) : 0;
+    }
+  }
+
+  return {
+    tauxSaisie,
+    bureauxSaisis,
+    totalBureaux: totalElectors,
+    voixNotreCanidat,
+    ecartDeuxieme,
+    anomaliesDetectees: 0,
+    pvsEnAttente: pvs.filter((pv: any) => pv.status === 'en_attente').length || 0,
+  };
+}
+
 // ─── Composant ────────────────────────────────────────────────────────────────
 const Results = () => {
   const { can, assignedElectionId, assignedElectionIds, role, isGlobalAdmin } = useRBAC();
@@ -51,56 +169,52 @@ const Results = () => {
     () => assignedElectionId ?? localStorage.getItem('results_selected_election') ?? ''
   );
   const [availableElections, setAvailableElections] = useState<ElectionOption[]>([]);
-  const [globalStats, setGlobalStats] = useState<GlobalStats>({
-    tauxSaisie: 0, bureauxSaisis: 0, totalBureaux: 0,
-    voixNotreCanidat: 0, ecartDeuxieme: 0, anomaliesDetectees: 0, pvsEnAttente: 0,
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
+
+  // ── useQuery : chargement des élections ───────────────────────────────────
+  const {
+    data: electionsQueryData,
+    isLoading: electionsQueryLoading,
+  } = useQuery({
+    queryKey: ['result-elections', isGlobalAdmin, assignedElectionIds.join(',')],
+    queryFn: () => fetchElectionsFn({ isGlobalAdmin, assignedElectionIds }),
+    staleTime: 5 * 60 * 1000,
   });
-  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<ResultsFilters>(EMPTY_FILTERS);
 
-  // ── Chargement des élections ───────────────────────────────────────────────
-  // Règle : seul le super-admin voit toutes les élections.
-  // Tous les autres rôles ne voient QUE l'élection qui leur est assignée.
+  // Derive loading state: only show spinner when first load (no cached data yet)
+  const loading = electionsQueryLoading && !electionsQueryData;
+
+  // Sync elections query result into local state
   useEffect(() => {
-    const fetchElections = async () => {
-      try {
-        setLoading(true);
+    if (!electionsQueryData) return;
 
-        // Non super-admin sans élection assignée → aucune élection accessible
-        if (!isGlobalAdmin && assignedElectionIds.length === 0) {
-          setAvailableElections([]);
-          setSelectedElection('');
-          return;
-        }
+    setAvailableElections(electionsQueryData);
 
-        let query = supabase.from('elections').select('id, title').order('election_date', { ascending: false });
+    if (assignedElectionIds.length === 1) {
+      setSelectedElection(assignedElectionIds[0]);
+    } else if (!localStorage.getItem('results_selected_election') && electionsQueryData.length > 0) {
+      setSelectedElection(electionsQueryData[0].id);
+    }
+  }, [electionsQueryData, assignedElectionIds]);
 
-        // Tout rôle non super-admin : restreindre aux élections assignées
-        if (!isGlobalAdmin && assignedElectionIds.length > 0) {
-          query = assignedElectionIds.length === 1
-            ? query.eq('id', assignedElectionIds[0])
-            : query.in('id', assignedElectionIds);
-        }
+  // ── useQuery : statistiques globales ──────────────────────────────────────
+  const { data: globalStatsData } = useQuery({
+    queryKey: ['result-global-stats', selectedElection],
+    queryFn: () => fetchGlobalStatsFn(selectedElection),
+    staleTime: 5 * 60 * 1000,
+    enabled: !!selectedElection,
+  });
 
-        const { data, error } = await query;
-        if (error) { console.error('Erreur chargement élections:', error); return; }
-
-        const elections: ElectionOption[] = (data ?? []).map(
-          (e: { id: string; title: string }) => ({ id: e.id.toString(), name: e.title })
-        );
-        setAvailableElections(elections);
-
-        if (assignedElectionIds.length === 1) {
-          setSelectedElection(assignedElectionIds[0]);
-        } else if (!localStorage.getItem('results_selected_election') && elections.length > 0) {
-          setSelectedElection(elections[0].id);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchElections();
-  }, [assignedElectionId]);
+  const globalStats: GlobalStats = globalStatsData ?? {
+    tauxSaisie: 0,
+    bureauxSaisis: 0,
+    totalBureaux: 0,
+    voixNotreCanidat: 0,
+    ecartDeuxieme: 0,
+    anomaliesDetectees: 0,
+    pvsEnAttente: 0,
+  };
 
   // ── Persistence localStorage (super-admin uniquement) ─────────────────────
   useEffect(() => {
@@ -113,88 +227,6 @@ const Results = () => {
   useEffect(() => {
     localStorage.setItem('results_active_tab', activeTab);
   }, [activeTab]);
-
-  // ── Statistiques globales ──────────────────────────────────────────────────
-  useEffect(() => {
-    if (!selectedElection) return;
-
-    const fetchGlobalStats = async () => {
-      // Récupérer PVs avec champs utiles
-      const { data: pvData } = await supabase
-        .from('procès_verbaux')
-        .select('id, status, bureau_id, total_voters, college_type')
-        .eq('election_id', selectedElection);
-
-      // Total électeurs élection (dénominateur)
-      const totalElectors = await getElectionElectorsTotal(selectedElection);
-
-      // Statuts considérés comme saisis
-      const enteredStatuses = ['entered','saisi','validated','validé'];
-
-      // Calculer électeurs saisis : priorité pv.total_voters, fallback sera calculé plus bas
-      const pvs = pvData || [];
-      let electorsEntered = 0;
-      let bureauxSaisis = 0;
-      for (const pv of pvs) {
-        if (enteredStatuses.includes(String(pv.status))) {
-          bureauxSaisis += 1;
-          const tv = Number(pv.total_voters) || 0;
-          electorsEntered += tv;
-        }
-      }
-
-      // Si aucun total_voters présent sur PVs, essayer d'utiliser registered_voters depuis voting_bureaux
-      if (electorsEntered === 0 && pvs.length > 0) {
-        const bureauIds = pvs.map((pv: any) => String(pv.bureau_id)).filter(Boolean);
-        if (bureauIds.length > 0) {
-          const { data: bureaux } = await supabase
-            .from('voting_bureaux')
-            .select('id, registered_voters')
-            .in('id', bureauIds);
-          const bureauxMap = new Map((bureaux || []).map((b: any) => [String(b.id), Number(b.registered_voters) || 0]));
-          electorsEntered = 0;
-          bureauxSaisis = 0;
-          for (const pv of pvs) {
-            if (enteredStatuses.includes(String(pv.status))) {
-              const bid = String(pv.bureau_id);
-              const rv = bureauxMap.get(bid) || 0;
-              electorsEntered += rv;
-              bureauxSaisis += 1;
-            }
-          }
-        }
-      }
-
-      const tauxSaisie = totalElectors > 0 ? Math.round((electorsEntered / totalElectors) * 100) : 0;
-
-      // Voix/candidate stats unchanged
-      const { data: ecData } = await supabase
-        .from('election_candidates')
-        .select('candidate_id')
-        .eq('election_id', selectedElection);
-
-      const candidateIds = (ecData ?? []).map((ec: { candidate_id: string }) => ec.candidate_id);
-      let voixNotreCanidat = 0;
-      let ecartDeuxieme    = 0;
-
-      if (candidateIds.length > 0) {
-        const { data: results } = await supabase
-          .from('candidate_results')
-          .select('votes')
-          .in('candidate_id', candidateIds)
-          .order('votes', { ascending: false });
-
-        if (results && results.length > 0) {
-          voixNotreCanidat = results[0].votes ?? 0;
-          ecartDeuxieme    = results.length > 1 ? voixNotreCanidat - (results[1].votes ?? 0) : 0;
-        }
-      }
-
-      setGlobalStats({ tauxSaisie, bureauxSaisis, totalBureaux: totalElectors, voixNotreCanidat, ecartDeuxieme, anomaliesDetectees: 0, pvsEnAttente: pvs.filter((pv: any) => pv.status === 'en_attente').length || 0 });
-    };
-
-    fetchGlobalStats();
-  }, [selectedElection]);
 
   // ── Permissions par section ────────────────────────────────────────────────
   // readOnly sur la validation : observateur peut voir mais pas agir
@@ -314,11 +346,11 @@ const Results = () => {
 
               <div className="p-3 sm:p-4 lg:p-6">
                 <TabsContent value="entry" className="space-y-6 mt-0">
-                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} filters={filters} />
+                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} filters={filters} />
                 </TabsContent>
 
                 <TabsContent value="validation" className="space-y-6 mt-0">
-                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} filters={filters} />
+                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} filters={filters} />
                 </TabsContent>
 
                 <TabsContent value="publish" className="space-y-6 mt-0">

@@ -84,7 +84,7 @@ export interface ProfessionalElectionConfig {
     campaignStart: string;
     campaignEnd: string;
     firstRoundDate: string;
-    secondRoundDate?: string; // 1er tour + 7 jours
+    secondRoundDate?: string; // 1er tour + 9 jours
     recoursStart?: string;
     recoursEnd?: string;
   };

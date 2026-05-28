@@ -31,7 +31,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
     legalFramework: (election as any).legal_framework || 'LOI-022-2021 + Arrêté 000147',
     
     // Entreprise
-    enterpriseId: (election as any).enterprise_id || '',
+    enterpriseId: election.enterpriseId || (election as any).enterprise_id || '',
     enterpriseName: '',
     enterpriseSector: 'prive',
     totalEmployees: election.statistics.totalVoters.toString(),
@@ -39,6 +39,11 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
     employeesEmployes: '0',
     employeesOuvriers: '0',
     administrativeUnit: '',
+    provinceName: '',
+    communeName: '',
+    hrContactName: '',
+    hrContactPhone: '',
+    hrContactEmail: '',
     region: 'Estuaire',
     villes: [] as string[],
     
@@ -58,15 +63,6 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
     carence: (election as any).carence || false,
   });
   
-  // Auto-calculer l'effectif total
-  useEffect(() => {
-    const total = (parseInt(formData.employeesCadres) || 0) + 
-                  (parseInt(formData.employeesEmployes) || 0) + 
-                  (parseInt(formData.employeesOuvriers) || 0);
-    if (total > 0 && total.toString() !== formData.totalEmployees) {
-      setFormData(prev => ({ ...prev, totalEmployees: total.toString() }));
-    }
-  }, [formData.employeesCadres, formData.employeesEmployes, formData.employeesOuvriers, formData.totalEmployees]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -89,44 +85,90 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
             setFormData(prev => ({
               ...prev,
               enterpriseName: enterprise.name,
-              enterpriseSector: enterprise.sector,
+              enterpriseSector: enterprise.sector || 'prive',
               employeesCadres: enterprise.employees_by_category?.cadres?.toString() || '0',
               employeesEmployes: enterprise.employees_by_category?.employes?.toString() || '0',
               employeesOuvriers: enterprise.employees_by_category?.ouvriers?.toString() || '0',
               administrativeUnit: enterprise.administrative_unit || '',
+              provinceName: enterprise.province_name || '',
+              communeName: enterprise.commune_name || '',
+              hrContactName: enterprise.hr_contact?.name || '',
+              hrContactPhone: enterprise.hr_contact?.phone || '',
+              hrContactEmail: enterprise.hr_contact?.email || '',
             }));
           }
         }
 
-        // 2. Charger les collèges
+        // 2. Charger les collèges depuis electoral_colleges (structure)
         const { data: colleges, error: collError } = await supabase
           .from('electoral_colleges')
           .select('*')
           .eq('election_id', election.id);
-          
-        if (!collError && colleges) {
-          setFormData(prev => ({
-            ...prev,
-            colleges: colleges.map((c: any) => ({
+
+        const baseColleges = (!collError && colleges && colleges.length > 0)
+          ? colleges.map((c: any) => ({
               id: c.id,
               name: c.name,
               type: c.college_type,
-              voters: c.total_voters,
-              seats: c.seats_to_fill
+              voters: Number(c.total_voters) || 0,
+              seats: Number(c.seats_to_fill) || 0,
             }))
-          }));
-        } else if (!collError && (!colleges || colleges.length === 0)) {
-           // Fallback default colleges if none found
-           setFormData(prev => ({
-            ...prev,
-            colleges: [
-              { id: '1', name: 'Cadre', type: 'cadres', voters: 0, seats: 1 },
-              { id: '2', name: 'Maîtrise', type: 'employes', voters: 0, seats: 1 },
-              { id: '3', name: 'Exécution', type: 'ouvriers', voters: 0, seats: 1 },
-              { id: '4', name: 'Encadrement', type: 'general', voters: 0, seats: 1 }
-            ]
-          }));
+          : [
+              { id: '1', name: 'Cadre',        type: 'cadres',   voters: 0, seats: 1 },
+              { id: '2', name: 'Maîtrise',     type: 'employes', voters: 0, seats: 1 },
+              { id: '3', name: 'Exécution',    type: 'ouvriers', voters: 0, seats: 1 },
+              { id: '4', name: 'Encadrement',  type: 'general',  voters: 0, seats: 1 },
+            ];
+
+        // Normalise un libellé collège vers la clé interne (cadres/employes/ouvriers/general)
+        const normalizeCollegeKey = (raw: string): string => {
+          const v = (raw || '').toLowerCase().trim();
+          if (v === 'general' || v.includes('encadrement')) return 'general';
+          if (v.includes('cadre'))                          return 'cadres';
+          if (v.includes('maitrise') || v.includes('maîtrise')) return 'employes';
+          if (v.includes('ex') && (v.includes('cution') || v.includes('ecution'))) return 'ouvriers';
+          return v;
+        };
+
+        // 3. Agréger les totaux réels depuis les pseudo-entrées voting_bureaux
+        const { data: ecData } = await supabase
+          .from('election_centers')
+          .select('center_id')
+          .eq('election_id', election.id);
+
+        const totalsMap: Record<string, { voters: number; seats: number }> = {};
+        if (ecData && ecData.length > 0) {
+          const centerIds = ecData.map((ec: any) => ec.center_id).filter(Boolean);
+          if (centerIds.length > 0) {
+            // Récupérer toutes les pseudo-entrées (nom commence par "College -")
+            const { data: bureaux } = await supabase
+              .from('voting_bureaux')
+              .select('name, college, college_type, registered_voters, seats_to_fill')
+              .in('center_id', centerIds);
+
+            for (const b of (bureaux || [])) {
+              // Pseudo-entrée collège : nom "College - X" ou college non vide
+              const isCollege = (b.name as string)?.startsWith('College -') ||
+                (b.college != null && b.college !== '');
+              if (!isCollege) continue;
+
+              const rawKey = b.college_type || b.college || 'general';
+              const ct = normalizeCollegeKey(String(rawKey));
+              if (!totalsMap[ct]) totalsMap[ct] = { voters: 0, seats: 0 };
+              totalsMap[ct].voters += Number(b.registered_voters) || 0;
+              totalsMap[ct].seats  += Number(b.seats_to_fill)     || 0;
+            }
+          }
         }
+
+        // Fusionner : priorité aux totaux voting_bureaux si > 0, sinon electoral_colleges
+        const mergedColleges = baseColleges.map(c => ({
+          ...c,
+          voters: totalsMap[c.type]?.voters || c.voters,
+          seats:  totalsMap[c.type]?.seats  || c.seats,
+        }));
+
+        setFormData(prev => ({ ...prev, colleges: mergedColleges }));
       } catch (error) {
         console.error('Erreur lors du chargement des données pro:', error);
       } finally {
@@ -137,16 +179,6 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
     loadProData();
   }, [election.id, formData.enterpriseId]);
 
-  // Calcul automatique de l'effectif total
-  useEffect(() => {
-    const cadres = parseInt(formData.employeesCadres) || 0;
-    const employes = parseInt(formData.employeesEmployes) || 0;
-    const ouvriers = parseInt(formData.employeesOuvriers) || 0;
-    const total = cadres + employes + ouvriers;
-    if (total > 0) {
-      setFormData(prev => ({ ...prev, totalEmployees: total.toString() }));
-    }
-  }, [formData.employeesCadres, formData.employeesEmployes, formData.employeesOuvriers]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,6 +199,11 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
               employes: parseInt(formData.employeesEmployes) || 0,
               ouvriers: parseInt(formData.employeesOuvriers) || 0,
             },
+            province_name: formData.provinceName || null,
+            commune_name: formData.communeName || null,
+            hr_contact: (formData.hrContactName || formData.hrContactPhone || formData.hrContactEmail)
+              ? { name: formData.hrContactName, phone: formData.hrContactPhone, email: formData.hrContactEmail }
+              : null,
           })
           .eq('id', formData.enterpriseId);
 
@@ -312,24 +349,34 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                     onChange={(e) => setFormData({ ...formData, administrativeUnit: e.target.value })}
                   />
                 </ModernFormGrid>
+                <ModernFormGrid cols={2}>
+                  <FloatingInput
+                    label="Province (Localisation Siège)"
+                    value={formData.provinceName}
+                    onChange={(e) => setFormData({ ...formData, provinceName: e.target.value })}
+                  />
+                  <FloatingInput
+                    label="Commune (Localisation Siège)"
+                    value={formData.communeName}
+                    onChange={(e) => setFormData({ ...formData, communeName: e.target.value })}
+                  />
+                </ModernFormGrid>
                 <ModernFormGrid cols={3}>
                   <FloatingInput
-                    label="Effectif Cadres"
-                    type="number"
-                    value={formData.employeesCadres}
-                    onChange={(e) => setFormData({ ...formData, employeesCadres: e.target.value })}
+                    label="Contact RH — Nom"
+                    value={formData.hrContactName}
+                    onChange={(e) => setFormData({ ...formData, hrContactName: e.target.value })}
                   />
                   <FloatingInput
-                    label="Effectif Employés"
-                    type="number"
-                    value={formData.employeesEmployes}
-                    onChange={(e) => setFormData({ ...formData, employeesEmployes: e.target.value })}
+                    label="Contact RH — Téléphone"
+                    value={formData.hrContactPhone}
+                    onChange={(e) => setFormData({ ...formData, hrContactPhone: e.target.value })}
                   />
                   <FloatingInput
-                    label="Effectif Ouvriers"
-                    type="number"
-                    value={formData.employeesOuvriers}
-                    onChange={(e) => setFormData({ ...formData, employeesOuvriers: e.target.value })}
+                    label="Contact RH — Email"
+                    type="email"
+                    value={formData.hrContactEmail}
+                    onChange={(e) => setFormData({ ...formData, hrContactEmail: e.target.value })}
                   />
                 </ModernFormGrid>
                 <ModernFormGrid cols={1}>
@@ -337,8 +384,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                     label="Effectif Total (Nombre d'électeurs)"
                     type="number"
                     value={formData.totalEmployees}
-                    disabled
-                    className="bg-gray-100 font-bold text-gov-blue"
+                    onChange={(e) => setFormData({ ...formData, totalEmployees: e.target.value })}
                   />
                 </ModernFormGrid>
               </ModernFormSection>
@@ -358,26 +404,18 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                       </div>
                       <div className="flex-1">
                         <FloatingInput
-                          label="Électeurs"
+                          label="Électeurs (total)"
                           type="number"
                           value={college.voters.toString()}
-                          onChange={(e) => {
-                            const newColleges = [...formData.colleges];
-                            newColleges[idx].voters = parseInt(e.target.value) || 0;
-                            setFormData({...formData, colleges: newColleges});
-                          }}
+                          disabled
                         />
                       </div>
                       <div className="flex-1">
                         <FloatingInput
-                          label="Sièges à pourvoir"
+                          label="Sièges à pourvoir (total)"
                           type="number"
                           value={college.seats.toString()}
-                          onChange={(e) => {
-                            const newColleges = [...formData.colleges];
-                            newColleges[idx].seats = parseInt(e.target.value) || 0;
-                            setFormData({...formData, colleges: newColleges});
-                          }}
+                          disabled
                         />
                       </div>
                     </div>
@@ -412,11 +450,7 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
               >
                 <ModernFormGrid cols={2}>
                   <FloatingInput label="Affichage des listes" type="date" value={formData.listDisplayDate} onChange={(e) => setFormData({...formData, listDisplayDate: e.target.value})} />
-                  <FloatingInput label="Début de campagne" type="date" value={formData.campaignStart} onChange={(e) => setFormData({...formData, campaignStart: e.target.value})} />
-                  <FloatingInput label="Fin de campagne" type="date" value={formData.campaignEnd} onChange={(e) => setFormData({...formData, campaignEnd: e.target.value})} />
                   <FloatingInput label="Date 2nd Tour" type="date" value={formData.secondRoundDate} onChange={(e) => setFormData({...formData, secondRoundDate: e.target.value})} />
-                  <FloatingInput label="Début des recours" type="date" value={formData.recoursStart} onChange={(e) => setFormData({...formData, recoursStart: e.target.value})} />
-                  <FloatingInput label="Fin des recours" type="date" value={formData.recoursEnd} onChange={(e) => setFormData({...formData, recoursEnd: e.target.value})} />
                 </ModernFormGrid>
               </ModernFormSection>
 

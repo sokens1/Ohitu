@@ -40,9 +40,11 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     employeesCadres: prefilledData?.employeesCadres || '0',
     employeesEmployes: prefilledData?.employeesEmployes || '0',
     employeesOuvriers: prefilledData?.employeesOuvriers || '0',
-    hrName: prefilledData?.hrName || '',
-    hrPhone: prefilledData?.hrPhone || '',
-    hrEmail: prefilledData?.hrEmail || '',
+    provinceName: prefilledData?.provinceName || '',
+    communeName: prefilledData?.communeName || '',
+    hrContactName: prefilledData?.hrContactName || '',
+    hrContactPhone: prefilledData?.hrContactPhone || '',
+    hrContactEmail: prefilledData?.hrContactEmail || '',
     
     // Collèges
     colleges: prefilledData?.colleges || [
@@ -86,7 +88,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
       listDisplay.setDate(listDisplay.getDate() - 5);
       
       const secondRound = new Date(electionDate);
-      secondRound.setDate(secondRound.getDate() + 7);
+      secondRound.setDate(secondRound.getDate() + 9);
       
       const recoursStart = new Date(electionDate);
       recoursStart.setDate(recoursStart.getDate() + 1);
@@ -104,16 +106,29 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
     }
   }, [formData.date]);
 
-  // Handle total employees auto-calc
+  // Recalculer les électeurs/sièges des collèges depuis les établissements importés
   useEffect(() => {
-    const cadres = parseInt(formData.employeesCadres) || 0;
-    const employes = parseInt(formData.employeesEmployes) || 0;
-    const ouvriers = parseInt(formData.employeesOuvriers) || 0;
-    const total = cadres + employes + ouvriers;
-    if (total > 0) {
-      setFormData(prev => ({ ...prev, totalEmployees: total.toString() }));
+    if (!formData.votingCenters || formData.votingCenters.length === 0) return;
+    const map: Record<string, { voters: number; seats: number }> = {};
+    for (const center of formData.votingCenters) {
+      for (const booth of (center.booths || [])) {
+        if (booth.is_college) {
+          const ct: string = booth.college || booth.college_type || 'general';
+          if (!map[ct]) map[ct] = { voters: 0, seats: 0 };
+          map[ct].voters += Number(booth.registered_voters) || 0;
+          map[ct].seats  += Number(booth.seats_to_fill)    || 0;
+        }
+      }
     }
-  }, [formData.employeesCadres, formData.employeesEmployes, formData.employeesOuvriers]);
+    setFormData(prev => ({
+      ...prev,
+      colleges: prev.colleges.map(c => ({
+        ...c,
+        voters: map[c.type]?.voters ?? c.voters,
+        seats:  map[c.type]?.seats  ?? c.seats,
+      }))
+    }));
+  }, [formData.votingCenters]);
 
   const handleNext = () => {
     if (currentStep < steps.length) {
@@ -404,32 +419,39 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                 onChange={(e) => setFormData({ ...formData, administrativeUnit: e.target.value })}
               />
               <FloatingInput
-                label="Effectif Cadres (Facultatif)"
-                type="number"
-                value={formData.employeesCadres}
-                onChange={(e) => setFormData({ ...formData, employeesCadres: e.target.value })}
+                label="Province / Région"
+                value={formData.provinceName}
+                onChange={(e) => setFormData({ ...formData, provinceName: e.target.value })}
               />
               <FloatingInput
-                label="Effectif Agent de maîtrise (Facultatif)"
-                type="number"
-                value={formData.employeesEmployes}
-                onChange={(e) => setFormData({ ...formData, employeesEmployes: e.target.value })}
+                label="Commune / Ville"
+                value={formData.communeName}
+                onChange={(e) => setFormData({ ...formData, communeName: e.target.value })}
+              />
+            </ModernFormGrid>
+            <ModernFormGrid cols={3}>
+              <FloatingInput
+                label="Contact RH — Nom"
+                value={formData.hrContactName}
+                onChange={(e) => setFormData({ ...formData, hrContactName: e.target.value })}
               />
               <FloatingInput
-                label="Effectif Employés et Ouvriers (Facultatif)"
-                type="number"
-                value={formData.employeesOuvriers}
-                onChange={(e) => setFormData({ ...formData, employeesOuvriers: e.target.value })}
+                label="Contact RH — Téléphone"
+                value={formData.hrContactPhone}
+                onChange={(e) => setFormData({ ...formData, hrContactPhone: e.target.value })}
+              />
+              <FloatingInput
+                label="Contact RH — Email"
+                value={formData.hrContactEmail}
+                onChange={(e) => setFormData({ ...formData, hrContactEmail: e.target.value })}
               />
             </ModernFormGrid>
             <ModernFormGrid cols={1}>
               <FloatingInput
-                label="Effectif Total (Facultatif)"
+                label="Effectif Total"
                 type="number"
                 value={formData.totalEmployees}
                 onChange={(e) => setFormData({ ...formData, totalEmployees: e.target.value })}
-                disabled
-                helperText="Ces effectifs pourront être précisés ultérieurement."
               />
             </ModernFormGrid>
           </ModernFormSection>
@@ -441,7 +463,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                <strong>Information :</strong> Sont électeurs les salariés âgés de seize (16) ans accomplis, ayant travaillé au moins six (6) mois dans l'entreprise, non frappés d'une incapacité électorale.
              </div>
              <div className="space-y-4">
-               {formData.colleges.map((college, idx) => (
+               {formData.colleges.map((college) => (
                  <div key={college.id} className="p-3 border rounded-lg bg-gray-50 flex items-center gap-4">
                     <div className="font-medium w-1/4">{college.name}</div>
                     <div className="w-1/3">
@@ -449,11 +471,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                         label="Nombre d'électeurs"
                         type="number"
                         value={college.voters.toString()}
-                        onChange={(e) => {
-                          const newColleges = [...formData.colleges];
-                          newColleges[idx].voters = parseInt(e.target.value) || 0;
-                          setFormData({...formData, colleges: newColleges});
-                        }}
+                        disabled
                       />
                     </div>
                     <div className="w-1/3">
@@ -461,11 +479,7 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
                         label="Sièges à pourvoir"
                         type="number"
                         value={college.seats.toString()}
-                        onChange={(e) => {
-                          const newColleges = [...formData.colleges];
-                          newColleges[idx].seats = parseInt(e.target.value) || 0;
-                          setFormData({...formData, colleges: newColleges});
-                        }}
+                        disabled
                       />
                     </div>
                   </div>
@@ -583,9 +597,9 @@ const ProfessionalElectionWizard: React.FC<ProfessionalElectionWizardProps> = ({
 
                 <div className="p-4 bg-gray-50 rounded-lg space-y-2 text-sm text-gray-700">
                   <h4 className="font-semibold text-gray-900 mb-2 border-b pb-1">Ressources Humaines</h4>
-                  <p><strong>Nom du RH:</strong> {formData.hrName || 'Non renseigné'}</p>
-                  <p><strong>Téléphone RH:</strong> {formData.hrPhone || 'Non renseigné'}</p>
-                  <p><strong>Email RH:</strong> {formData.hrEmail || 'Non renseigné'}</p>
+                  <p><strong>Nom du RH:</strong> {formData.hrContactName || 'Non renseigné'}</p>
+                  <p><strong>Téléphone RH:</strong> {formData.hrContactPhone || 'Non renseigné'}</p>
+                  <p><strong>Email RH:</strong> {formData.hrContactEmail || 'Non renseigné'}</p>
                 </div>
               </div>
 

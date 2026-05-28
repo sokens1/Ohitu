@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -152,9 +152,9 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
 
 import type { ResultsFilters } from './ResultsFilterBar';
 
-interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; filters?: ResultsFilters; }
+interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; filters?: ResultsFilters; onDataRefresh?: () => void; }
 
-const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false, filters }) => {
+const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false, filters, onDataRefresh }) => {
   const { role } = useRBAC();
   const { user } = useAuth();
   const isObserver = role === 'observateur';
@@ -239,7 +239,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     return publicUrlData.publicUrl;
   };
 
-  useEffect(() => {
+  const loadPVs = useCallback(async () => {
     const load = async () => {
       try {
         setLoading(true);
@@ -271,7 +271,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             .select('center_id')
             .eq('election_id', selectedElection);
           if (ecErr) throw ecErr;
-          let allowedCenterIds = new Set((ecRows || []).map((r: any) => r.center_id));
+          let allowedCenterIds = new Set<string>((ecRows || []).map((r: any) => r.center_id as string));
 
           // Si l'utilisateur est validateur avec des centres/collèges assignés → filtrer davantage
           if (user?.role === 'validateur') {
@@ -353,6 +353,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     };
     load();
   }, [selectedElection, user?.id, user?.assigned_center_ids, user?.assigned_center_colleges]);
+
+  useEffect(() => { loadPVs(); }, [loadPVs]);
 
   const displayedPVs = useMemo(() => {
     const enriched = pvs.map(pv => {
@@ -581,50 +583,12 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         return;
       }
 
-      // Mettre à jour l'état local
-      setPvs(prev => prev.map(pv => 
-        pv.id === selectedPV 
-          ? { 
-              ...pv, 
-              status: 'pending',
-              total_registered: defaultRegisteredVoters,
-              total_voters: 0,
-              null_votes: 0,
-              votes_expressed: 0,
-              entered_by: null,
-              entered_at: null,
-              validated_at: null,
-              pv_photo_url: null,
-              anomalies: null
-            }
-          : pv
-      ));
-
-      // Réinitialiser les valeurs d'édition avec le nombre d'électeurs inscrits par défaut
-      setEditValues({
-        total_registered: defaultRegisteredVoters,
-        total_voters: 0,
-        null_votes: 0,
-        votes_expressed: 0
-      });
-
-      // Vider les résultats des candidats
-      setCandidateResults([]);
-
-      // Recharger les candidats pour cette élection (supporte élections pro)
-      try {
-        const { data: elecInfo } = await supabase
-          .from('elections')
-          .select('type')
-          .eq('id', selectedElection)
-          .single();
-        const candidates = await resolveCandidatesForElection(selectedElection, elecInfo?.type);
-        setCandidateResults(candidates.map(c => ({ id: c.id, name: c.name, votes: 0 })));
-      } catch (error) {
-        console.error('Erreur lors du rechargement des candidats:', error);
-      }
+      // Recharger les PV depuis la DB pour garantir la cohérence (évite les désynchronisations)
+      await loadPVs();
 
       toast.success('Les chiffres du bureau ont été réinitialisés avec succès');
+      setFilter('all');
+      onDataRefresh?.();
       setDetailOpen(false);
     } catch (error) {
       console.error('Erreur lors de la réinitialisation:', error);

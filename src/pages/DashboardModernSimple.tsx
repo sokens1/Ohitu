@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
@@ -7,9 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
-import { 
-  Calendar, 
-  Users, 
+import {
+  Calendar,
+  Users,
   Building,
   Vote,
   TrendingUp,
@@ -65,12 +66,375 @@ interface DashboardStats {
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444', '#06b6d4', '#14b8a6'];
 
+// ---------------------------------------------------------------------------
+// Standalone fetcher 1 – elections list
+// ---------------------------------------------------------------------------
+async function fetchElectionsList({
+  userId,
+  userRole,
+  assignedElectionIds,
+}: {
+  userId: string;
+  userRole: string;
+  assignedElectionIds: string[];
+}): Promise<any[]> {
+  let query = supabase
+    .from('elections')
+    .select('id, title, status, type, election_date');
+
+  if (userRole === 'super-admin') {
+    // accès total — aucun filtre
+  } else if (userRole === 'admin') {
+    // élections créées par lui ou qui lui sont assignées
+    const adminIds =
+      assignedElectionIds.length > 0
+        ? [`created_by.eq.${userId}`, ...assignedElectionIds.map((id) => `id.eq.${id}`)]
+        : [`created_by.eq.${userId}`];
+    query = query.or(adminIds.join(','));
+  } else {
+    // rôles opérationnels → uniquement les élections assignées
+    if (assignedElectionIds.length > 0) {
+      query = query.in('id', assignedElectionIds);
+    } else {
+      // aucune assignation → retourner vide
+      return [];
+    }
+  }
+
+  const { data, error } = await query.order('election_date', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// ---------------------------------------------------------------------------
+// Standalone fetcher 2 – dashboard aggregate data
+// ---------------------------------------------------------------------------
+async function fetchDashboardData({
+  selectedElectionIds,
+  userId,
+  userRole,
+}: {
+  selectedElectionIds: string[];
+  userId: string;
+  userRole: string;
+}): Promise<{
+  stats: DashboardStats;
+  chartData: { timeline: any[]; colleges: any[]; provinces: any[]; parties: any[] };
+  recentActivities: any[];
+  nextElection: any;
+}> {
+  // a. Load election details
+  const { data: electionsData, error: electionsError } = await supabase
+    .from('elections')
+    .select('id, title, status, type, election_date, nb_electeurs, created_at')
+    .in('id', selectedElectionIds);
+
+  if (electionsError) throw electionsError;
+
+  // Stats by status
+  const electionsByStatus = (electionsData || []).reduce((acc, election) => {
+    const normalizedStatus = election.status?.trim() || 'À venir';
+    acc[normalizedStatus] = (acc[normalizedStatus] || 0) + 1;
+    return acc;
+  }, {} as { [key: string]: number });
+
+  const upcomingElections = (electionsData || []).filter((e) => e.status?.trim() === 'À venir').length;
+  const completedElections = (electionsData || []).filter((e) => e.status?.trim() === 'Terminée').length;
+
+  // Find nearest upcoming election among selected elections
+  const upcomingSorted = (electionsData || [])
+    .filter((e) => e.status?.trim() === 'À venir' && e.election_date)
+    .sort((a, b) => new Date(a.election_date).getTime() - new Date(b.election_date).getTime());
+
+  let nextElection: any = null;
+  if (upcomingSorted.length > 0) {
+    nextElection = upcomingSorted[0];
+  } else if (electionsData && electionsData.length > 0) {
+    nextElection = electionsData[0];
+  }
+
+  // b. Load centers linked to selected elections
+  const { data: ecData, error: ecError } = await supabase
+    .from('election_centers')
+    .select('center_id')
+    .in('election_id', selectedElectionIds);
+
+  if (ecError) throw ecError;
+  const centerIds = Array.from(
+    new Set((ecData || []).map((r: any) => r.center_id).filter(Boolean))
+  );
+
+  let centersCount = centerIds.length;
+  let bureauxCount = 0;
+  let totalVoters = 0;
+
+  if (centerIds.length > 0) {
+    // c. Load bureaux
+    const { data: bureauxData, error: bError } = await supabase
+      .from('voting_bureaux')
+      .select('registered_voters')
+      .in('center_id', centerIds);
+
+    if (bError) throw bError;
+    bureauxCount = bureauxData?.length || 0;
+    totalVoters = (bureauxData || []).reduce(
+      (sum, bureau) => sum + (Number(bureau.registered_voters) || 0),
+      0
+    );
+  }
+
+  // If totalVoters is 0, fallback to sum of nb_electeurs from election headers
+  if (totalVoters === 0 && electionsData) {
+    totalVoters = electionsData.reduce((sum, e) => sum + (e.nb_electeurs || 0), 0);
+  }
+
+  // d. Count candidates in election_candidates
+  const { count: candidatesCount } = await supabase
+    .from('election_candidates')
+    .select('candidate_id', { count: 'exact', head: true })
+    .in('election_id', selectedElectionIds);
+
+  // e. Count active provinces & communes
+  let provincesCount = 0;
+  let communesCount = 0;
+  let provincesList: any[] = [];
+  if (centerIds.length > 0) {
+    const { data: centersData } = await supabase
+      .from('voting_centers')
+      .select('province_id, commune_id')
+      .in('id', centerIds);
+
+    const activeProvinceIds = Array.from(
+      new Set((centersData || []).map((c: any) => c.province_id).filter(Boolean))
+    );
+    provincesCount = activeProvinceIds.length;
+
+    const activeCommuneIds = Array.from(
+      new Set((centersData || []).map((c: any) => c.commune_id).filter(Boolean))
+    );
+    communesCount = activeCommuneIds.length;
+
+    const provMap: Record<string, number> = {};
+    (centersData || []).forEach((c: any) => {
+      if (c.province_id) {
+        provMap[c.province_id] = (provMap[c.province_id] || 0) + 1;
+      }
+    });
+    provincesList = Object.entries(provMap).map(([name, value]) => ({ name, value }));
+  }
+
+  // If no centers or provinces, query directly
+  if (provincesList.length === 0) {
+    const { data: allProvinces } = await supabase.from('provinces').select('name');
+    provincesCount = allProvinces?.length || 0;
+
+    const { data: allCommunes } = await supabase.from('communes').select('id');
+    communesCount = allCommunes?.length || 0;
+
+    provincesList = (allProvinces || []).slice(0, 5).map((p) => ({
+      name: p.name,
+      value: Math.floor(Math.random() * 8) + 2,
+    }));
+  }
+
+  // f. Load electoral colleges
+  const { data: collegesData } = await supabase
+    .from('electoral_colleges')
+    .select('name, total_voters, college_type, election_id')
+    .in('election_id', selectedElectionIds);
+
+  const collegesChart = (collegesData || []).reduce((acc: any[], curr: any) => {
+    const name = curr.name || 'Général';
+    const existing = acc.find((item) => item.name === name);
+    if (existing) {
+      existing.value += Number(curr.total_voters) || 0;
+    } else {
+      acc.push({ name, value: Number(curr.total_voters) || 0 });
+    }
+    return acc;
+  }, []);
+
+  const hasProfessional = (electionsData || []).some((e) => e.type === 'Élection Professionnelle');
+  if (hasProfessional && collegesChart.length === 0) {
+    collegesChart.push(
+      { name: 'Collège Ouvriers', value: Math.round(totalVoters * 0.55) },
+      { name: 'Collège Employés', value: Math.round(totalVoters * 0.30) },
+      { name: 'Collège Cadres', value: Math.round(totalVoters * 0.15) }
+    );
+  }
+
+  // g. Load candidates and their parties for selected elections
+  const { data: ecCandidates } = await supabase
+    .from('election_candidates')
+    .select(`
+      candidates (
+        id,
+        name,
+        party
+      )
+    `)
+    .in('election_id', selectedElectionIds);
+
+  const partyMap: Record<string, number> = {};
+  if (ecCandidates) {
+    ecCandidates.forEach((item: any) => {
+      if (item.candidates) {
+        const p = item.candidates.party?.trim() || 'Indépendant';
+        partyMap[p] = (partyMap[p] || 0) + 1;
+      }
+    });
+  }
+
+  const partiesChart = Object.entries(partyMap).map(([name, value]) => ({ name, value }));
+
+  // h. Fetch procès_verbaux for the selected elections
+  const { data: pvsData } = await supabase
+    .from('procès_verbaux')
+    .select('election_id, total_voters, total_registered')
+    .in('election_id', selectedElectionIds);
+
+  const electionVotesMap: Record<string, { voters: number; registered: number }> = {};
+  (pvsData || []).forEach((pv) => {
+    if (!electionVotesMap[pv.election_id]) {
+      electionVotesMap[pv.election_id] = { voters: 0, registered: 0 };
+    }
+    electionVotesMap[pv.election_id].voters += pv.total_voters || 0;
+    electionVotesMap[pv.election_id].registered += pv.total_registered || 0;
+  });
+
+  const timelineChart = (electionsData || [])
+    .map((e) => {
+      const pvsStats = electionVotesMap[e.id] || { voters: 0, registered: 0 };
+      const inscrits = pvsStats.registered > 0 ? pvsStats.registered : e.nb_electeurs || 1500;
+      return {
+        name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
+        inscrits,
+        votants:
+          pvsStats.voters > 0
+            ? pvsStats.voters
+            : Math.round(inscrits * (0.6 + Math.random() * 0.25)),
+      };
+    })
+    .reverse();
+
+  // i. Recent activities
+  const activities: any[] = [];
+
+  // Fetch new users — uniquement pour super-admin et admin
+  if (userRole === 'super-admin' || userRole === 'admin') {
+    const { data: recentUsers } = await supabase
+      .from('users')
+      .select('name, email, role, created_at')
+      .order('created_at', { ascending: false })
+      .limit(3);
+
+    if (recentUsers) {
+      recentUsers.forEach((u, i) => {
+        activities.push({
+          id: `user_${i}_${u.created_at}`,
+          type: 'user',
+          action: 'Utilisateur créé',
+          description: `${u.name} ajouté en tant que ${u.role}`,
+          timestamp: new Date(u.created_at).toLocaleDateString('fr-FR', {
+            day: '2-digit',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          iconType: 'user',
+        });
+      });
+    }
+  }
+
+  // Fetch recent PV modifications for selected elections
+  const { data: recentPVs } = await supabase
+    .from('procès_verbaux')
+    .select('id, election_id, status, created_at, elections(title)')
+    .in('election_id', selectedElectionIds)
+    .order('created_at', { ascending: false })
+    .limit(3);
+
+  if (recentPVs) {
+    recentPVs.forEach((pv: any, i) => {
+      activities.push({
+        id: `pv_${i}_${pv.created_at}`,
+        type: 'pv',
+        action: 'Saisie PV',
+        description: `PV de l'élection "${pv.elections?.title || 'Élection'}" mis à jour (${pv.status})`,
+        timestamp: new Date(pv.created_at).toLocaleDateString('fr-FR', {
+          day: '2-digit',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        iconType: 'pv',
+      });
+    });
+  }
+
+  // Fallbacks for activities
+  if (activities.length === 0) {
+    activities.push(
+      {
+        id: 'a1',
+        type: 'system',
+        action: 'Importation globale',
+        description: 'Liste électorale de Moanda importée avec succès',
+        timestamp: 'Hier, 15:40',
+        iconType: 'system',
+      },
+      {
+        id: 'a2',
+        type: 'election',
+        action: 'Nouvelle Élection',
+        description: 'Création du scrutin professionel CNSS Gabon',
+        timestamp: 'Le 15 mai, 09:12',
+        iconType: 'election',
+      }
+    );
+  }
+
+  return {
+    stats: {
+      elections: {
+        total: (electionsData || []).length,
+        byStatus: electionsByStatus,
+        upcoming: upcomingElections,
+        completed: completedElections,
+      },
+      voters: {
+        total: totalVoters,
+        registered: totalVoters,
+        trend: 8.4,
+      },
+      infrastructure: {
+        centers: centersCount || 0,
+        bureaux: bureauxCount || 0,
+        provinces: provincesCount || 0,
+        communes: communesCount || 0,
+        candidates: candidatesCount || 0,
+      },
+    },
+    chartData: {
+      timeline: timelineChart,
+      colleges: collegesChart,
+      provinces: provincesList,
+      parties: partiesChart.length > 0 ? partiesChart : [{ name: 'Sans étiquette', value: 12 }],
+    },
+    recentActivities: activities.slice(0, 5),
+    nextElection,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 const DashboardModernSimple = () => {
   const { user } = useAuth();
   const { can, isOperational, assignedElectionIds } = useRBAC();
   const navigate = useNavigate();
   const { addNotification } = useNotifications();
-  const [loading, setLoading] = useState(true);
   const [electionsList, setElectionsList] = useState<any[]>([]);
   const [selectedElectionIds, setSelectedElectionIds] = useState<string[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -81,84 +445,113 @@ const DashboardModernSimple = () => {
   const [nextElection, setNextElection] = useState<any>(null);
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
-  // Stats state
-  const [stats, setStats] = useState<DashboardStats>({
+  // -------------------------------------------------------------------------
+  // Query 1 – elections list
+  // -------------------------------------------------------------------------
+  const { data: electionsListData } = useQuery({
+    queryKey: ['dashboard-elections', user?.id, user?.role, assignedElectionIds.join(',')],
+    queryFn: () =>
+      fetchElectionsList({
+        userId: user!.id,
+        userRole: user!.role,
+        assignedElectionIds,
+      }),
+    staleTime: 5 * 60 * 1000,
+    enabled: !!user,
+  });
+
+  // Sync elections list to local state (selectedElectionIds is also user-controlled via dropdown)
+  useEffect(() => {
+    if (!electionsListData) return;
+    setElectionsList(electionsListData);
+    setSelectedElectionIds(electionsListData.map((e) => e.id));
+
+    // Find nearest upcoming election
+    const upcoming = electionsListData
+      .filter((e) => e.status?.trim() === 'À venir' && e.election_date)
+      .sort(
+        (a, b) => new Date(a.election_date).getTime() - new Date(b.election_date).getTime()
+      );
+
+    if (upcoming.length > 0) {
+      setNextElection(upcoming[0]);
+    } else if (electionsListData.length > 0) {
+      setNextElection(electionsListData[0]);
+    } else {
+      setNextElection(null);
+    }
+  }, [electionsListData]);
+
+  // -------------------------------------------------------------------------
+  // Query 2 – dashboard aggregate data
+  // -------------------------------------------------------------------------
+  const { data: dashboardData, isLoading: dashboardLoading } = useQuery({
+    queryKey: ['dashboard-data', selectedElectionIds.join(','), user?.id],
+    queryFn: () =>
+      fetchDashboardData({
+        selectedElectionIds,
+        userId: user!.id,
+        userRole: user!.role,
+      }),
+    staleTime: 5 * 60 * 1000,
+    enabled: selectedElectionIds.length > 0 && !!user,
+    placeholderData: keepPreviousData,
+  });
+
+  // Derive state from query results
+  const stats: DashboardStats = dashboardData?.stats ?? {
     elections: { total: 0, byStatus: {}, upcoming: 0, completed: 0 },
     voters: { total: 0, registered: 0, trend: 0 },
     infrastructure: { centers: 0, bureaux: 0, provinces: 0, communes: 0, candidates: 0 },
-  });
+  };
 
-  // Chart data state
-  const [chartData, setChartData] = useState<{
-    timeline: any[];
-    colleges: any[];
-    provinces: any[];
-    parties: any[];
-  }>({
+  const chartData = dashboardData?.chartData ?? {
     timeline: [],
     colleges: [],
     provinces: [],
-    parties: []
-  });
+    parties: [],
+  };
 
-  // Recent activity logs
-  const [recentActivities, setRecentActivities] = useState<any[]>([]);
+  // Map iconType strings back to JSX icons inside the component render
+  const recentActivities = (dashboardData?.recentActivities ?? []).map((a) => ({
+    ...a,
+    icon:
+      a.iconType === 'user' ? (
+        <UserPlus className="w-4 h-4 text-blue-500" />
+      ) : a.iconType === 'pv' ? (
+        <FileText className="w-4 h-4 text-orange-500" />
+      ) : a.iconType === 'system' ? (
+        <Layers className="w-4 h-4 text-green-500" />
+      ) : (
+        <Calendar className="w-4 h-4 text-purple-500" />
+      ),
+  }));
 
-  // 1. Load election list on mount
+  // Derive loading: show skeleton only while first-loading (no data yet)
+  const loading = (dashboardLoading && !dashboardData) || (!electionsListData && !dashboardData);
+
+  // Sync nextElection from dashboard query result
   useEffect(() => {
-    const fetchElections = async () => {
-      try {
-        let query = supabase
-          .from('elections')
-          .select('id, title, status, type, election_date');
+    if (dashboardData?.nextElection !== undefined) {
+      setNextElection(dashboardData.nextElection);
+    }
+  }, [dashboardData]);
 
-        if (user) {
-          if (user.role === 'super-admin') {
-            // accès total — aucun filtre
-          } else if (user.role === 'admin') {
-            // élections créées par lui ou qui lui sont assignées
-            const adminIds = assignedElectionIds.length > 0
-              ? [`created_by.eq.${user.id}`, ...assignedElectionIds.map(id => `id.eq.${id}`)]
-              : [`created_by.eq.${user.id}`];
-            query = query.or(adminIds.join(','));
-          } else {
-            // rôles opérationnels → uniquement les élections assignées
-            if (assignedElectionIds.length > 0) {
-              query = query.in('id', assignedElectionIds);
-            } else {
-              // aucune assignation → retourner vide
-              setElectionsList([]);
-              setSelectedElectionIds([]);
-              setLoading(false);
-              return;
-            }
-          }
-        }
-
-        const { data, error } = await query.order('election_date', { ascending: false });
-        if (error) throw error;
-        
-        setElectionsList(data || []);
-        // Select all elections by default
-        setSelectedElectionIds((data || []).map(e => e.id));
-
-        // Find nearest upcoming election
-        const upcoming = (data || [])
-          .filter(e => e.status?.trim() === 'À venir' && e.election_date)
-          .sort((a, b) => new Date(a.election_date).getTime() - new Date(b.election_date).getTime());
-        
-        if (upcoming.length > 0) {
-          setNextElection(upcoming[0]);
-        } else if (data && data.length > 0) {
-          // Fallback to latest election if no upcoming
-          setNextElection(data[0]);
-        }
-      } catch (error) {
-        console.error('Erreur lors du chargement des élections:', error);
+  // Fire notification once after first load
+  useEffect(() => {
+    if (!dashboardData) return;
+    if (!hasNotifiedRef.current) {
+      const upcomingCount = dashboardData.stats.elections.upcoming;
+      if (upcomingCount > 0) {
+        addNotification({
+          title: 'Élection active à venir',
+          message: `${upcomingCount} scrutin(s) planifié(s) dans le calendrier.`,
+          type: 'info',
+        });
       }
-    };
-    fetchElections();
-  }, [user]);
+      hasNotifiedRef.current = true;
+    }
+  }, [dashboardData]);
 
   // 2. Click outside logic for dropdown
   useEffect(() => {
@@ -167,8 +560,8 @@ const DashboardModernSimple = () => {
         setIsOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // 3. Countdown timer ticker
@@ -197,330 +590,6 @@ const DashboardModernSimple = () => {
 
     return () => clearInterval(interval);
   }, [nextElection]);
-
-  // 4. Load dashboard stats & chart data depending on selection
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      if (selectedElectionIds.length === 0) {
-        setStats({
-          elections: { total: 0, byStatus: {}, upcoming: 0, completed: 0 },
-          voters: { total: 0, registered: 0, trend: 0 },
-          infrastructure: { centers: 0, bureaux: 0, provinces: 0, communes: 0, candidates: 0 },
-        });
-        setChartData({ timeline: [], colleges: [], provinces: [], parties: [] });
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-
-        // a. Load election details
-        const { data: electionsData, error: electionsError } = await supabase
-          .from('elections')
-          .select('id, title, status, type, election_date, nb_electeurs, created_at')
-          .in('id', selectedElectionIds);
-
-        if (electionsError) throw electionsError;
-
-        // Stats by status
-        const electionsByStatus = (electionsData || []).reduce((acc, election) => {
-          const normalizedStatus = election.status?.trim() || 'À venir';
-          acc[normalizedStatus] = (acc[normalizedStatus] || 0) + 1;
-          return acc;
-        }, {} as { [key: string]: number });
-
-        const upcomingElections = (electionsData || []).filter(e => e.status?.trim() === 'À venir').length;
-        const completedElections = (electionsData || []).filter(e => e.status?.trim() === 'Terminée').length;
-
-        // Find nearest upcoming election among selected elections
-        const upcoming = (electionsData || [])
-          .filter(e => e.status?.trim() === 'À venir' && e.election_date)
-          .sort((a, b) => new Date(a.election_date).getTime() - new Date(b.election_date).getTime());
-        
-        if (upcoming.length > 0) {
-          setNextElection(upcoming[0]);
-        } else if (electionsData && electionsData.length > 0) {
-          setNextElection(electionsData[0]);
-        } else {
-          setNextElection(null);
-        }
-
-        // b. Load centers linked to selected elections
-        const { data: ecData, error: ecError } = await supabase
-          .from('election_centers')
-          .select('center_id')
-          .in('election_id', selectedElectionIds);
-
-        if (ecError) throw ecError;
-        const centerIds = Array.from(new Set((ecData || []).map((r: any) => r.center_id).filter(Boolean)));
-
-        let centersCount = centerIds.length;
-        let bureauxCount = 0;
-        let totalVoters = 0;
-
-        if (centerIds.length > 0) {
-          // c. Load bureaux
-          const { data: bureauxData, error: bError } = await supabase
-            .from('voting_bureaux')
-            .select('registered_voters')
-            .in('center_id', centerIds);
-
-          if (bError) throw bError;
-          bureauxCount = bureauxData?.length || 0;
-          totalVoters = (bureauxData || []).reduce((sum, bureau) => sum + (Number(bureau.registered_voters) || 0), 0);
-        }
-
-        // If totalVoters is 0, fallback to sum of nb_electeurs from election headers
-        if (totalVoters === 0 && electionsData) {
-          totalVoters = electionsData.reduce((sum, e) => sum + (e.nb_electeurs || 0), 0);
-        }
-
-        // d. Count candidates in election_candidates
-        const { count: candidatesCount } = await supabase
-          .from('election_candidates')
-          .select('candidate_id', { count: 'exact', head: true })
-          .in('election_id', selectedElectionIds);
-
-        // e. Count active provinces & communes
-        let provincesCount = 0;
-        let communesCount = 0;
-        let provincesList: any[] = [];
-        if (centerIds.length > 0) {
-          const { data: centersData } = await supabase
-            .from('voting_centers')
-            .select('province_id, commune_id')
-            .in('id', centerIds);
-
-          // Compter les provinces et communes distinctes par leur ID
-          const activeProvinceIds = Array.from(new Set((centersData || []).map((c: any) => c.province_id).filter(Boolean)));
-          provincesCount = activeProvinceIds.length;
-
-          const activeCommuneIds = Array.from(new Set((centersData || []).map((c: any) => c.commune_id).filter(Boolean)));
-          communesCount = activeCommuneIds.length;
-
-          // Distribution par province_id (les noms lisibles sont chargés ci-dessous si besoin)
-          const provMap: Record<string, number> = {};
-          (centersData || []).forEach((c: any) => {
-            if (c.province_id) {
-              provMap[c.province_id] = (provMap[c.province_id] || 0) + 1;
-            }
-          });
-          provincesList = Object.entries(provMap).map(([name, value]) => ({ name, value }));
-        }
-
-        // If no centers or provinces, query directly
-        if (provincesList.length === 0) {
-          const { data: allProvinces } = await supabase.from('provinces').select('name');
-          provincesCount = allProvinces?.length || 0;
-
-          const { data: allCommunes } = await supabase.from('communes').select('id');
-          communesCount = allCommunes?.length || 0;
-
-          provincesList = (allProvinces || []).slice(0, 5).map((p, i) => ({
-            name: p.name,
-            value: Math.floor(Math.random() * 8) + 2
-          }));
-        }
-
-        // f. Load electoral colleges
-        const { data: collegesData } = await supabase
-          .from('electoral_colleges')
-          .select('name, total_voters, college_type, election_id')
-          .in('election_id', selectedElectionIds);
-
-        const collegesChart = (collegesData || []).reduce((acc: any[], curr: any) => {
-          const name = curr.name || 'Général';
-          const existing = acc.find(item => item.name === name);
-          if (existing) {
-            existing.value += Number(curr.total_voters) || 0;
-          } else {
-            acc.push({ name, value: Number(curr.total_voters) || 0 });
-          }
-          return acc;
-        }, []);
-
-        // Fallback for colleges chart if it's professional but empty
-        const hasProfessional = (electionsData || []).some(e => e.type === 'Élection Professionnelle');
-        if (hasProfessional && collegesChart.length === 0) {
-          collegesChart.push(
-            { name: 'Collège Ouvriers', value: Math.round(totalVoters * 0.55) },
-            { name: 'Collège Employés', value: Math.round(totalVoters * 0.30) },
-            { name: 'Collège Cadres', value: Math.round(totalVoters * 0.15) }
-          );
-        }
-
-        // g. Load candidates and their parties for selected elections
-        const { data: ecCandidates } = await supabase
-          .from('election_candidates')
-          .select(`
-            candidates (
-              id,
-              name,
-              party
-            )
-          `)
-          .in('election_id', selectedElectionIds);
-
-        const partyMap: Record<string, number> = {};
-        if (ecCandidates) {
-          ecCandidates.forEach((item: any) => {
-            if (item.candidates) {
-              const p = item.candidates.party?.trim() || 'Indépendant';
-              partyMap[p] = (partyMap[p] || 0) + 1;
-            }
-          });
-        }
-
-        const partiesChart = Object.entries(partyMap).map(([name, value]) => ({ name, value }));
-
-        // h. Fetch procès_verbaux for the selected elections to get actual participation numbers
-        const { data: pvsData } = await supabase
-          .from('procès_verbaux')
-          .select('election_id, total_voters, total_registered')
-          .in('election_id', selectedElectionIds);
-
-        const electionVotesMap: Record<string, { voters: number; registered: number }> = {};
-        (pvsData || []).forEach(pv => {
-          if (!electionVotesMap[pv.election_id]) {
-            electionVotesMap[pv.election_id] = { voters: 0, registered: 0 };
-          }
-          electionVotesMap[pv.election_id].voters += pv.total_voters || 0;
-          electionVotesMap[pv.election_id].registered += pv.total_registered || 0;
-        });
-
-        const timelineChart = (electionsData || [])
-          .map(e => {
-            const pvsStats = electionVotesMap[e.id] || { voters: 0, registered: 0 };
-            const inscrits = pvsStats.registered > 0 ? pvsStats.registered : (e.nb_electeurs || 1500);
-            return {
-              name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
-              inscrits,
-              votants: pvsStats.voters > 0 ? pvsStats.voters : Math.round(inscrits * (0.6 + Math.random() * 0.25))
-            };
-          })
-          .reverse();
-
-        // 5. Update stats
-        setStats({
-          elections: {
-            total: (electionsData || []).length,
-            byStatus: electionsByStatus,
-            upcoming: upcomingElections,
-            completed: completedElections
-          },
-          voters: {
-            total: totalVoters,
-            registered: totalVoters,
-            trend: 8.4
-          },
-          infrastructure: {
-            centers: centersCount || 0,
-            bureaux: bureauxCount || 0,
-            provinces: provincesCount || 0,
-            communes: communesCount || 0,
-            candidates: candidatesCount || 0
-          }
-        });
-
-        setChartData({
-          timeline: timelineChart,
-          colleges: collegesChart,
-          provinces: provincesList,
-          parties: partiesChart.length > 0 ? partiesChart : [{ name: 'Sans étiquette', value: 12 }]
-        });
-
-        // 6. Recent activities query
-        const activities: any[] = [];
-
-        // Fetch new users — uniquement pour super-admin et admin
-        if (user && (user.role === 'super-admin' || user.role === 'admin')) {
-          const { data: recentUsers } = await supabase
-            .from('users')
-            .select('name, email, role, created_at')
-            .order('created_at', { ascending: false })
-            .limit(3);
-
-          if (recentUsers) {
-            recentUsers.forEach((u, i) => {
-              activities.push({
-                id: `user_${i}_${u.created_at}`,
-                type: 'user',
-                action: 'Utilisateur créé',
-                description: `${u.name} ajouté en tant que ${u.role}`,
-                timestamp: new Date(u.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-                icon: <UserPlus className="w-4 h-4 text-blue-500" />
-              });
-            });
-          }
-        }
-
-        // Fetch recent PV modifications for selected elections
-        const { data: recentPVs } = await supabase
-          .from('procès_verbaux')
-          .select('id, election_id, status, created_at, elections(title)')
-          .in('election_id', selectedElectionIds)
-          .order('created_at', { ascending: false })
-          .limit(3);
-
-        if (recentPVs) {
-          recentPVs.forEach((pv: any, i) => {
-            activities.push({
-              id: `pv_${i}_${pv.created_at}`,
-              type: 'pv',
-              action: 'Saisie PV',
-              description: `PV de l'élection "${pv.elections?.title || 'Élection'}" mis à jour (${pv.status})`,
-              timestamp: new Date(pv.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-              icon: <FileText className="w-4 h-4 text-orange-500" />
-            });
-          });
-        }
-
-        // Fallbacks for activities to look dynamic and populated
-        if (activities.length === 0) {
-          activities.push(
-            {
-              id: 'a1',
-              type: 'system',
-              action: 'Importation globale',
-              description: 'Liste électorale de Moanda importée avec succès',
-              timestamp: 'Hier, 15:40',
-              icon: <Layers className="w-4 h-4 text-green-500" />
-            },
-            {
-              id: 'a2',
-              type: 'election',
-              action: 'Nouvelle Élection',
-              description: 'Création du scrutin professionel CNSS Gabon',
-              timestamp: 'Le 15 mai, 09:12',
-              icon: <Calendar className="w-4 h-4 text-purple-500" />
-            }
-          );
-        }
-
-        setRecentActivities(activities.slice(0, 5));
-
-        // Global notification triggers once
-        if (!hasNotifiedRef.current) {
-          if (upcomingElections > 0) {
-            addNotification({
-              title: 'Élection active à venir',
-              message: `${upcomingElections} scrutin(s) planifié(s) dans le calendrier.`,
-              type: 'info'
-            });
-          }
-          hasNotifiedRef.current = true;
-        }
-
-      } catch (error) {
-        console.error('Erreur lors du chargement des données:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboardData();
-  }, [selectedElectionIds, addNotification]);
 
   if (loading) {
     return (
@@ -611,7 +680,7 @@ const DashboardModernSimple = () => {
         {/* Decorative subtle background glows */}
         <div className="absolute top-0 right-1/4 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow"></div>
         <div className="absolute bottom-1/4 left-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow" style={{ animationDelay: '3s' }}></div>
-        
+
         {/* HEADER SECTION: Title & Custom Dropdown Filter */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 relative z-30">
           <div>
@@ -709,29 +778,29 @@ const DashboardModernSimple = () => {
         <Tabs defaultValue="overview" className="w-full space-y-6">
           <div className="flex border-b border-slate-100 pb-2 overflow-x-auto scrollbar-none justify-center sm:justify-start">
             <TabsList className="bg-slate-100/80 backdrop-blur p-1 rounded-2xl flex gap-1 border border-slate-200/30 w-full sm:w-auto h-auto">
-              <TabsTrigger 
-                value="overview" 
+              <TabsTrigger
+                value="overview"
                 className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
                 <Activity className="w-4.5 h-4.5 text-indigo-500" />
                 <span>Vue d'ensemble</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="politics" 
+              <TabsTrigger
+                value="politics"
                 className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-violet-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
                 <Target className="w-4.5 h-4.5 text-violet-500" />
                 <span>Partis & Syndicats</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="geo" 
+              <TabsTrigger
+                value="geo"
                 className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
                 <Map className="w-4.5 h-4.5 text-emerald-500" />
                 <span>Analyse Géographique</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="live" 
+              <TabsTrigger
+                value="live"
                 className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-amber-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
               >
                 <Clock className="w-4.5 h-4.5 text-amber-500" />
@@ -886,11 +955,11 @@ const DashboardModernSimple = () => {
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} className="focus:outline-none transition-all duration-300" />
                           ))}
                         </Pie>
-                        <Tooltip 
+                        <Tooltip
                           formatter={(value) => `${value.toLocaleString()} électeurs`}
-                          contentStyle={{ 
-                            borderRadius: '16px', 
-                            border: 'none', 
+                          contentStyle={{
+                            borderRadius: '16px',
+                            border: 'none',
                             boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
                             backgroundColor: '#0f172a',
                             color: '#fff'
@@ -903,7 +972,7 @@ const DashboardModernSimple = () => {
                       <span className="text-2xl font-black text-slate-800 leading-none">{stats.voters.total.toLocaleString()}</span>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-2 mt-4 px-2 max-h-[70px] overflow-y-auto scrollbar-thin">
                     {(chartData.colleges.length > 0 ? chartData.colleges : [{ name: 'Général', value: stats.voters.total }]).map((item, i) => (
                       <div key={i} className="flex items-center gap-1.5 text-left truncate">
@@ -1082,7 +1151,7 @@ const DashboardModernSimple = () => {
                   <div className="p-4.5 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-100 space-y-2">
                     <span className="text-xs font-black text-emerald-800 uppercase tracking-wider block">Concentration Électorale</span>
                     <p className="text-xs text-emerald-900 leading-relaxed font-medium">
-                      {chartData.provinces.length > 0 
+                      {chartData.provinces.length > 0
                         ? `La province de "${chartData.provinces[0]?.name || 'Gabon'}" regroupe la plus grande concentration de centres de vote dans cette consolidation.`
                         : 'Aucune donnée géographique active.'
                       }
@@ -1101,7 +1170,7 @@ const DashboardModernSimple = () => {
                 {/* Glow effects inside the countdown */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
                 <div className="absolute bottom-0 left-0 w-32 h-32 bg-yellow-500/5 rounded-full blur-2xl pointer-events-none"></div>
-                
+
                 <CardHeader className="pb-2 border-b border-white/5">
                   <CardTitle className="text-base sm:text-lg font-bold flex items-center gap-2 text-white">
                     <Clock className="w-5 h-5 text-yellow-400 animate-pulse-slow" />
@@ -1120,7 +1189,7 @@ const DashboardModernSimple = () => {
                           Scrutin programmé le {new Date(nextElection.election_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
                         </p>
                       </div>
-                      
+
                       <div className="flex items-center justify-center space-x-2.5 text-white mt-2">
                         <div className="text-center">
                           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
@@ -1177,9 +1246,9 @@ const DashboardModernSimple = () => {
                       <span>Élections Terminées</span>
                       <span className="text-slate-800">{stats.elections.completed} / {stats.elections.total}</span>
                     </div>
-                    <Progress 
-                      value={stats.elections.total > 0 ? (stats.elections.completed / stats.elections.total) * 100 : 0} 
-                      className="h-2.5 bg-slate-50 [&>div]:bg-emerald-500 rounded-full" 
+                    <Progress
+                      value={stats.elections.total > 0 ? (stats.elections.completed / stats.elections.total) * 100 : 0}
+                      className="h-2.5 bg-slate-50 [&>div]:bg-emerald-500 rounded-full"
                     />
                   </div>
 
@@ -1188,9 +1257,9 @@ const DashboardModernSimple = () => {
                       <span>Élections Planifiées (À venir)</span>
                       <span className="text-slate-800">{stats.elections.upcoming} / {stats.elections.total}</span>
                     </div>
-                    <Progress 
-                      value={stats.elections.total > 0 ? (stats.elections.upcoming / stats.elections.total) * 100 : 0} 
-                      className="h-2.5 bg-slate-50 [&>div]:bg-indigo-500 rounded-full" 
+                    <Progress
+                      value={stats.elections.total > 0 ? (stats.elections.upcoming / stats.elections.total) * 100 : 0}
+                      className="h-2.5 bg-slate-50 [&>div]:bg-indigo-500 rounded-full"
                     />
                   </div>
 
