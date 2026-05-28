@@ -206,15 +206,21 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           const bureaux = (Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [])
             .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
 
+          // Séparer pseudo-entrées collège (nommées "College - X" ou avec champ college non vide) et bureaux physiques
+          const isCollegeEntry = (b: any) =>
+            b.name?.startsWith?.('College -') || (b.college != null && b.college !== '' && b.college !== 'general');
+          const physicalBureaux = bureaux.filter((b: any) => !isCollegeEntry(b));
+          const collegeBureaux  = bureaux.filter((b: any) =>  isCollegeEntry(b));
+          // Physiques prioritaires ; pseudo-entrées en fallback si aucun physique
+          const countableBureaux = physicalBureaux.length > 0 ? physicalBureaux : collegeBureaux;
+
           // Calculer les électeurs réels à partir des bureaux, ou fallback sur la colonne total_voters
           const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) =>
             sum + (bureau.registered_voters || 0), 0);
           const finalVoters = votersFromBureaux > 0 ? votersFromBureaux : (Number(center.total_voters) || 0);
 
-          console.log(`📍 Centre: ${center.name} | Bureaux: ${bureaux.length} | Électeurs bureaux: ${votersFromBureaux} | Total voters colonne: ${center.total_voters} | Final: ${finalVoters}`);
-
-          // Nombre total de bureaux (collèges + manuels)
-          const totalBureauxCount = bureaux.length;
+          // Nombre total de bureaux : uniquement les physiques (fallback pseudo si aucun physique)
+          const totalBureauxCount = countableBureaux.length;
           const finalBureaux = totalBureauxCount > 0 ? totalBureauxCount : (Number(center.total_bureaux) || 0);
           
           // Nombre de sièges (somme des sièges des collèges)

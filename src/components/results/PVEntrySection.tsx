@@ -1167,9 +1167,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
           rawVisibleCandidates.forEach(c => {
             const key = (c.party?.split(' — ')[0] || c.name || '').trim();
             if (!syndicatMap.has(key)) {
-              syndicatMap.set(key, { ...c, allNames: [c.name] });
+              syndicatMap.set(key, { ...c, allNames: [c.name], allSuppleants: [c.suppleant || null] });
             } else {
-              syndicatMap.get(key).allNames.push(c.name);
+              const existing = syndicatMap.get(key);
+              existing.allNames.push(c.name);
+              existing.allSuppleants.push(c.suppleant || null);
             }
           });
           return Array.from(syndicatMap.values());
@@ -1211,10 +1213,14 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         <div className="flex items-center gap-3">
                           <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{groupLabel}</h4>
                           {(() => {
-                            // Sièges de l'établissement en priorité, sinon fallback global
-                            const seats = establishmentSeatsMap.get(ct)
+                            const seatsFromDb = establishmentSeatsMap.get(ct)
                               ?? electoralColleges.find(col => col.college_type === ct)?.seats_to_fill
                               ?? 0;
+                            // Dériver depuis le nombre réel de titulaires si la DB sous-estime
+                            const seatsFromCandidates = groupCandidates.length > 0
+                              ? Math.max(...groupCandidates.map(c => Array.isArray(c.allNames) ? c.allNames.length : 1))
+                              : 0;
+                            const seats = Math.max(seatsFromDb, seatsFromCandidates);
                             return seats > 0 ? (
                               <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
                                 {seats} siège{seats > 1 ? 's' : ''} à pourvoir
@@ -1222,43 +1228,53 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             ) : null;
                           })()}
                         </div>
-                        {groupCandidates.map(candidate => {
-                          const syndicat = candidate.party?.split(' — ')[0] || '';
-                          const hasMultiple = Array.isArray(candidate.allNames) && candidate.allNames.length > 1;
-                          return (
-                            <div key={candidate.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center justify-between gap-4">
-                              <div className="flex-1 min-w-0">
-                                <p className="font-bold text-blue-700 text-sm truncate">{syndicat}</p>
+                        <div className="space-y-3">
+                          {groupCandidates.map(candidate => {
+                            const syndicat = candidate.party?.split(' — ')[0] || '';
+                            const names: string[] = Array.isArray(candidate.allNames) ? candidate.allNames : [candidate.name];
+                            const suppleants: (string | null)[] = Array.isArray(candidate.allSuppleants) ? candidate.allSuppleants : [candidate.suppleant || null];
+                            const hasMultiple = names.length > 1;
+                            return (
+                              <div key={candidate.id} className="p-3 border border-gray-200 rounded-xl bg-white space-y-2">
+                                <p className="font-bold text-blue-700 text-sm">{syndicat}</p>
                                 {hasMultiple ? (
-                                  <div className="mt-1 space-y-0.5">
-                                    {(candidate.allNames as string[]).map((n, i) => (
-                                      <p key={i} className="text-xs text-gray-600">
-                                        <span className="text-gray-400 font-medium">#{i + 1} </span>
-                                        <span className="font-semibold">{n}</span>
-                                      </p>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {names.map((n, i) => (
+                                      <div key={i} className="bg-gray-50 rounded-lg p-2 space-y-0.5">
+                                        <p className="text-xs text-gray-400 font-medium">Titulaire #{i + 1}</p>
+                                        <p className="text-xs font-semibold text-gray-800 leading-tight">{n}</p>
+                                        {suppleants[i] && (
+                                          <p className="text-xs text-gray-500 leading-tight">
+                                            <span className="font-medium">Suppléant : </span>{suppleants[i]}
+                                          </p>
+                                        )}
+                                      </div>
                                     ))}
                                   </div>
                                 ) : (
-                                  <p className="text-sm text-gray-900 mt-0.5">
-                                    <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
-                                    <span className="font-semibold">{candidate.name}</span>
-                                  </p>
+                                  <div className="space-y-0.5">
+                                    <p className="text-xs text-gray-400 font-medium">Titulaire</p>
+                                    <p className="text-sm font-semibold text-gray-800">{names[0]}</p>
+                                    {suppleants[0] && (
+                                      <p className="text-xs text-gray-500">
+                                        <span className="font-medium">Suppléant : </span>{suppleants[0]}
+                                      </p>
+                                    )}
+                                  </div>
                                 )}
-                                {candidate.suppleant && (
-                                  <p className="text-xs text-gray-500 mt-0.5">
-                                    <span className="font-medium">Suppléant : </span>{candidate.suppleant}
-                                  </p>
-                                )}
+                                <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                                  <span className="text-xs text-gray-500">Voix</span>
+                                  <div className="w-28">
+                                    <Input type="number" placeholder="Voix"
+                                      value={formData.candidateVotes[candidate.id] || ''}
+                                      onChange={(e) => setFormData({ ...formData, candidateVotes: { ...formData.candidateVotes, [candidate.id]: e.target.value } })}
+                                    />
+                                  </div>
+                                </div>
                               </div>
-                              <div className="w-28 flex-shrink-0">
-                                <Input type="number" placeholder="Voix"
-                                  value={formData.candidateVotes[candidate.id] || ''}
-                                  onChange={(e) => setFormData({ ...formData, candidateVotes: { ...formData.candidateVotes, [candidate.id]: e.target.value } })}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })

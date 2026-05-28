@@ -87,6 +87,8 @@ const ElectionManagementUnified = () => {
   const [electionToDelete, setElectionToDelete] = useState<Election | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const [detailVersion, setDetailVersion] = useState(0);
+
   // States pour le choix du mode de création (manuel vs import)
   const [showCreationModeModal, setShowCreationModeModal] = useState(false);
   const [selectedElectionCategory, setSelectedElectionCategory] = useState<'political' | 'professional'>('political');
@@ -422,7 +424,7 @@ const ElectionManagementUnified = () => {
                 id,
                 total_voters,
                 total_bureaux,
-                voting_bureaux!center_id(id, registered_voters, election_id)
+                voting_bureaux!center_id(id, name, registered_voters, election_id, college)
               )
             `)
             .eq('election_id', election.id);
@@ -436,13 +438,18 @@ const ElectionManagementUnified = () => {
               if (center.voting_centers) {
                 const vc = center.voting_centers as any;
                 // Compter les bureaux : soit depuis la liste, soit depuis la colonne total_bureaux
-                const bureaux = (Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [])
+                const allBureaux = (Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [])
                   .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
-                const bureauxCount = bureaux.length > 0 ? bureaux.length : (Number(vc.total_bureaux) || 0);
+                // Exclure les pseudo-entrées collège (élections professionnelles)
+                const isCollegeEntry = (b: any) =>
+                  b.name?.startsWith?.('College -') || (b.college != null && b.college !== '' && b.college !== 'general');
+                const physicalBureaux = allBureaux.filter((b: any) => !isCollegeEntry(b));
+                const countableBureaux = physicalBureaux.length > 0 ? physicalBureaux : allBureaux;
+                const bureauxCount = countableBureaux.length > 0 ? countableBureaux.length : (Number(vc.total_bureaux) || 0);
                 totalBureaux += bureauxCount;
                 
                 // Calculer les électeurs : soit depuis les bureaux, soit depuis la colonne total_voters
-                const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) => 
+                const votersFromBureaux = allBureaux.reduce((sum: number, bureau: any) =>
                   sum + (Number(bureau.registered_voters) || 0), 0);
                 
                 const votersCount = votersFromBureaux > 0 ? votersFromBureaux : (Number(vc.total_voters) || 0);
@@ -852,7 +859,12 @@ const ElectionManagementUnified = () => {
               employes: parseInt(formData.employeesEmployes),
               ouvriers: parseInt(formData.employeesOuvriers)
             },
-            administrative_unit: formData.administrativeUnit
+            administrative_unit: formData.administrativeUnit,
+            province_name: formData.provinceName || null,
+            commune_name: formData.communeName || null,
+            hr_contact: (formData.hrContactName || formData.hrContactPhone || formData.hrContactEmail)
+              ? { name: formData.hrContactName, phone: formData.hrContactPhone, email: formData.hrContactEmail }
+              : null,
           })
           .eq('id', formData.enterpriseId);
         if (entError) throw entError;
@@ -906,6 +918,7 @@ const ElectionManagementUnified = () => {
 
       toast.success('Élection professionnelle mise à jour avec succès');
       await refreshElectionsData();
+      setDetailVersion(v => v + 1);
       handleCloseEditModal();
     } catch (error) {
       console.error(error);
@@ -1582,6 +1595,7 @@ const ElectionManagementUnified = () => {
       description: selectedElection.description || `${selectedElection.location.commune}, ${selectedElection.location.province}`,
       voters: selectedElection.statistics.totalVoters,
       centers: selectedElection.statistics.totalCenters,
+      bureaux: selectedElection.statistics.totalBureaux,
       candidates: selectedElection.statistics.totalCandidates,
       location: selectedElection.location.fullAddress,
       type: selectedElection.type,
@@ -1597,8 +1611,9 @@ const ElectionManagementUnified = () => {
     };
 
     return (
-      <ElectionDetailView 
-        election={adaptedElection as any} 
+      <ElectionDetailView
+        key={detailVersion}
+        election={adaptedElection as any}
         onBack={handleCloseDetail}
         onDataChange={refreshElectionsData}
       />

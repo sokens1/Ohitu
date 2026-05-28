@@ -31,9 +31,10 @@ interface DataEntrySectionProps {
   };
   selectedElection: string;
   readOnly?: boolean;
+  refreshKey?: number;
 }
 
-const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false }) => {
+const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false, refreshKey }) => {
   const [expandedCenters, setExpandedCenters] = useState<string[]>([]);
   const [showAnomaliesOnly, setShowAnomaliesOnly] = useState(false);
   const [showPVEntry, setShowPVEntry] = useState(false);
@@ -140,10 +141,13 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           // Toujours afficher les vrais bureaux physiques ; pseudo-entrées en fallback si aucun physique
           const centerBureaux = physicalBureaux.length > 0 ? physicalBureaux : collegeBureaux;
 
-          // Fallback centre : si TOUTES les pseudo-entrées collège ont un PV → bureaux physiques héritent du statut
+          // Fallback centre : si TOUTES les pseudo-entrées collège ont un PV SAISI → bureaux physiques héritent du statut
+          // On exclut les PVs en statut "pending" (réinitialisés) pour qu'ils redeviennent éditables
+          const doneStatuses = ['entered', 'saisi', 'validated', 'validé', 'anomaly', 'published'];
           const allCollegePvs = collegeBureaux.map((cb: any) => {
             const cbKey = toRawKey(cb.college_type || cb.college);
-            return pvMap.get(String(cb.id)) || (cbKey ? pvByCollegeType.get(`${centerId}_${cbKey}`) : null);
+            const pv = pvMap.get(String(cb.id)) || (cbKey ? pvByCollegeType.get(`${centerId}_${cbKey}`) : null);
+            return pv && doneStatuses.includes(pv.status) ? pv : null;
           }).filter(Boolean);
           const allCollegesSubmitted = collegeBureaux.length > 0 && allCollegePvs.length === collegeBureaux.length;
           const centreRepresentativePv = allCollegesSubmitted ? allCollegePvs[0] : null;
@@ -218,6 +222,14 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPVEntry]);
+
+  // Rafraîchir quand le parent signale une réinitialisation externe (ex: reset PV)
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) {
+      fetchVotingCenters();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {

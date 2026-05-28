@@ -53,6 +53,7 @@ const Results = () => {
     voixNotreCanidat: 0, ecartDeuxieme: 0, anomaliesDetectees: 0, pvsEnAttente: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
 
   // ── Chargement des élections ───────────────────────────────────────────────
   // Règle : seul le super-admin voit toutes les élections.
@@ -152,7 +153,7 @@ const Results = () => {
           for (const pv of pvs) {
             if (enteredStatuses.includes(String(pv.status))) {
               const bid = String(pv.bureau_id);
-              const rv = bureauxMap.get(bid) || 0;
+              const rv = (bureauxMap.get(bid) as number) || 0;
               electorsEntered += rv;
               bureauxSaisis += 1;
             }
@@ -302,11 +303,11 @@ const Results = () => {
 
               <div className="p-3 sm:p-4 lg:p-6">
                 <TabsContent value="entry" className="space-y-6 mt-0">
-                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} />
+                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} />
                 </TabsContent>
 
                 <TabsContent value="validation" className="space-y-6 mt-0">
-                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} />
+                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} />
                 </TabsContent>
 
                 <TabsContent value="publish" className="space-y-6 mt-0">

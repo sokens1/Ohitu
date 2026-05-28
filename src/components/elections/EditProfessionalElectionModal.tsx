@@ -39,6 +39,11 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
     employeesEmployes: '0',
     employeesOuvriers: '0',
     administrativeUnit: '',
+    provinceName: '',
+    communeName: '',
+    hrContactName: '',
+    hrContactPhone: '',
+    hrContactEmail: '',
     region: 'Estuaire',
     villes: [] as string[],
     
@@ -89,11 +94,16 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
             setFormData(prev => ({
               ...prev,
               enterpriseName: enterprise.name,
-              enterpriseSector: enterprise.sector,
+              enterpriseSector: enterprise.sector || 'prive',
               employeesCadres: enterprise.employees_by_category?.cadres?.toString() || '0',
               employeesEmployes: enterprise.employees_by_category?.employes?.toString() || '0',
               employeesOuvriers: enterprise.employees_by_category?.ouvriers?.toString() || '0',
               administrativeUnit: enterprise.administrative_unit || '',
+              provinceName: enterprise.province_name || '',
+              communeName: enterprise.commune_name || '',
+              hrContactName: enterprise.hr_contact?.name || '',
+              hrContactPhone: enterprise.hr_contact?.phone || '',
+              hrContactEmail: enterprise.hr_contact?.email || '',
             }));
           }
         }
@@ -167,6 +177,11 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
               employes: parseInt(formData.employeesEmployes) || 0,
               ouvriers: parseInt(formData.employeesOuvriers) || 0,
             },
+            province_name: formData.provinceName || null,
+            commune_name: formData.communeName || null,
+            hr_contact: (formData.hrContactName || formData.hrContactPhone || formData.hrContactEmail)
+              ? { name: formData.hrContactName, phone: formData.hrContactPhone, email: formData.hrContactEmail }
+              : null,
           })
           .eq('id', formData.enterpriseId);
 
@@ -310,6 +325,36 @@ const EditProfessionalElectionModal: React.FC<EditProfessionalElectionModalProps
                     label="Tutelle"
                     value={formData.administrativeUnit}
                     onChange={(e) => setFormData({ ...formData, administrativeUnit: e.target.value })}
+                  />
+                </ModernFormGrid>
+                <ModernFormGrid cols={2}>
+                  <FloatingInput
+                    label="Province (Localisation Siège)"
+                    value={formData.provinceName}
+                    onChange={(e) => setFormData({ ...formData, provinceName: e.target.value })}
+                  />
+                  <FloatingInput
+                    label="Commune (Localisation Siège)"
+                    value={formData.communeName}
+                    onChange={(e) => setFormData({ ...formData, communeName: e.target.value })}
+                  />
+                </ModernFormGrid>
+                <ModernFormGrid cols={3}>
+                  <FloatingInput
+                    label="Contact RH — Nom"
+                    value={formData.hrContactName}
+                    onChange={(e) => setFormData({ ...formData, hrContactName: e.target.value })}
+                  />
+                  <FloatingInput
+                    label="Contact RH — Téléphone"
+                    value={formData.hrContactPhone}
+                    onChange={(e) => setFormData({ ...formData, hrContactPhone: e.target.value })}
+                  />
+                  <FloatingInput
+                    label="Contact RH — Email"
+                    type="email"
+                    value={formData.hrContactEmail}
+                    onChange={(e) => setFormData({ ...formData, hrContactEmail: e.target.value })}
                   />
                 </ModernFormGrid>
                 <ModernFormGrid cols={3}>
