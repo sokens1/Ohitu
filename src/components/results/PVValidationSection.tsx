@@ -388,6 +388,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     });
 
     return enriched.filter(e => {
+      if (e.status === 'en_cours') return false; // PV réinitialisé — retirer de la validation
       if (filter !== 'all' && e.status !== filter) return false;
       if (filters?.centerId && e.centerId !== filters.centerId) return false;
       if (filters?.collegeType && e.college_type !== filters.collegeType) return false;
@@ -526,28 +527,6 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     
     setResetting(true);
     try {
-      // Récupérer le nombre d'électeurs inscrits par défaut du bureau
-      let defaultRegisteredVoters = 0;
-      try {
-        const { data: pvData } = await supabase
-          .from('procès_verbaux')
-          .select('bureau_id')
-          .eq('id', selectedPV)
-          .single();
-
-        if (pvData?.bureau_id) {
-          const { data: bureauData } = await supabase
-            .from('voting_bureaux')
-            .select('registered_voters')
-            .eq('id', pvData.bureau_id)
-            .single();
-
-          defaultRegisteredVoters = bureauData?.registered_voters || 0;
-        }
-      } catch (error) {
-        console.warn('Impossible de récupérer le nombre d\'électeurs inscrits par défaut:', error);
-      }
-
       // Supprimer les résultats des candidats
       const { error: deleteResultsError } = await supabase
         .from('candidate_results')
@@ -560,21 +539,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         return;
       }
 
-      // Réinitialiser le PV à "En attente de saisie" avec le nombre d'électeurs inscrits par défaut
+      // Supprimer le PV pour que le bureau redevienne "non saisi" (re-saisissable, retiré de la validation)
       const { error: resetPVError } = await supabase
         .from('procès_verbaux')
-        .update({
-          status: 'pending',
-          total_registered: defaultRegisteredVoters,
-          total_voters: 0,
-          null_votes: 0,
-          votes_expressed: 0,
-          entered_by: null,
-          entered_at: null,
-          validated_at: null,
-          pv_photo_url: null,
-          anomalies: null
-        })
+        .delete()
         .eq('id', selectedPV);
 
       if (resetPVError) {
@@ -644,7 +612,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           return collegeMatch && etabMatch;
         });
 
-        // Combiner candidats filtrés et résultats, n'afficher que ceux renseignés
+        // Combiner candidats filtrés et résultats
         const mapped = filteredCandidates
           .map(c => ({
             id: c.id,
@@ -653,8 +621,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             suppleant: c.suppleant,
             college_type: c.college_type,
             votes: resultsMap.get(c.id) || 0
-          }))
-          .filter(cr => cr.votes > 0);
+          }));
 
         setCandidateResults(mapped);
       } catch (error) {
@@ -928,44 +895,96 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               {/* Résultats par candidat */}
                   <div>
                 <h4 className="font-medium text-gray-900 mb-3">Résultats par Candidat</h4>
-                {candidateResults.length > 0 ? (
+                {(editMode ? candidateResults.length > 0 : candidateResults.some(cr => cr.votes > 0)) ? (
                   <div className="space-y-2">
                     {isProElection ? (
-                      // Élection professionnelle — blocs syndicat identiques à la saisie
-                      candidateResults.map(cr => {
-                        const syndicat = cr.party?.split(' — ')[0] || '';
-                        return (
-                          <div key={cr.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center justify-between gap-4">
-                            <div className="flex-1 min-w-0">
-                              <p className="font-bold text-blue-700 text-sm truncate">{syndicat}</p>
-                              <p className="text-sm text-gray-900 mt-0.5">
-                                <span className="text-xs text-gray-500 font-medium">Titulaire : </span>
-                                <span className="font-semibold">{cr.name}</span>
-                              </p>
-                              {cr.suppleant && (
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                  <span className="font-medium">Suppléant : </span>{cr.suppleant}
-                                </p>
+                      // Élection professionnelle — groupé par syndicat (même affichage que la saisie)
+                      (() => {
+                        const syndicatMap = new Map<string, any>();
+                        candidateResults.forEach(cr => {
+                          const key = (cr.party?.split(' — ')[0] || cr.name || '').trim();
+                          if (!syndicatMap.has(key)) {
+                            syndicatMap.set(key, { ...cr, allNames: [cr.name], allSuppleants: [cr.suppleant || null] });
+                          } else {
+                            const existing = syndicatMap.get(key);
+                            existing.allNames.push(cr.name);
+                            existing.allSuppleants.push(cr.suppleant || null);
+                          }
+                        });
+                        const grouped = Array.from(syndicatMap.values());
+                        const collegeGroups = Array.from(new Set(grouped.map(c => c.college_type || 'general')));
+
+                        return collegeGroups.map(ct => {
+                          const groupLabel = ct === 'cadres' ? 'Collège Cadres' : ct === 'employes' ? 'Collège Maîtrise' : ct === 'ouvriers' ? 'Collège Exécution' : 'Collège Encadrement';
+                          const groupCandidates = grouped.filter(c => (c.college_type || 'general') === ct);
+                          return (
+                            <div key={ct} className="space-y-2">
+                              {collegeGroups.length > 1 && (
+                                <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{groupLabel}</h4>
                               )}
+                              <div className="space-y-3">
+                                {groupCandidates.map(candidate => {
+                                  const syndicat = candidate.party?.split(' — ')[0] || '';
+                                  const names: string[] = Array.isArray(candidate.allNames) ? candidate.allNames : [candidate.name];
+                                  const suppleants: (string | null)[] = Array.isArray(candidate.allSuppleants) ? candidate.allSuppleants : [candidate.suppleant || null];
+                                  const hasMultiple = names.length > 1;
+                                  return (
+                                    <div key={candidate.id} className="p-3 border border-gray-200 rounded-xl bg-white space-y-2">
+                                      <p className="font-bold text-blue-700 text-sm">{syndicat}</p>
+                                      {hasMultiple ? (
+                                        <div className="grid grid-cols-2 gap-2">
+                                          {names.map((n, i) => (
+                                            <div key={i} className="bg-gray-50 rounded-lg p-2 space-y-0.5">
+                                              <p className="text-xs text-gray-400 font-medium">Titulaire #{i + 1}</p>
+                                              <p className="text-xs font-semibold text-gray-800 leading-tight">{n}</p>
+                                              {suppleants[i] && (
+                                                <p className="text-xs text-gray-500 leading-tight">
+                                                  <span className="font-medium">Suppléant : </span>{suppleants[i]}
+                                                </p>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="space-y-0.5">
+                                          <p className="text-xs text-gray-400 font-medium">Titulaire</p>
+                                          <p className="text-sm font-semibold text-gray-800">{names[0]}</p>
+                                          {suppleants[0] && (
+                                            <p className="text-xs text-gray-500">
+                                              <span className="font-medium">Suppléant : </span>{suppleants[0]}
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                      <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                                        <span className="text-xs text-gray-500">Voix</span>
+                                        <div className="w-28">
+                                          {editMode ? (
+                                            <input
+                                              type="number"
+                                              className="border rounded px-2 py-1 w-full text-right"
+                                              value={candidate.votes}
+                                              onChange={e => {
+                                                const value = parseInt(e.target.value || '0');
+                                                const groupIds = candidateResults
+                                                  .filter(cr => (cr.party?.split(' — ')[0] || cr.name || '').trim() === syndicat)
+                                                  .map(cr => cr.id);
+                                                setCandidateResults(prev => prev.map(c => groupIds.includes(c.id) ? { ...c, votes: value } : c));
+                                              }}
+                                            />
+                                          ) : (
+                                            <span className="font-bold text-gray-900 text-sm">{candidate.votes} <span className="text-xs font-normal text-gray-500">voix</span></span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                            <div className="flex-shrink-0 text-right">
-                              {editMode ? (
-                                <input
-                                  type="number"
-                                  className="border rounded px-2 py-1 w-24 text-right"
-                                  value={cr.votes}
-                                  onChange={e => {
-                                    const value = parseInt(e.target.value || '0');
-                                    setCandidateResults(prev => prev.map(c => c.id === cr.id ? { ...c, votes: value } : c));
-                                  }}
-                                />
-                              ) : (
-                                <span className="font-bold text-gray-900">{cr.votes} <span className="text-xs font-normal text-gray-500">voix</span></span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })
+                          );
+                        });
+                      })()
                     ) : (
                       // Élection standard — liste plate
                       candidateResults.map(cr => (

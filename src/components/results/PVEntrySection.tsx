@@ -15,16 +15,19 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { 
-  ChevronRight, 
-  AlertCircle, 
-  CheckCircle, 
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  ChevronRight,
+  AlertCircle,
+  CheckCircle,
   Upload,
   FileText,
   Calculator,
   ArrowLeft,
   Calendar,
-  Users
+  Users,
+  FolderOpen,
+  X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
@@ -84,6 +87,11 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Sélection d'un PV existant
+  const [showExistingPvPicker, setShowExistingPvPicker] = useState(false);
+  const [existingValidatedPvs, setExistingValidatedPvs] = useState<{ id: string; bureau_name: string; pv_photo_url: string }[]>([]);
+  const [loadingExistingPvs, setLoadingExistingPvs] = useState(false);
+  const [selectedExistingPvUrl, setSelectedExistingPvUrl] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     province: '',
     ville: '',
@@ -313,18 +321,17 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
           let sieges = 0;
 
           if (isPro && preCollegeType) {
-            const col = loadedColleges.find((c: any) => toRawCollegeKey(c.college_type) === preCollegeType);
-            rv     = Number(col?.total_voters)  || 0;
-            sieges = Number(col?.seats_to_fill) || 0;
-            // Fallback inscrits depuis la pseudo-entrée du collège
-            if (!rv) {
-              const pseudos = collegesMap.get(preCenterId) || [];
-              const pseudo  = pseudos.find((p: any) =>
-                (toRawCollegeKey(p.college_type || p.college) || 'general') === preCollegeType
-              );
-              rv = Number(pseudo?.registered_voters) || 0;
-              if (!bureauId && pseudo?.id) bureauId = String(pseudo.id);
-            }
+            // inscrits depuis la pseudo-entrée du collège (per-établissement)
+            // NE PAS utiliser electoral_colleges.total_voters qui est le total GLOBAL de tous les établissements
+            const pseudos = collegesMap.get(preCenterId) || [];
+            const pseudo  = pseudos.find((p: any) =>
+              (toRawCollegeKey(p.college_type || p.college) || 'general') === preCollegeType
+            );
+            rv = Number(pseudo?.registered_voters) || 0;
+            if (!bureauId && pseudo?.id) bureauId = String(pseudo.id);
+            // Sièges depuis electoral_colleges (correct — nombre de sièges par collège pour l'élection)
+            const col  = loadedColleges.find((c: any) => toRawCollegeKey(c.college_type) === preCollegeType);
+            sieges = Number(col?.seats_to_fill) || Number(pseudo?.seats_to_fill) || 0;
           } else if (bureauId) {
             const preBureau = physicalBureaux.find((b: any) => String(b.id) === bureauId);
             rv = Number(preBureau?.registered_voters) || 0;
@@ -480,6 +487,43 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     });
   };
 
+  // Ouvre le picker de PV existants pour le centre sélectionné
+  const handleOpenExistingPvPicker = async () => {
+    if (!formData.centre) {
+      toast.warning('Veuillez d\'abord sélectionner un établissement.');
+      return;
+    }
+    setLoadingExistingPvs(true);
+    setShowExistingPvPicker(true);
+    try {
+      // Récupérer les PV validés/publiés avec un document, pour les bureaux de ce centre
+      const { data: pvRows } = await supabase
+        .from('procès_verbaux')
+        .select('id, pv_photo_url, bureau_id, voting_bureaux!bureau_id(id, name, center_id)')
+        .eq('election_id', selectedElection)
+        .in('status', ['validated', 'validé', 'published'])
+        .not('pv_photo_url', 'is', null);
+
+      const centerPvs = (pvRows || []).filter((pv: any) =>
+        String((pv as any).voting_bureaux?.center_id) === String(formData.centre) &&
+        pv.pv_photo_url
+      );
+
+      setExistingValidatedPvs(
+        centerPvs.map((pv: any) => ({
+          id: String(pv.id),
+          bureau_name: (pv as any).voting_bureaux?.name || 'Bureau',
+          pv_photo_url: pv.pv_photo_url as string,
+        }))
+      );
+    } catch (e) {
+      toast.error('Erreur lors du chargement des PV existants.');
+      setShowExistingPvPicker(false);
+    } finally {
+      setLoadingExistingPvs(false);
+    }
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -607,7 +651,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         // ignore et rester à 0
       }
 
-      let pvPhotoUrl: string | null = null;
+      let pvPhotoUrl: string | null = selectedExistingPvUrl || null;
       if (formData.uploadedFile) {
         try {
           pvPhotoUrl = await uploadPVFile(formData.uploadedFile, selectedElection, centerId, bureauId);
@@ -849,10 +893,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             const allB = realBureaux.length > 0 ? realBureaux : ps;
                             // Auto-sélectionner si un seul bureau
                             const bureauId = allB.length === 1 ? String(allB[0].id) : '';
-                            // Électeurs : electoral_colleges en priorité (||, pas ??), sinon somme
+                            // inscrits depuis les pseudo-entrées du collège (per-établissement)
+                            // NE PAS utiliser ec?.total_voters (electoral_colleges) qui est le total GLOBAL
                             const ec = electoralColleges.find((c: any) => toRawCollegeKey(c.college_type) === collegeKey);
-                            let rv = Number(ec?.total_voters) || 0;
-                            if (!rv) rv = ps.reduce((s: number, p: any) => s + (Number(p.registered_voters) || 0), 0);
+                            const rv = ps.reduce((s: number, p: any) => s + (Number(p.registered_voters) || 0), 0);
                             const sieges = Number(ec?.seats_to_fill) || ps.reduce((s: number, p: any) => s + (Number(p.seats_to_fill) || 0), 0);
                             // Pré-remplir votants = inscrits - votants déjà saisis sur les autres bureaux du collège
                             const otherVotants = allB
@@ -1341,17 +1385,18 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         return (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Import du PV Scanné</h3>
-            
+
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
               <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h4 className="text-lg font-medium text-gray-900 mb-2">Téléverser le PV physique</h4>
-              <p className="text-sm text-gray-600 mb-4">Formats acceptés: PDF, JPG, PNG (max. 10MB)</p>
-              {!formData.uploadedFile && (
-                <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
+              <h4 className="text-lg font-medium text-gray-900 mb-2">Joindre le PV physique</h4>
+              <p className="text-sm text-gray-600 mb-4">Formats acceptés : PDF, JPG, PNG (max. 10 Mo)</p>
+
+              {!formData.uploadedFile && !selectedExistingPvUrl && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
                   ℹ️ L'ajout d'un document physique (PV scanné) est optionnel. Vous pouvez poursuivre et enregistrer les chiffres directement.
                 </div>
               )}
-              
+
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1359,24 +1404,133 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                 onChange={handleFileUpload}
                 className="hidden"
               />
-              <Button
-                variant="outline"
-                className="cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Choisir un fichier
-              </Button>
-              
+
+              {/* Boutons d'action */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <Button
+                  variant="outline"
+                  className="cursor-pointer"
+                  onClick={() => {
+                    setSelectedExistingPvUrl(null);
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Importer un PV
+                </Button>
+
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                  onClick={handleOpenExistingPvPicker}
+                >
+                  <FolderOpen className="w-4 h-4 mr-2" />
+                  Sélectionner un PV existant
+                </Button>
+              </div>
+
+              {/* Fichier importé */}
               {formData.uploadedFile && (
                 <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <div className="flex items-center justify-center space-x-2 text-green-700">
-                    <FileText className="w-4 h-4" />
-                    <span className="text-sm font-medium">{formData.uploadedFile.name}</span>
-                    <CheckCircle className="w-4 h-4" />
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-green-700">
+                      <FileText className="w-4 h-4" />
+                      <span className="text-sm font-medium">{formData.uploadedFile.name}</span>
+                      <CheckCircle className="w-4 h-4" />
+                    </div>
+                    <button
+                      onClick={() => setFormData(prev => ({ ...prev, uploadedFile: null }))}
+                      className="text-green-600 hover:text-green-800 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* PV existant sélectionné */}
+              {selectedExistingPvUrl && !formData.uploadedFile && (
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-blue-700">
+                      <FileText className="w-4 h-4" />
+                      <span className="text-sm font-medium">PV existant sélectionné</span>
+                      <CheckCircle className="w-4 h-4" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={selectedExistingPvUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-blue-600 underline hover:text-blue-800"
+                      >
+                        Voir
+                      </a>
+                      <button
+                        onClick={() => setSelectedExistingPvUrl(null)}
+                        className="text-blue-500 hover:text-blue-700 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
             </div>
+
+            {/* Dialog picker de PV existants */}
+            <Dialog open={showExistingPvPicker} onOpenChange={setShowExistingPvPicker}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <FolderOpen className="w-5 h-5 text-blue-600" />
+                    Sélectionner un PV existant
+                  </DialogTitle>
+                </DialogHeader>
+
+                {loadingExistingPvs ? (
+                  <div className="py-8 text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3" />
+                    <p className="text-sm text-gray-500">Chargement des PV validés…</p>
+                  </div>
+                ) : existingValidatedPvs.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500">
+                    <AlertCircle className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                    <p className="font-medium text-gray-700">Aucun PV validé disponible</p>
+                    <p className="text-sm mt-1 text-gray-400">
+                      Aucun PV validé avec document n'a été trouvé pour cet établissement.
+                      Importez un nouveau fichier.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 py-2 max-h-64 overflow-y-auto">
+                    <p className="text-xs text-gray-500 mb-3">
+                      {existingValidatedPvs.length} PV validé{existingValidatedPvs.length > 1 ? 's' : ''} trouvé{existingValidatedPvs.length > 1 ? 's' : ''} pour cet établissement
+                    </p>
+                    {existingValidatedPvs.map(pv => (
+                      <button
+                        key={pv.id}
+                        onClick={() => {
+                          setSelectedExistingPvUrl(pv.pv_photo_url);
+                          setFormData(prev => ({ ...prev, uploadedFile: null }));
+                          setShowExistingPvPicker(false);
+                          toast.success('PV existant sélectionné.');
+                        }}
+                        className="w-full text-left p-3 border border-gray-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-colors flex items-center gap-3 group"
+                      >
+                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-blue-200 transition-colors">
+                          <FileText className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{pv.bureau_name}</p>
+                          <p className="text-xs text-gray-400 truncate">{pv.pv_photo_url.split('/').pop()}</p>
+                        </div>
+                        <CheckCircle className="w-4 h-4 text-green-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
           </div>
         );
 

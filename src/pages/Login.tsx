@@ -4,14 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import type { UserRole } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, Eye, EyeOff, Vote, Building, ArrowRight, Shield, CheckCircle, Users, BarChart3 } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Vote, ArrowRight, Shield, CheckCircle, Users } from 'lucide-react';
 import { fetchPublicElections } from '../api/elections';
 import NetworkIndicator from '@/components/NetworkIndicator';
 import { isProfessionalElection } from '@/utils/electionCalculations';
+import FloatingChatbot from '@/components/FloatingChatbot';
 
 interface Election {
   id: string;
@@ -86,6 +88,7 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [elections, setElections] = useState<Election[]>([]);
   const [electionsLoading, setElectionsLoading] = useState(true);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau'];
 
   const { login, user } = useAuth();
@@ -231,10 +234,10 @@ const Login = () => {
                          className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                        >
                          <div className="flex items-center justify-between">
-                           <div className="text-left">
-                             <h3 className="font-bold text-base lg:text-lg">{election.title}</h3>
+                           <div className="text-left min-w-0 flex-1">
+                             <h3 className="font-bold text-base lg:text-lg truncate">{election.title}</h3>
                              {election.localisation && (
-                               <p className="text-xs opacity-60 mt-1">{election.localisation}</p>
+                               <p className="text-xs opacity-60 mt-1 truncate">{election.localisation}</p>
                              )}
                            </div>
                            <ArrowRight className="w-4 h-4 lg:w-5 lg:h-5 transition-transform text-white/60" />
@@ -261,10 +264,18 @@ const Login = () => {
               <span className="text-xs">Accessible</span>
             </div>
           </div>
-          {/* Copyright desktop aligné à la même colonne (conteneur max-w-md centré) */}
+          {/* Copyright desktop */}
           <div className="hidden lg:block w-full mt-8">
-            <div className="max-w-md mx-auto text-blue-100 text-[10px] lg:text-xs opacity-80 text-center">
-              © 2026 o'Hitu - Tous droits réservés
+            <div className="max-w-md mx-auto text-center space-y-1">
+              <div className="text-blue-100 text-[10px] lg:text-xs opacity-80">
+                © 2026 o'Hitu - Tous droits réservés
+              </div>
+              <button
+                onClick={() => setPrivacyOpen(true)}
+                className="text-blue-200 text-[10px] lg:text-xs opacity-70 hover:opacity-100 underline underline-offset-2 transition-opacity"
+              >
+                Politique de confidentialité
+              </button>
             </div>
           </div>
           {/* Copyright déplacé plus bas (voir footer absolu ci-dessous) */}
@@ -337,10 +348,10 @@ const Login = () => {
                         className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-left flex-1">
-                            <h3 className="font-bold text-base leading-snug whitespace-normal">{election.title}</h3>
+                          <div className="text-left flex-1 min-w-0">
+                            <h3 className="font-bold text-base truncate">{election.title}</h3>
                             {election.localisation && (
-                              <p className="text-xs opacity-60 mt-1 leading-snug whitespace-normal">{election.localisation}</p>
+                              <p className="text-xs opacity-60 mt-1 truncate">{election.localisation}</p>
                             )}
                           </div>
                           <ArrowRight className="w-4 h-4 text-white/60 shrink-0" />
@@ -367,12 +378,44 @@ const Login = () => {
               <span className="text-xs">Accessible</span>
             </div>
               </div>
-              <div className="mt-12 text-blue-100 text-[10px] opacity-80 text-center px-2 leading-snug whitespace-normal">
-                © 2026 o'Hitu - Tous droits réservés
+              <div className="mt-12 text-center space-y-1">
+                <div className="text-blue-100 text-[10px] opacity-80 leading-snug">
+                  © 2026 o'Hitu - Tous droits réservés
+                </div>
+                <button
+                  onClick={() => setPrivacyOpen(true)}
+                  className="text-blue-200 text-[10px] opacity-70 hover:opacity-100 underline underline-offset-2 transition-opacity"
+                >
+                  Politique de confidentialité
+                </button>
               </div>
             </div>
         </div>
         {/* Footer desktop absolu supprimé pour garder l'alignement avec la colonne centralisée */}
+
+      {/* Modal Politique de confidentialité */}
+      <Dialog open={privacyOpen} onOpenChange={setPrivacyOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-gov-blue" />
+              Politique de confidentialité
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-6 text-center text-gray-500 text-sm">
+            <div className="w-12 h-12 mx-auto mb-4 bg-blue-50 rounded-full flex items-center justify-center">
+              <Shield className="w-6 h-6 text-gov-blue" />
+            </div>
+            <p className="font-medium text-gray-700 mb-2">Contenu à venir</p>
+            <p className="text-xs text-gray-400">
+              La politique de confidentialité de la plateforme o'Hitu sera publiée prochainement.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Chatbot flottant */}
+      <FloatingChatbot />
 
       {/* Section droite - Formulaire */}
       <div className="w-full lg:w-1/2 bg-white flex items-center justify-center p-4 sm:p-6 lg:p-8">

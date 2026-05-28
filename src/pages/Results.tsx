@@ -30,10 +30,10 @@ interface GlobalStats {
 
 // ─── Définition des onglets disponibles par permission ───────────────────────
 const TAB_DEFS = [
+  { value: 'documents',  icon: Folder,    label: 'Documents',               labelShort: 'Documents', permission: 'results:documents'  as const },
   { value: 'entry',      icon: FileText,  label: 'Saisir les résultats',   labelShort: 'Saisir',    permission: 'results:entry'      as const },
   { value: 'validation', icon: FileCheck, label: 'Valider les résultats',  labelShort: 'Valider',   permission: 'results:validate'   as const },
   { value: 'publish',    icon: Upload,    label: 'Publier les résultats',   labelShort: 'Publier',   permission: 'results:publish'    as const },
-  { value: 'documents',  icon: Folder,    label: 'Documents',               labelShort: 'Documents', permission: 'results:documents'  as const },
 ];
 
 // ─── Standalone fetch functions ───────────────────────────────────────────────
@@ -162,8 +162,22 @@ const Results = () => {
 
   const [activeTab, setActiveTab] = useState<string>(() => {
     const saved = localStorage.getItem('results_active_tab') || '';
-    return allowedTabs.some(t => t.value === saved) ? saved : (allowedTabs[0]?.value ?? 'entry');
+    return allowedTabs.some(t => t.value === saved) ? saved : (allowedTabs[0]?.value ?? 'documents');
   });
+
+  // Tabs déjà visitées → composant monté une seule fois, jamais démonté (pas de rechargement)
+  const [mountedTabs, setMountedTabs] = useState<Set<string>>(
+    () => new Set([localStorage.getItem('results_active_tab') || allowedTabs[0]?.value || 'documents'])
+  );
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setMountedTabs(prev => {
+      if (prev.has(tab)) return prev;
+      return new Set([...prev, tab]);
+    });
+    localStorage.setItem('results_active_tab', tab);
+  };
 
   const [selectedElection, setSelectedElection] = useState<string>(
     () => assignedElectionId ?? localStorage.getItem('results_selected_election') ?? ''
@@ -319,7 +333,7 @@ const Results = () => {
         {/* Onglets — seuls ceux autorisés sont affichés */}
         <Card className="gov-card">
           <CardContent className="p-0">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
               <div className="border-b overflow-x-auto">
                 <TabsList
                   className={`grid w-full bg-transparent h-auto p-0`}
@@ -345,20 +359,30 @@ const Results = () => {
               </div>
 
               <div className="p-3 sm:p-4 lg:p-6">
-                <TabsContent value="entry" className="space-y-6 mt-0">
-                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} filters={filters} />
+                {/* forceMount : le composant reste monté après la première visite (pas de rechargement) */}
+                {/* hidden : masque le contenu inactif via l'attribut HTML hidden (display:none) */}
+                <TabsContent value="documents" forceMount hidden={activeTab !== 'documents'} className="space-y-6 mt-0">
+                  {mountedTabs.has('documents') && (
+                    <DocumentsSection selectedElection={selectedElection} filters={filters} />
+                  )}
                 </TabsContent>
 
-                <TabsContent value="validation" className="space-y-6 mt-0">
-                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} filters={filters} />
+                <TabsContent value="entry" forceMount hidden={activeTab !== 'entry'} className="space-y-6 mt-0">
+                  {mountedTabs.has('entry') && (
+                    <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} filters={filters} />
+                  )}
                 </TabsContent>
 
-                <TabsContent value="publish" className="space-y-6 mt-0">
-                  <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} filters={filters} />
+                <TabsContent value="validation" forceMount hidden={activeTab !== 'validation'} className="space-y-6 mt-0">
+                  {mountedTabs.has('validation') && (
+                    <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} filters={filters} />
+                  )}
                 </TabsContent>
 
-                <TabsContent value="documents" className="space-y-6 mt-0">
-                  <DocumentsSection selectedElection={selectedElection} filters={filters} />
+                <TabsContent value="publish" forceMount hidden={activeTab !== 'publish'} className="space-y-6 mt-0">
+                  {mountedTabs.has('publish') && (
+                    <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} filters={filters} />
+                  )}
                 </TabsContent>
               </div>
             </Tabs>

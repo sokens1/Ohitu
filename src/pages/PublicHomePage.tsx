@@ -2,14 +2,16 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Link, useNavigate } from 'react-router-dom';
-import { Calendar, Users, TrendingUp, RefreshCw, Flag, Landmark, Megaphone, Facebook, Link as LinkIcon, Menu, X } from 'lucide-react';
+import { Calendar, Users, TrendingUp, RefreshCw, Flag, Landmark, Megaphone, Facebook, Link as LinkIcon, Menu, X, Shield } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchPublicElections, fetchRunningElection, fetchPublishedElection, fetchLatestElection } from '../api/elections';
 import { isElectionVisibleOnPublic } from '@/utils/electionVisibility';
 import { fetchGlobalMetrics } from '../api/metrics';
 import { toast } from 'sonner';
 import SEOHead from '@/components/SEOHead';
+import FloatingChatbot from '@/components/FloatingChatbot';
 
 // Icone WhatsApp (SVG minimal)
 const WhatsAppIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -57,6 +59,7 @@ const fallbackImages = [
 
 const PublicHomePage = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const navigate = useNavigate();
   const [results, setResults] = useState<PublicResults>({
     election: null,
@@ -656,11 +659,45 @@ const PublicHomePage = () => {
           </div>
           </div>
 
-          {/* Copyright centré en bas */}
-          <div className="mt-12 text-center font-semibold">© {new Date().getFullYear()} o'Hitu. Tous droits réservés.</div>
+          {/* Copyright + liens légaux */}
+          <div className="mt-12 text-center space-y-1.5">
+            <div className="font-semibold text-sm">© {new Date().getFullYear()} o'Hitu. Tous droits réservés.</div>
+            <div className="flex items-center justify-center gap-3 text-xs text-white/70">
+              <button
+                onClick={() => setPrivacyOpen(true)}
+                className="hover:text-white underline underline-offset-2 transition-colors"
+              >
+                Politique de confidentialité
+              </button>
+            </div>
+          </div>
         </div>
       </footer>
     </div>
+
+    {/* Modal Politique de confidentialité */}
+    <Dialog open={privacyOpen} onOpenChange={setPrivacyOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-gov-blue" />
+            Politique de confidentialité
+          </DialogTitle>
+        </DialogHeader>
+        <div className="py-6 text-center text-gray-500 text-sm">
+          <div className="w-12 h-12 mx-auto mb-4 bg-blue-50 rounded-full flex items-center justify-center">
+            <Shield className="w-6 h-6 text-gov-blue" />
+          </div>
+          <p className="font-medium text-gray-700 mb-2">Contenu à venir</p>
+          <p className="text-xs text-gray-400">
+            La politique de confidentialité de la plateforme o'Hitu sera publiée prochainement.
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Chatbot flottant */}
+    <FloatingChatbot />
     </>
   );
 };
