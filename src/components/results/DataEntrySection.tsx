@@ -21,6 +21,28 @@ import PVEntrySection from './PVEntrySection';
 import { toast } from 'sonner';
 import type { ResultsFilters } from './ResultsFilterBar';
 
+// Retry automatique sur erreurs réseau (ERR_CONNECTION_RESET, ERR_HTTP2_PING_FAILED)
+async function sbQuery<T>(
+  fn: () => PromiseLike<{ data: T | null; error: any }>,
+  retries = 3
+): Promise<{ data: T | null; error: any }> {
+  let lastResult: { data: T | null; error: any } = { data: null, error: null };
+  for (let i = 0; i <= retries; i++) {
+    try {
+      lastResult = await fn() as { data: T | null; error: any };
+      if (!lastResult.error) return lastResult;
+      const msg = String(lastResult.error?.message || lastResult.error?.toString() || '').toLowerCase();
+      const isNetwork = msg.includes('connection') || msg.includes('network') || msg.includes('ping') || msg.includes('failed to fetch') || msg.includes('reset') || msg.includes('ssl');
+      if (!isNetwork || i === retries) return lastResult;
+    } catch (err: any) {
+      lastResult = { data: null, error: err };
+      if (i === retries) return lastResult;
+    }
+    await new Promise(r => setTimeout(r, 700 * (i + 1)));
+  }
+  return lastResult;
+}
+
 interface DataEntrySectionProps {
   stats: {
     tauxSaisie: number;
@@ -50,10 +72,9 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         setLoading(true);
 
         // Étape 1 : récupérer les centre_ids liés à cette élection
-        const { data: ecRows, error: ecError } = await supabase
-          .from('election_centers')
-          .select('center_id')
-          .eq('election_id', selectedElection);
+        const { data: ecRows, error: ecError } = await sbQuery<{ center_id: string }[]>(() =>
+          supabase.from('election_centers').select('center_id').eq('election_id', selectedElection)
+        );
 
         if (ecError) {
           console.error('Erreur lors du chargement de election_centers:', ecError);
@@ -68,19 +89,19 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           return;
         }
 
-        // Étape 2 : requêtes indépendantes en parallèle
-        const [usersResult, bureauxResult, centersResult] = await Promise.all([
-          supabase.from('users').select('id, name'),
-          supabase
-            .from('voting_bureaux')
+        // Étape 2 : requêtes indépendantes — sérialisées pour éviter ERR_HTTP2_PING_FAILED
+        const usersResult = await sbQuery<any[]>(() => supabase.from('users').select('id, name'));
+        const bureauxResult = await sbQuery<any[]>(() =>
+          supabase.from('voting_bureaux')
             .select('id, name, center_id, registered_voters, college_type, election_id, college, seats_to_fill')
-            .in('center_id', centerIds),
-          supabase
-            .from('voting_centers')
+            .in('center_id', centerIds)
+        );
+        const centersResult = await sbQuery<any[]>(() =>
+          supabase.from('voting_centers')
             .select('id, name, address')
             .in('id', centerIds)
-            .order('name', { ascending: true }),
-        ]);
+            .order('name', { ascending: true })
+        );
 
         const usersMap = new Map((usersResult.data || []).map((u: any) => [u.id, u.name]));
         const bureauxData = bureauxResult.data;
@@ -114,11 +135,12 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         // pvByCollegeType : "${centerId}_${rawCollegeType}" → PV  (rétro-compat PV saisis via pseudo-entrée)
         const pvByCollegeType = new Map<string, any>();
         if (allBureauIds.length > 0) {
-          const { data: pvRows } = await supabase
-            .from('procès_verbaux')
-            .select('id, bureau_id, status, entered_by, entered_at, anomalies, college_type')
-            .eq('election_id', selectedElection)
-            .in('bureau_id', allBureauIds);
+          const { data: pvRows } = await sbQuery<any[]>(() =>
+            supabase.from('procès_verbaux')
+              .select('id, bureau_id, status, entered_by, entered_at, anomalies, college_type')
+              .eq('election_id', selectedElection)
+              .in('bureau_id', allBureauIds)
+          );
           (pvRows || []).forEach((pv: any) => {
             const bureauIdStr = String(pv.bureau_id);
             pvMap.set(bureauIdStr, pv);
@@ -247,6 +269,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         return <AlertTriangle className="w-4 h-4 text-red-600" />;
       case 'en_attente':
       case 'pending':
+      case 'en_cours':
         return <Clock className="w-4 h-4 text-gray-400" />;
       default:
         return <Clock className="w-4 h-4 text-gray-400" />;
@@ -265,6 +288,8 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         return <Badge className="bg-red-100 text-red-800 border-red-200">🚩 Rejeté</Badge>;
       case 'pending':
         return <Badge className="bg-gray-100 text-gray-800 border-gray-200">En attente de saisie</Badge>;
+      case 'en_cours':
+        return <Badge className="bg-orange-100 text-orange-800 border-orange-200">Re-saisie en cours</Badge>;
       default:
         return <Badge className="bg-gray-100 text-gray-800 border-gray-200">En attente</Badge>;
     }

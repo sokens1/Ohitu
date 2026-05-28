@@ -20,16 +20,19 @@ interface Props {
   onChange: (f: ResultsFilters) => void;
 }
 
+const COLLEGE_LABELS: Record<string, string> = {
+  cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+};
+
 // ─── Composant ───────────────────────────────────────────────────────────────
 const ResultsFilterBar: React.FC<Props> = ({ selectedElection, filters, onChange }) => {
   const [centers, setCenters]   = useState<{ id: string; name: string }[]>([]);
   const [colleges, setColleges] = useState<{ value: string; label: string }[]>([]);
 
-  // Charger établissements + collèges à chaque changement d'élection
   useEffect(() => {
     if (!selectedElection) { setCenters([]); setColleges([]); return; }
     const load = async () => {
-      // Centres
+      // Centres liés à l'élection
       const { data: ecRows } = await supabase
         .from('election_centers')
         .select('center_id')
@@ -46,16 +49,30 @@ const ResultsFilterBar: React.FC<Props> = ({ selectedElection, filters, onChange
         setCenters([]);
       }
 
-      // Collèges
+      // Collèges — priorité electoral_colleges, fallback voting_bureaux (élections pro)
       const { data: coll } = await supabase
         .from('electoral_colleges')
         .select('college_type')
         .eq('election_id', selectedElection);
-      const LABELS: Record<string, string> = {
-        cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-      };
-      const distinct = Array.from(new Set((coll ?? []).map((c: any) => c.college_type).filter(Boolean)));
-      setColleges(distinct.map(v => ({ value: v, label: LABELS[v] ?? v })));
+
+      let distinct: string[] = Array.from(
+        new Set((coll ?? []).map((c: any) => c.college_type).filter(Boolean))
+      );
+
+      if (distinct.length === 0 && ids.length > 0) {
+        // Fallback : lire les types de collège depuis voting_bureaux pseudo-entrées
+        const { data: bureaux } = await supabase
+          .from('voting_bureaux')
+          .select('college, college_type')
+          .in('center_id', ids);
+        distinct = Array.from(new Set(
+          (bureaux ?? [])
+            .map((b: any) => String(b.college_type || b.college || ''))
+            .filter((v: string) => v && v !== '' && v !== 'general')
+        ));
+      }
+
+      setColleges(distinct.map((v: string) => ({ value: v, label: COLLEGE_LABELS[v] ?? v })));
     };
     load();
   }, [selectedElection]);
@@ -71,11 +88,11 @@ const ResultsFilterBar: React.FC<Props> = ({ selectedElection, filters, onChange
       {/* Ligne principale */}
       <div className="flex flex-wrap gap-2 items-center">
 
-        {/* Recherche */}
-        <div className="relative flex-1 min-w-48">
+        {/* Recherche — largeur limitée */}
+        <div className="relative w-52 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           <Input
-            placeholder="Rechercher un bureau, un établissement…"
+            placeholder="Rechercher…"
             value={filters.search}
             onChange={e => set({ search: e.target.value })}
             className="pl-9 pr-8 h-9 text-sm bg-gray-50 border-gray-200 rounded-xl focus:bg-white focus:border-blue-400 transition-colors"
@@ -92,44 +109,40 @@ const ResultsFilterBar: React.FC<Props> = ({ selectedElection, filters, onChange
 
         {/* Établissement */}
         {centers.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            <Building2 className="w-4 h-4 text-gray-400 flex-shrink-0" />
-            <Select
-              value={filters.centerId || '_all'}
-              onValueChange={v => set({ centerId: v === '_all' ? '' : v, collegeType: '' })}
-            >
-              <SelectTrigger className="h-9 text-sm w-48 bg-gray-50 border-gray-200 rounded-xl focus:border-blue-400 transition-colors">
-                <SelectValue placeholder="Tous les établissements" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl shadow-lg">
-                <SelectItem value="_all" className="text-sm">Tous les établissements</SelectItem>
-                {centers.map(c => (
-                  <SelectItem key={c.id} value={c.id} className="text-sm">{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <Select
+            value={filters.centerId || '_all'}
+            onValueChange={v => set({ centerId: v === '_all' ? '' : v, collegeType: '' })}
+          >
+            <SelectTrigger className="h-9 text-sm w-52 bg-gray-50 border-gray-200 rounded-xl text-gray-700 focus:border-blue-400">
+              <Building2 className="w-3.5 h-3.5 text-gray-400 mr-1.5 flex-shrink-0" />
+              <SelectValue>{filters.centerId ? activeCenterName : 'Tous les établissements'}</SelectValue>
+            </SelectTrigger>
+            <SelectContent className="rounded-xl shadow-lg">
+              <SelectItem value="_all" className="text-sm">Tous les établissements</SelectItem>
+              {centers.map(c => (
+                <SelectItem key={c.id} value={c.id} className="text-sm">{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
 
-        {/* Collège (visible si des collèges existent) */}
+        {/* Collège */}
         {colleges.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            <BookOpen className="w-4 h-4 text-gray-400 flex-shrink-0" />
-            <Select
-              value={filters.collegeType || '_all'}
-              onValueChange={v => set({ collegeType: v === '_all' ? '' : v })}
-            >
-              <SelectTrigger className="h-9 text-sm w-40 bg-gray-50 border-gray-200 rounded-xl focus:border-blue-400 transition-colors">
-                <SelectValue placeholder="Tous les collèges" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl shadow-lg">
-                <SelectItem value="_all" className="text-sm">Tous les collèges</SelectItem>
-                {colleges.map(c => (
-                  <SelectItem key={c.value} value={c.value} className="text-sm">{c.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <Select
+            value={filters.collegeType || '_all'}
+            onValueChange={v => set({ collegeType: v === '_all' ? '' : v })}
+          >
+            <SelectTrigger className="h-9 text-sm w-44 bg-gray-50 border-gray-200 rounded-xl text-gray-700 focus:border-blue-400">
+              <BookOpen className="w-3.5 h-3.5 text-gray-400 mr-1.5 flex-shrink-0" />
+              <SelectValue>{filters.collegeType ? activeCollegeName : 'Tous les collèges'}</SelectValue>
+            </SelectTrigger>
+            <SelectContent className="rounded-xl shadow-lg">
+              <SelectItem value="_all" className="text-sm">Tous les collèges</SelectItem>
+              {colleges.map(c => (
+                <SelectItem key={c.value} value={c.value} className="text-sm">{c.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
 
         {/* Effacer tout */}
