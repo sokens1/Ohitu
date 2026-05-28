@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -113,6 +114,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const { can } = useRBAC();
   const canManage = can('elections:manage');
   const isProfessional = election.type?.trim() === 'Élection Professionnelle' || !!(election.enterpriseId || (election as any).enterprise_id);
+  const queryClient = useQueryClient();
 
   const [showAddCenter, setShowAddCenter] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
@@ -123,12 +125,6 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const [selectedCenter, setSelectedCenter] = useState<Center | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [selectedBureau, setSelectedBureau] = useState<any>(null);
-  const [enterprise, setEnterprise] = useState<any>(null);
-  const [loadingEnterprise, setLoadingEnterprise] = useState(false);
-  const [centers, setCenters] = useState<Center[]>([]);
-
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [loading, setLoading] = useState(true);
   
   const centersFileInputRef = useRef<HTMLInputElement>(null);
   const candidatesFileInputRef = useRef<HTMLInputElement>(null);
@@ -173,201 +169,176 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     }
   };
 
-  // Fonction pour charger les centres de vote liés à cette élection
-  const fetchCenters = useCallback(async () => {
-      try {
-        setLoading(true);
-        
-        // Récupérer les centres liés à cette élection via la table de jonction
-        const { data, error } = await supabase
-          .from('election_centers')
-          .select(`
-            voting_centers(
-              id, name, address, contact_name, contact_phone, enterprise_id,
-              total_voters, total_bureaux,
-              voting_bureaux!center_id(id, name, registered_voters, election_id, seats_to_fill, lieu_vote, college)
-            )
-          `)
-          .eq('election_id', election.id);
+  // --- Query functions (standalone, no setState) ---
 
-        if (error) {
-          console.error('Erreur lors du chargement des centres:', error);
-          setCenters([]);
-          setLoading(false);
-          return;
-        }
+  async function fetchCentersData(electionId: string): Promise<Center[]> {
+    const { data, error } = await supabase
+      .from('election_centers')
+      .select(`
+        voting_centers(
+          id, name, address, contact_name, contact_phone, enterprise_id,
+          total_voters, total_bureaux,
+          voting_bureaux!center_id(id, name, registered_voters, election_id, seats_to_fill, lieu_vote, college)
+        )
+      `)
+      .eq('election_id', electionId);
 
-        // Transformer les données Supabase en format Center
-        const transformedCenters: Center[] = data?.map((link: any) => {
-          const center = link.voting_centers as any;
-          if (!center) return null;
-
-          // Filtrer STRICTEMENT les bureaux par l'id de l'élection en cours
-          const bureaux = (Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [])
-            .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
-
-          // Séparer pseudo-entrées collège (nommées "College - X" ou avec champ college non vide) et bureaux physiques
-          const isCollegeEntry = (b: any) =>
-            b.name?.startsWith?.('College -') || (b.college != null && b.college !== '' && b.college !== 'general');
-          const physicalBureaux = bureaux.filter((b: any) => !isCollegeEntry(b));
-          const collegeBureaux  = bureaux.filter((b: any) =>  isCollegeEntry(b));
-          // Physiques prioritaires ; pseudo-entrées en fallback si aucun physique
-          const countableBureaux = physicalBureaux.length > 0 ? physicalBureaux : collegeBureaux;
-
-          // Calculer les électeurs réels à partir des bureaux, ou fallback sur la colonne total_voters
-          const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) =>
-            sum + (bureau.registered_voters || 0), 0);
-          const finalVoters = votersFromBureaux > 0 ? votersFromBureaux : (Number(center.total_voters) || 0);
-
-          // Nombre total de bureaux : uniquement les physiques (fallback pseudo si aucun physique)
-          const totalBureauxCount = countableBureaux.length;
-          const finalBureaux = totalBureauxCount > 0 ? totalBureauxCount : (Number(center.total_bureaux) || 0);
-          
-          // Nombre de sièges (somme des sièges des collèges)
-          const totalSeats = bureaux.reduce((sum: number, b: any) => sum + (Number(b.seats_to_fill) || 0), 0);
-          
-          return {
-            id: center.id.toString(),
-            name: center.name,
-            address: center.address || '',
-            responsable: center.contact_name || '',
-            contact: center.contact_phone || '',
-            bureaux: finalBureaux,
-            voters: finalVoters,
-            seats: totalSeats
-          };
-        }).filter(Boolean) || [];
-
-        setCenters(transformedCenters);
-      } catch (error) {
-        console.error('Erreur lors du chargement des centres:', error);
-      } finally {
-        setLoading(false);
-      }
-    }, [election.id]);
-
-  // Charger les centres de vote liés à cette élection
-  useEffect(() => {
-    fetchCenters();
-  }, [fetchCenters]);
-
-  // Fonction pour charger les candidats liés à cette élection
-  const fetchCandidates = useCallback(async () => {
-      try {
-        if (election.type === 'Élection Professionnelle') {
-          // Tentative avec logo (nécessite ALTER TABLE unions ADD COLUMN logo TEXT)
-          let rawData: any[] | null = null;
-          let hasLogo = true;
-
-          const { data: dataWithLogo, error: errWithLogo } = await supabase
-            .from('union_lists')
-            .select(`id, college, titulaires, suppleants, unions(id, name, acronym, logo)`)
-            .eq('election_id', election.id);
-
-          if (errWithLogo) {
-            // Colonne logo absente ou erreur PostgREST — fallback sans logo
-            hasLogo = false;
-            const { data: dataNoLogo, error: errNoLogo } = await supabase
-              .from('union_lists')
-              .select(`id, college, titulaires, suppleants, unions(id, name, acronym)`)
-              .eq('election_id', election.id);
-            if (errNoLogo) throw errNoLogo;
-            rawData = dataNoLogo;
-          } else {
-            rawData = dataWithLogo;
-          }
-
-          // Récupérer les sièges par collège
-          const { data: electoralColleges } = await supabase
-            .from('electoral_colleges')
-            .select('college_type, seats_to_fill')
-            .eq('election_id', election.id);
-
-          const seatsMap = new Map<string, number>(
-            (electoralColleges || []).map((ec: any) => [String(ec.college_type), Number(ec.seats_to_fill) || 1])
-          );
-
-          const transformed: Candidate[] = (rawData ?? []).map((list: any) => ({
-            id: list.id,
-            name: list.unions?.name || 'Syndicat inconnu',
-            party: list.unions?.acronym || 'Indépendant',
-            isOurCandidate: false,
-            college: list.college,
-            titulaires: list.titulaires || [],
-            suppleants: list.suppleants || [],
-            unionLogo: hasLogo ? (list.unions?.logo || null) : null,
-            unionId: list.unions?.id || null,
-            seatsToFill: seatsMap.get(list.college) || 1,
-          }));
-
-          console.log(`📋 ${transformed.length} listes syndicales chargées pour l'élection`);
-          setCandidates(transformed);
-          return;
-        }
-
-        const { data, error } = await supabase
-          .from('election_candidates')
-          .select(`
-            candidates(id, name, party, photo_url, is_our_candidate),
-            is_our_candidate
-          `)
-          .eq('election_id', election.id);
-
-        if (error) {
-          console.error('Erreur lors du chargement des candidats:', error);
-          setCandidates([]);
-          return;
-        }
-
-        // Transformer les données Supabase en format Candidate
-        const transformedCandidates: Candidate[] = data?.map((link: any) => ({
-          id: String(link.candidates.id),
-          name: link.candidates.name || '',
-          party: link.candidates.party || '',
-          isOurCandidate: link.is_our_candidate || false,
-          photo: link.candidates.photo_url || '/placeholder.svg',
-        })) || [];
-
-        setCandidates(transformedCandidates);
-      } catch (error) {
-        console.error('Erreur lors du chargement des candidats:', error);
-      }
-    }, [election.id, election.type]);
-
-  // Charger les candidats liés à cette élection
-  useEffect(() => {
-    fetchCandidates();
-  }, [fetchCandidates]);
-
-  // Charger les informations de l'entreprise si c'est une élection pro ou liée à une entreprise
-  const fetchEnterprise = useCallback(async () => {
-    const entId = election.enterpriseId || (election as any).enterprise_id;
-
-    if (entId) {
-      setLoadingEnterprise(true);
-      try {
-        const { data, error } = await supabase
-          .from('enterprises')
-          .select('*')
-          .eq('id', entId)
-          .single();
-
-        if (error) throw error;
-        setEnterprise(data);
-      } catch (error) {
-        console.error('Erreur lors du chargement de l\'entreprise:', error);
-      } finally {
-        setLoadingEnterprise(false);
-      }
-    } else {
-      setEnterprise(null);
-      setLoadingEnterprise(false);
+    if (error) {
+      console.error('Erreur lors du chargement des centres:', error);
+      return [];
     }
-  }, [election.enterpriseId, (election as any).enterprise_id]);
 
-  useEffect(() => {
-    fetchEnterprise();
-  }, [fetchEnterprise]);
+    const transformedCenters: Center[] = (data ?? []).map((link: any) => {
+      const center = link.voting_centers as any;
+      if (!center) return null;
+
+      const bureaux = (Array.isArray(center.voting_bureaux) ? center.voting_bureaux : [])
+        .filter((b: any) => b.election_id === electionId || String(b.election_id) === String(electionId));
+
+      const isCollegeEntry = (b: any) =>
+        b.name?.startsWith?.('College -') || (b.college != null && b.college !== '' && b.college !== 'general');
+      const physicalBureaux = bureaux.filter((b: any) => !isCollegeEntry(b));
+      const collegeBureaux  = bureaux.filter((b: any) =>  isCollegeEntry(b));
+      const countableBureaux = physicalBureaux.length > 0 ? physicalBureaux : collegeBureaux;
+
+      const votersFromBureaux = bureaux.reduce((sum: number, bureau: any) =>
+        sum + (bureau.registered_voters || 0), 0);
+      const finalVoters = votersFromBureaux > 0 ? votersFromBureaux : (Number(center.total_voters) || 0);
+
+      const totalBureauxCount = countableBureaux.length;
+      const finalBureaux = totalBureauxCount > 0 ? totalBureauxCount : (Number(center.total_bureaux) || 0);
+
+      const totalSeats = bureaux.reduce((sum: number, b: any) => sum + (Number(b.seats_to_fill) || 0), 0);
+
+      return {
+        id: center.id.toString(),
+        name: center.name,
+        address: center.address || '',
+        responsable: center.contact_name || '',
+        contact: center.contact_phone || '',
+        bureaux: finalBureaux,
+        voters: finalVoters,
+        seats: totalSeats
+      };
+    }).filter(Boolean) as Center[];
+
+    return transformedCenters;
+  }
+
+  async function fetchCandidatesData(electionId: string, electionType: string): Promise<Candidate[]> {
+    if (electionType === 'Élection Professionnelle') {
+      let rawData: any[] | null = null;
+      let hasLogo = true;
+
+      const { data: dataWithLogo, error: errWithLogo } = await supabase
+        .from('union_lists')
+        .select(`id, college, titulaires, suppleants, unions(id, name, acronym, logo)`)
+        .eq('election_id', electionId);
+
+      if (errWithLogo) {
+        hasLogo = false;
+        const { data: dataNoLogo, error: errNoLogo } = await supabase
+          .from('union_lists')
+          .select(`id, college, titulaires, suppleants, unions(id, name, acronym)`)
+          .eq('election_id', electionId);
+        if (errNoLogo) throw errNoLogo;
+        rawData = dataNoLogo;
+      } else {
+        rawData = dataWithLogo;
+      }
+
+      const { data: electoralColleges } = await supabase
+        .from('electoral_colleges')
+        .select('college_type, seats_to_fill')
+        .eq('election_id', electionId);
+
+      const seatsMap = new Map<string, number>(
+        (electoralColleges || []).map((ec: any) => [String(ec.college_type), Number(ec.seats_to_fill) || 1])
+      );
+
+      const transformed: Candidate[] = (rawData ?? []).map((list: any) => ({
+        id: list.id,
+        name: list.unions?.name || 'Syndicat inconnu',
+        party: list.unions?.acronym || 'Indépendant',
+        isOurCandidate: false,
+        college: list.college,
+        titulaires: list.titulaires || [],
+        suppleants: list.suppleants || [],
+        unionLogo: hasLogo ? (list.unions?.logo || null) : null,
+        unionId: list.unions?.id || null,
+        seatsToFill: seatsMap.get(list.college) || 1,
+      }));
+
+      console.log(`📋 ${transformed.length} listes syndicales chargées pour l'élection`);
+      return transformed;
+    }
+
+    const { data, error } = await supabase
+      .from('election_candidates')
+      .select(`
+        candidates(id, name, party, photo_url, is_our_candidate),
+        is_our_candidate
+      `)
+      .eq('election_id', electionId);
+
+    if (error) {
+      console.error('Erreur lors du chargement des candidats:', error);
+      return [];
+    }
+
+    const transformedCandidates: Candidate[] = (data ?? []).map((link: any) => ({
+      id: String(link.candidates.id),
+      name: link.candidates.name || '',
+      party: link.candidates.party || '',
+      isOurCandidate: link.is_our_candidate || false,
+      photo: link.candidates.photo_url || '/placeholder.svg',
+    }));
+
+    return transformedCandidates;
+  }
+
+  async function fetchEnterpriseData(entId: string): Promise<any> {
+    const { data, error } = await supabase
+      .from('enterprises')
+      .select('*')
+      .eq('id', entId)
+      .single();
+
+    if (error) {
+      console.error('Erreur lors du chargement de l\'entreprise:', error);
+      throw error;
+    }
+    return data;
+  }
+
+  // --- useQuery hooks ---
+
+  const entId = election.enterpriseId || (election as any).enterprise_id;
+
+  const { data: centersData, isLoading: centersLoading } = useQuery<Center[]>({
+    queryKey: ['election-centers', election.id],
+    queryFn: () => fetchCentersData(election.id),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: candidatesData } = useQuery<Candidate[]>({
+    queryKey: ['election-candidates', election.id, election.type],
+    queryFn: () => fetchCandidatesData(election.id, election.type),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: enterpriseData, isLoading: loadingEnterprise } = useQuery<any>({
+    queryKey: ['election-enterprise', entId],
+    queryFn: () => fetchEnterpriseData(entId),
+    staleTime: 5 * 60 * 1000,
+    enabled: !!entId,
+  });
+
+  // Derive state-like constants from query data
+  const centers: Center[] = centersData ?? [];
+  const candidates: Candidate[] = candidatesData ?? [];
+  const enterprise = enterpriseData ?? null;
+  const loading = centersLoading;
 
 
   // Mettre à jour les statistiques quand les données changent
@@ -419,13 +390,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
       }
 
       // Recharger les centres depuis la base de données
-      await fetchCenters();
-      
+      await queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] });
+
       // Notifier le parent pour rafraîchir les données
       if (onDataChange) {
         onDataChange();
       }
-      
+
       setShowAddCenter(false);
       toast.success(`${centersData.length} centre${centersData.length > 1 ? 's' : ''} ajouté${centersData.length > 1 ? 's' : ''} et rattaché${centersData.length > 1 ? 's' : ''} à l'élection`);
     } catch (error) {
@@ -504,7 +475,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               console.warn('Import établissements — avertissements:', importResult.errors);
             }
           }
-          fetchCenters();
+          queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] });
           if (onDataChange) onDataChange();
         } catch (err: any) {
           toast.error(err.message || "Erreur de lecture du fichier");
@@ -547,13 +518,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
       }
 
       // Recharger les candidats depuis la base de données
-      await fetchCandidates();
-      
+      await queryClient.invalidateQueries({ queryKey: ['election-candidates', election.id, election.type] });
+
       // Notifier le parent pour rafraîchir les données
       if (onDataChange) {
         onDataChange();
       }
-      
+
       setShowAddCandidate(false);
       toast.success(`${candidatesData.length} candidat${candidatesData.length > 1 ? 's' : ''} ajouté${candidatesData.length > 1 ? 's' : ''} et rattaché${candidatesData.length > 1 ? 's' : ''} à l'élection`);
     } catch (error) {
@@ -628,7 +599,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               console.warn('Import listes — avertissements:', importResult.errors);
             }
           }
-          fetchCandidates();
+          queryClient.invalidateQueries({ queryKey: ['election-candidates', election.id, election.type] });
           if (onDataChange) onDataChange();
         } catch (err: any) {
           toast.error(err.message || "Erreur de lecture du fichier");
@@ -666,13 +637,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             }
 
             // Recharger les centres depuis la base de données
-            await fetchCenters();
-            
+            await queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] });
+
             // Notifier le parent pour rafraîchir les données
             if (onDataChange) {
               onDataChange();
             }
-            
+
             toast.success('Centre retiré de l\'élection');
           } catch (err) {
             console.error('Erreur lors de la suppression du centre:', err);
@@ -717,13 +688,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             }
 
             // Recharger les candidats depuis la base de données
-            await fetchCandidates();
-            
+            await queryClient.invalidateQueries({ queryKey: ['election-candidates', election.id, election.type] });
+
             // Notifier le parent pour rafraîchir les données
             if (onDataChange) {
               onDataChange();
             }
-            
+
             toast.success('Candidat retiré de l\'élection');
           } catch (err) {
             console.error('Erreur lors de la suppression du candidat:', err);
@@ -742,7 +713,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   };
 
   const handleUpdateCenter = (updatedCenter: Center) => {
-    setCenters(centers.map(c => c.id === updatedCenter.id ? updatedCenter : c));
+    queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] });
     setShowEditCenter(false);
     setSelectedCenter(null);
     if (onDataChange) {
@@ -757,18 +728,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   };
 
   const handleUpdateCandidate = (updatedCandidate: Candidate) => {
-    setCandidates(candidates.map(c => {
-      if (c.id === updatedCandidate.id) return updatedCandidate;
-      // Propager le nouveau logo à toutes les cartes du même syndicat
-      if (
-        updatedCandidate.unionLogo &&
-        updatedCandidate.party &&
-        c.party === updatedCandidate.party
-      ) {
-        return { ...c, unionLogo: updatedCandidate.unionLogo };
-      }
-      return c;
-    }));
+    queryClient.invalidateQueries({ queryKey: ['election-candidates', election.id, election.type] });
     setShowEditCandidate(false);
     setSelectedCandidate(null);
     if (onDataChange) {
@@ -782,16 +742,9 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     setShowEditBureau(true);
   };
 
-  const handleUpdateBureau = (updatedBureau: any) => {
-    // Mettre à jour le bureau dans la liste des centres
-    setCenters(centers.map(center => {
-      if (center.id === selectedCenter?.id) {
-        // Ici, vous devriez mettre à jour les bureaux du centre
-        // Pour simplifier, on recharge les centres
-        fetchCenters();
-      }
-      return center;
-    }));
+  const handleUpdateBureau = (_updatedBureau: any) => {
+    // Recharger les centres pour refléter les modifications du bureau
+    queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] });
     setShowEditBureau(false);
     setSelectedBureau(null);
     if (onDataChange) {
@@ -814,7 +767,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         }
 
         toast.success('Bureau supprimé avec succès');
-        fetchCenters(); // Recharger les centres pour mettre à jour les bureaux
+        queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] }); // Recharger les centres pour mettre à jour les bureaux
         
         if (onDataChange) {
           onDataChange();
@@ -902,7 +855,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                 .in('candidate_id', ids);
             }
             setSelectedCandidateIds(new Set());
-            await fetchCandidates();
+            await queryClient.invalidateQueries({ queryKey: ['election-candidates', election.id, election.type] });
             if (onDataChange) onDataChange();
             toast.success('Suppression effectuée');
           } catch (err) {
@@ -950,8 +903,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   variant="ghost" 
                   size="sm"
                   onClick={() => {
-                    fetchCandidates();
-                    fetchCenters();
+                    queryClient.invalidateQueries({ queryKey: ['election-candidates', election.id, election.type] });
+                    queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] });
                     toast.success('Données actualisées');
                   }}
                   className="hover:bg-white/50 transition-all duration-300 rounded-lg px-2"
@@ -1171,7 +1124,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           </span>
                         </div>
                         <div className="flex-1 flex flex-col items-center justify-center relative px-2">
-                          <span className="text-[9px] text-purple-600 font-bold mb-1 bg-purple-100 px-1.5 py-0.5 rounded-full">+7 jours</span>
+                          <span className="text-[9px] text-purple-600 font-bold mb-1 bg-purple-100 px-1.5 py-0.5 rounded-full">+9 jours</span>
                           <div className="w-full h-0.5 bg-dashed bg-purple-300"></div>
                         </div>
                         <div className="flex-1 text-center p-2 bg-white rounded-lg border border-purple-100 shadow-sm z-10">
@@ -1210,7 +1163,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          fetchEnterprise();
+                          queryClient.invalidateQueries({ queryKey: ['election-enterprise', entId] });
                           toast.success('Données entreprise actualisées');
                         }}
                         className="hover:bg-green-50 transition-all duration-300 rounded-lg px-2"
@@ -1258,13 +1211,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           <p className="text-sm font-bold text-gray-900 mt-1">
                             {loadingEnterprise
                               ? 'Chargement...'
-                              : (enterprise?.province_name && enterprise.province_name.trim() && enterprise?.commune_name && enterprise.commune_name.trim()
-                                ? `${enterprise.province_name}, ${enterprise.commune_name}`
-                                : <span className="text-gray-400 italic">Non renseignée</span>)}
+                              : (() => {
+                                  const parts = [enterprise?.province_name?.trim(), enterprise?.commune_name?.trim()].filter(Boolean);
+                                  return parts.length > 0 ? parts.join(', ') : <span className="text-gray-400 italic">Non renseignée</span>;
+                                })()}
                           </p>
                         </div>
                         {!loadingEnterprise && (
-                          enterprise?.hr_contact && enterprise.hr_contact.name?.trim() && enterprise.hr_contact.email?.trim() ? (
+                          enterprise?.hr_contact && enterprise.hr_contact.name?.trim() ? (
                             <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
                               <label className="text-xs font-medium text-blue-600 uppercase tracking-wide">Contact RH</label>
                               <p className="text-sm font-bold text-blue-900 mt-1">{enterprise.hr_contact.name}</p>
@@ -2044,7 +1998,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             center={selectedCenter}
             onClose={() => setSelectedCenter(null)}
             isProfessional={isProfessional}
-            onDataChange={fetchCenters}
+            onDataChange={() => queryClient.invalidateQueries({ queryKey: ['election-centers', election.id] })}
             electionId={election.id}
           />
         )}

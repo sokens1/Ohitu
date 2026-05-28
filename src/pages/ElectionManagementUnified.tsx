@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { useElectionState } from '@/hooks/useElectionState';
@@ -371,240 +372,152 @@ const ElectionManagementUnified = () => {
     }
   }, []);
 
-  // Fonction utilitaire pour rafraîchir les données des élections
-  const refreshElectionsData = useCallback(async () => {
-    try {
-      console.log('🔄 Rafraîchissement des données des élections...');
-      setLoading(true);
-      
-      let query = supabase
-        .from('elections')
-        .select(`
-          *,
-          enterprises (id, name, province_name, commune_name)
-        `);
+  // Fonction de fetch pure pour React Query (sans setLoading/setElections/setError)
+  const fetchElectionsQueryFn = useCallback(async (): Promise<Election[]> => {
+    let query = supabase
+      .from('elections')
+      .select(`*, enterprises (id, name, province_name, commune_name)`);
 
-      // Super-admin : voit toutes les élections
-      // Tous les autres rôles : uniquement les élections qui leur sont assignées
-      if (!isGlobalAdmin) {
-        if (assignedElectionIds.length > 0) {
-          query = assignedElectionIds.length === 1
-            ? query.eq('id', assignedElectionIds[0])
-            : query.in('id', assignedElectionIds);
-        } else if (user) {
-          // Admin sans élection assignée : voit celles qu'il a créées
-          query = query.eq('created_by', user.id);
-        }
+    if (!isGlobalAdmin) {
+      if (assignedElectionIds.length > 0) {
+        query = assignedElectionIds.length === 1
+          ? query.eq('id', assignedElectionIds[0])
+          : query.in('id', assignedElectionIds);
+      } else if (user) {
+        query = query.eq('created_by', user.id);
       }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('❌ Erreur lors de la récupération des élections:', error);
-        throw error;
-      }
-
-      console.log(`📊 ${data?.length || 0} élections récupérées de la base de données`);
-      
-      // Récupérer les compteurs de candidats, centres et bureaux pour chaque élection
-      const electionsWithCounts = await Promise.all(
-        (data || []).map(async (election) => {
-          // Récupérer les candidats liés
-          const { data: candidatesData } = await supabase
-            .from('election_candidates')
-            .select('id')
-            .eq('election_id', election.id);
-
-          // Récupérer les centres liés avec leurs bureaux pour calculer les vrais totaux
-          const { data: centersData } = await supabase
-            .from('election_centers')
-            .select(`
-              id,
-              voting_centers(
-                id,
-                total_voters,
-                total_bureaux,
-                voting_bureaux!center_id(id, name, registered_voters, election_id, college)
-              )
-            `)
-            .eq('election_id', election.id);
-
-          // Calculer le total des bureaux et électeurs en temps réel
-          let totalBureaux = 0;
-          let totalElecteurs = 0;
-          
-          if (centersData && centersData.length > 0) {
-            centersData.forEach(center => {
-              if (center.voting_centers) {
-                const vc = center.voting_centers as any;
-                // Compter les bureaux : soit depuis la liste, soit depuis la colonne total_bureaux
-                const allBureaux = (Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [])
-                  .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
-                // Exclure les pseudo-entrées collège (élections professionnelles)
-                const isCollegeEntry = (b: any) =>
-                  b.name?.startsWith?.('College -') || (b.college != null && b.college !== '' && b.college !== 'general');
-                const physicalBureaux = allBureaux.filter((b: any) => !isCollegeEntry(b));
-                const countableBureaux = physicalBureaux.length > 0 ? physicalBureaux : allBureaux;
-                const bureauxCount = countableBureaux.length > 0 ? countableBureaux.length : (Number(vc.total_bureaux) || 0);
-                totalBureaux += bureauxCount;
-                
-                // Calculer les électeurs : soit depuis les bureaux, soit depuis la colonne total_voters
-                const votersFromBureaux = allBureaux.reduce((sum: number, bureau: any) =>
-                  sum + (Number(bureau.registered_voters) || 0), 0);
-                
-                const votersCount = votersFromBureaux > 0 ? votersFromBureaux : (Number(vc.total_voters) || 0);
-                totalElecteurs += votersCount;
-              }
-            });
-          }
-
-          // Élections pro : effectifs des collèges électoraux en priorité
-          if (election.type === 'Élection Professionnelle') {
-            const { data: collegesData } = await supabase
-              .from('electoral_colleges')
-              .select('total_voters')
-              .eq('election_id', election.id);
-
-            if (collegesData && collegesData.length > 0) {
-              const collegesTotal = collegesData.reduce(
-                (sum, college) => sum + (Number(college.total_voters) || 0),
-                0
-              );
-              if (collegesTotal > 0) {
-                totalElecteurs = collegesTotal;
-              }
-            }
-          }
-
-
-          // Mettre à jour automatiquement la colonne nb_electeurs dans la table elections
-          if (totalElecteurs !== election.nb_electeurs) {
-            try {
-              await supabase
-                .from('elections')
-                .update({ 
-                  nb_electeurs: totalElecteurs,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', election.id);
-              
-              console.log(`Mise à jour automatique nb_electeurs pour ${election.title}: ${totalElecteurs}`);
-            } catch (updateError) {
-              console.error(`Erreur lors de la mise à jour nb_electeurs pour ${election.title}:`, updateError);
-            }
-          }
-
-          return {
-            ...election,
-            candidates_count: candidatesData?.length || 0,
-            centers_count: centersData?.length || 0,
-            voting_bureaux_count: totalBureaux,
-            nb_electeurs: totalElecteurs
-          };
-        })
-      );
-
-      // Recalculer automatiquement le nombre d'électeurs pour toutes les élections
-      // pour s'assurer que la colonne nb_electeurs est synchronisée
-      try {
-        await Promise.all(
-          electionsWithCounts.map(async (election) => {
-            try {
-              await recalculateElectionVoters(election.id);
-            } catch (error) {
-              console.warn(`Erreur lors du recalcul pour l'élection ${election.title}:`, error);
-            }
-          })
-        );
-        console.log('Recalcul automatique effectué pour toutes les élections');
-      } catch (error) {
-        console.warn('Erreur lors du recalcul global des électeurs:', error);
-      }
-
-      // Transformer les données Supabase en format Election unifié
-      const transformedElections: Election[] = electionsWithCounts.map(election => {
-        console.log('Données de localisation pour l\'élection:', election.title, {
-          province_name: election.province_name,
-          commune_name: election.commune_name,
-          arrondissement_name: election.arrondissement_name,
-          province: election.province,
-          commune: election.commune,
-          arrondissement: election.arrondissement
-        });
-        const isPublicVisible = election.is_public_visible !== false;
-        const dbStatus = (election.status || 'À venir') as Election['status'];
-        return {
-          id: String(election.id),
-          title: election.title,
-          type: election.type || 'Législatives',
-          status: dbStatus,
-          hiddenFromPublic: !isPublicVisible,
-          date: new Date(election.election_date || election.created_at),
-          description: election.description || '',
-          location: {
-            province: (election.type === 'Élection Professionnelle')
-              ? (election.enterprises?.province_name || 'Non spécifiée')
-              : (election.province_name || election.province || 'Haut-Ogooué'),
-            commune: (election.type === 'Élection Professionnelle')
-              ? (election.enterprises?.commune_name || 'Non spécifiée')
-              : (election.commune_name || election.commune || 'Moanda'),
-            arrondissement: (election.type === 'Élection Professionnelle')
-              ? 'Multi-établissements'
-              : (election.arrondissement_name || election.arrondissement || '1er Arrondissement'),
-            fullAddress: (election.type === 'Élection Professionnelle')
-              ? (election.enterprises?.name || 'Entreprise')
-              : (election.localisation || 
-                `${election.commune_name || election.commune || 'Moanda'}, ${election.province_name || election.province || 'Haut-Ogooué'}` ||
-                'Moanda, Haut-Ogooué'),
-          },
-          cover_image: election.cover_image_url,
-          enterpriseId: election.enterprise_id,
-          has_second_round: election.has_second_round,
-          second_round_date: election.second_round_date,
-          configuration: {
-            seatsAvailable: election.seats_available || 1,
-            budget: election.budget || 0,
-            voteGoal: election.vote_goal || 0,
-            allowMultipleCandidates: true,
-            requirePhotoValidation: false,
-          },
-          statistics: {
-            totalVoters: election.nb_electeurs || election.registered_voters || 0,
-            totalCandidates: election.candidates_count || 0,
-            totalCenters: election.centers_count || 0,
-            totalBureaux: election.voting_bureaux_count || 0,
-            completedSteps: 0,
-            totalSteps: 5,
-            progressPercentage: 0,
-          },
-          timeline: {
-            created: new Date(election.created_at),
-            configured: election.status === 'À venir' ? new Date(election.created_at) : null,
-            started: election.status === 'En cours' ? new Date(election.election_date || election.created_at) : null,
-            ended: election.status === 'Terminée' ? new Date(election.election_date || election.created_at) : null,
-            published: null,
-          },
-          createdAt: new Date(election.created_at),
-          updatedAt: new Date(election.updated_at),
-          createdBy: election.created_by || 'system',
-        };
-      });
-
-      console.log('✅ Données transformées avec succès:', transformedElections.length);
-      setElections(transformedElections);
-    } catch (err) {
-      console.error('Erreur lors du rafraîchissement:', err);
-      setError('Erreur lors du rafraîchissement des données');
-    } finally {
-      setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setLoading, setError, setElections, recalculateElectionVoters, user, isGlobalAdmin, JSON.stringify(assignedElectionIds)]);
 
-  // Charger les élections depuis Supabase
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const electionsWithCounts = await Promise.all(
+      (data || []).map(async (election) => {
+        const [{ data: candidatesData }, { data: centersData }] = await Promise.all([
+          supabase.from('election_candidates').select('id').eq('election_id', election.id),
+          supabase.from('election_centers').select(`id, voting_centers(id, total_voters, total_bureaux, voting_bureaux!center_id(id, name, registered_voters, election_id, college))`).eq('election_id', election.id),
+        ]);
+
+        let totalBureaux = 0;
+        let totalElecteurs = 0;
+
+        if (centersData && centersData.length > 0) {
+          centersData.forEach(center => {
+            if (center.voting_centers) {
+              const vc = center.voting_centers as any;
+              const allBureaux = (Array.isArray(vc.voting_bureaux) ? vc.voting_bureaux : [])
+                .filter((b: any) => b.election_id === election.id || String(b.election_id) === String(election.id));
+              const isCollegeEntry = (b: any) =>
+                b.name?.startsWith?.('College -') || (b.college != null && b.college !== '' && b.college !== 'general');
+              const physicalBureaux = allBureaux.filter((b: any) => !isCollegeEntry(b));
+              const countableBureaux = physicalBureaux.length > 0 ? physicalBureaux : allBureaux;
+              const bureauxCount = countableBureaux.length > 0 ? countableBureaux.length : (Number(vc.total_bureaux) || 0);
+              totalBureaux += bureauxCount;
+              const votersFromBureaux = allBureaux.reduce((sum: number, bureau: any) => sum + (Number(bureau.registered_voters) || 0), 0);
+              totalElecteurs += votersFromBureaux > 0 ? votersFromBureaux : (Number(vc.total_voters) || 0);
+            }
+          });
+        }
+
+        if (election.type === 'Élection Professionnelle') {
+          const { data: collegesData } = await supabase
+            .from('electoral_colleges').select('total_voters').eq('election_id', election.id);
+          if (collegesData && collegesData.length > 0) {
+            const collegesTotal = collegesData.reduce((sum, c) => sum + (Number(c.total_voters) || 0), 0);
+            if (collegesTotal > 0) totalElecteurs = collegesTotal;
+          }
+        }
+
+        // Sync nb_electeurs silently (fire-and-forget)
+        if (totalElecteurs !== election.nb_electeurs) {
+          supabase.from('elections').update({ nb_electeurs: totalElecteurs, updated_at: new Date().toISOString() }).eq('id', election.id).then(() => {});
+        }
+
+        return { ...election, candidates_count: candidatesData?.length || 0, centers_count: centersData?.length || 0, voting_bureaux_count: totalBureaux, nb_electeurs: totalElecteurs };
+      })
+    );
+
+    const transformedElections: Election[] = electionsWithCounts.map(election => {
+      const isPublicVisible = election.is_public_visible !== false;
+      const dbStatus = (election.status || 'À venir') as Election['status'];
+      return {
+        id: String(election.id),
+        title: election.title,
+        type: election.type || 'Législatives',
+        status: dbStatus,
+        hiddenFromPublic: !isPublicVisible,
+        date: new Date(election.election_date || election.created_at),
+        description: election.description || '',
+        location: {
+          province: (election.type === 'Élection Professionnelle') ? (election.enterprises?.province_name || 'Non spécifiée') : (election.province_name || election.province || 'Haut-Ogooué'),
+          commune: (election.type === 'Élection Professionnelle') ? (election.enterprises?.commune_name || 'Non spécifiée') : (election.commune_name || election.commune || 'Moanda'),
+          arrondissement: (election.type === 'Élection Professionnelle') ? 'Multi-établissements' : (election.arrondissement_name || election.arrondissement || '1er Arrondissement'),
+          fullAddress: (election.type === 'Élection Professionnelle') ? (election.enterprises?.name || 'Entreprise') : (election.localisation || `${election.commune_name || election.commune || 'Moanda'}, ${election.province_name || election.province || 'Haut-Ogooué'}` || 'Moanda, Haut-Ogooué'),
+        },
+        cover_image: election.cover_image_url,
+        enterpriseId: election.enterprise_id,
+        has_second_round: election.has_second_round,
+        second_round_date: election.second_round_date,
+        configuration: {
+          seatsAvailable: election.seats_available || 1,
+          budget: election.budget || 0,
+          voteGoal: election.vote_goal || 0,
+          allowMultipleCandidates: true,
+          requirePhotoValidation: false,
+        },
+        statistics: {
+          totalVoters: election.nb_electeurs || election.registered_voters || 0,
+          totalCandidates: election.candidates_count || 0,
+          totalCenters: election.centers_count || 0,
+          totalBureaux: election.voting_bureaux_count || 0,
+          completedSteps: 0,
+          totalSteps: 5,
+          progressPercentage: 0,
+        },
+        timeline: {
+          created: new Date(election.created_at),
+          configured: election.status === 'À venir' ? new Date(election.created_at) : null,
+          started: election.status === 'En cours' ? new Date(election.election_date || election.created_at) : null,
+          ended: election.status === 'Terminée' ? new Date(election.election_date || election.created_at) : null,
+          published: null,
+        },
+        createdAt: new Date(election.created_at),
+        updatedAt: new Date(election.updated_at),
+        createdBy: election.created_by || 'system',
+      };
+    });
+
+    return transformedElections;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGlobalAdmin, user, assignedElectionIds]);
+
+  // React Query : cache des élections
+  const queryClient = useQueryClient();
+
+  const electionQueryKey = useMemo(
+    () => ['elections', isGlobalAdmin, user?.id ?? '', assignedElectionIds.join(',')],
+    [isGlobalAdmin, user?.id, assignedElectionIds]
+  );
+
+  const { data: electionsQueryData, isLoading: electionsQueryLoading } = useQuery({
+    queryKey: electionQueryKey,
+    queryFn: fetchElectionsQueryFn,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
+    enabled: user !== null,
+  });
+
+  // Sync query data vers l'état existant
   useEffect(() => {
-    refreshElectionsData();
-  }, [refreshElectionsData]);
+    if (electionsQueryData) {
+      setElections(electionsQueryData);
+    }
+  }, [electionsQueryData, setElections]);
+
+  // refreshElectionsData : invalide le cache React Query (les mutations l'appellent)
+  const refreshElectionsData = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['elections'] });
+  }, [queryClient]);
 
 
   // Mettre à jour les filtres dans le hook
@@ -1461,13 +1374,18 @@ const ElectionManagementUnified = () => {
         .insert({
           name: electionData.enterpriseName,
           sector: electionData.enterpriseSector,
-          total_employees: parseInt(electionData.totalEmployees),
+          total_employees: parseInt(electionData.totalEmployees) || 0,
           employees_by_category: {
-            cadres: parseInt(electionData.employeesCadres),
-            employes: parseInt(electionData.employeesEmployes),
-            ouvriers: parseInt(electionData.employeesOuvriers)
+            cadres: parseInt(electionData.employeesCadres) || 0,
+            employes: parseInt(electionData.employeesEmployes) || 0,
+            ouvriers: parseInt(electionData.employeesOuvriers) || 0,
           },
-          administrative_unit: electionData.administrativeUnit
+          administrative_unit: electionData.administrativeUnit || null,
+          province_name: electionData.provinceName || null,
+          commune_name: electionData.communeName || null,
+          hr_contact: (electionData.hrContactName || electionData.hrContactPhone || electionData.hrContactEmail)
+            ? { name: electionData.hrContactName || '', phone: electionData.hrContactPhone || '', email: electionData.hrContactEmail || '' }
+            : null,
         })
         .select()
         .single();
@@ -1620,7 +1538,7 @@ const ElectionManagementUnified = () => {
     );
   }
 
-  if (loading) {
+  if (electionsQueryLoading && !electionsQueryData) {
     return (
       <Layout>
         <div className="space-y-6 pb-8">
