@@ -31,9 +31,12 @@ CREATE POLICY "validators and admins can read opinions"
   USING (true);
 
 
--- 2. Centres assignés au validateur (dans son élection)
+-- 2. Centres + collèges assignés au validateur
+--    Structure : { "center_uuid": ["cadres","employes"], ... }
+--    Tableau vide pour un centre = tous les collèges de ce centre
 ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS assigned_center_ids UUID[] DEFAULT '{}';
+  ADD COLUMN IF NOT EXISTS assigned_center_ids UUID[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS assigned_center_colleges JSONB DEFAULT '{}';
 
 
 -- 3. Colonne pour le commentaire de rejet (renvoi en saisie)

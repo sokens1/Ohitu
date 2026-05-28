@@ -4,11 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { 
-  ChevronDown, 
-  ChevronRight, 
-  CheckCircle, 
-  Clock, 
+import {
+  ChevronDown,
+  ChevronRight,
+  CheckCircle,
+  Clock,
   AlertTriangle,
   User,
   MapPin,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import PVEntrySection from './PVEntrySection';
 import { toast } from 'sonner';
+import type { ResultsFilters } from './ResultsFilterBar';
 
 interface DataEntrySectionProps {
   stats: {
@@ -31,10 +32,11 @@ interface DataEntrySectionProps {
   };
   selectedElection: string;
   readOnly?: boolean;
+  filters?: ResultsFilters;
   refreshKey?: number;
 }
 
-const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false, refreshKey }) => {
+const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false, filters, refreshKey }) => {
   const [expandedCenters, setExpandedCenters] = useState<string[]>([]);
   const [showAnomaliesOnly, setShowAnomaliesOnly] = useState(false);
   const [showPVEntry, setShowPVEntry] = useState(false);
@@ -260,7 +262,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
       case 'entered':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Saisi</Badge>;
       case 'anomaly':
-        return <Badge className="bg-red-100 text-red-800 border-red-200">🚩 Anomalie</Badge>;
+        return <Badge className="bg-red-100 text-red-800 border-red-200">🚩 Rejeté</Badge>;
       case 'pending':
         return <Badge className="bg-gray-100 text-gray-800 border-gray-200">En attente de saisie</Badge>;
       default:
@@ -287,11 +289,26 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     );
   };
 
-  const filteredCenters = showAnomaliesOnly
-    ? votingCenters.filter(center =>
-        center.bureaux.some(bureau => bureau.status === 'anomaly')
-      )
-    : votingCenters;
+  const filteredCenters = (() => {
+    let result: typeof votingCenters = showAnomaliesOnly
+      ? votingCenters.filter(center => center.bureaux.some((b: any) => b.status === 'anomaly'))
+      : [...votingCenters];
+
+    if (filters?.centerId) {
+      result = result.filter(c => c.id === filters.centerId);
+    }
+    if (filters?.collegeType) {
+      result = result.filter(c => c.bureaux.some((b: any) => b.college_type === filters.collegeType));
+    }
+    if (filters?.search?.trim()) {
+      const q = filters.search.trim().toLowerCase();
+      result = result.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.bureaux.some((b: any) => b.name.toLowerCase().includes(q))
+      );
+    }
+    return result;
+  })();
 
   const handleCloseBureau = async (bureau: any, center: any) => {
     if (!window.confirm(`Clôturer le bureau "${bureau.name}" avec 0 votant ?`)) return;

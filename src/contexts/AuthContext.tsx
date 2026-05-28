@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import auditService from '@/services/auditService';
 
-export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau';
+export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau' | 'president-etablissement';
 
 export interface User {
   id: string;
@@ -14,6 +14,8 @@ export interface User {
   assigned_election_id?: string | null;
   assigned_election_ids?: string[] | null;
   assigned_center_ids?: string[] | null;
+  /** map centerId → college_types[] (vide = tous les collèges du centre) */
+  assigned_center_colleges?: Record<string, string[]> | null;
   created_by?: string | null;
 }
 
@@ -59,6 +61,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               assigned_election_id: userData.assigned_election_id,
               assigned_election_ids: userData.assigned_election_ids ?? null,
               assigned_center_ids: userData.assigned_center_ids ?? null,
+              assigned_center_colleges: userData.assigned_center_colleges ?? null,
               created_by: userData.created_by
             };
             setUser(u);
@@ -128,6 +131,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           role: userData.role,
           isActive: userData.is_active,
           assigned_election_id: userData.assigned_election_id,
+          assigned_election_ids: userData.assigned_election_ids ?? null,
+          assigned_center_ids: userData.assigned_center_ids ?? null,
+          assigned_center_colleges: userData.assigned_center_colleges ?? null,
           created_by: userData.created_by
         };
 

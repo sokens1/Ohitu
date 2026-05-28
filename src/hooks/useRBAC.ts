@@ -15,6 +15,10 @@ export type Permission =
   | 'results:validate'
   | 'results:publish'
   | 'results:observe'
+  | 'results:documents'   // voir l'onglet Documents
+  | 'documents:upload'    // joindre des documents (président d'établissement)
+  | 'documents:review'    // donner un avis sur les documents (admin+)
+  | 'documents:download'  // consulter et télécharger les documents (agent-saisie+)
   | 'manage:users:all'
   | 'manage:users:own';
 
@@ -24,6 +28,7 @@ const PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:users', 'view:audit', 'view:results',
     'elections:manage',
     'results:entry', 'results:submit', 'results:validate', 'results:publish', 'results:observe',
+    'results:documents', 'documents:review', 'documents:download',
     'manage:users:all',
   ],
   'admin': [
@@ -31,6 +36,7 @@ const PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:users', 'view:results',
     'elections:manage',
     'results:entry', 'results:submit', 'results:validate', 'results:publish', 'results:observe',
+    'results:documents', 'documents:review', 'documents:download',
     'manage:users:own',
   ],
   // ── Rôles opérationnels : vue élection + résultats uniquement ──────────────
@@ -41,6 +47,7 @@ const PERMISSIONS: Record<UserRole, Permission[]> = {
   'agent-saisie': [
     'view:dashboard', 'view:elections', 'view:results',
     'results:entry', 'results:submit',
+    'results:documents', 'documents:download',
   ],
   'observateur': [
     'view:dashboard', 'view:elections', 'view:results',
@@ -53,9 +60,14 @@ const PERMISSIONS: Record<UserRole, Permission[]> = {
     // PAS results:submit → lecture seule sur l'onglet saisie
     'results:validate',
   ],
+  'president-etablissement': [
+    'view:dashboard', 'view:elections', 'view:results',
+    'results:observe',
+    'results:documents', 'documents:upload', 'documents:download',
+  ],
 };
 
-const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau'];
+const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau', 'president-etablissement'];
 
 export function useRBAC() {
   const { user } = useAuth();

@@ -6,10 +6,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, FileCheck, Upload, Lock } from 'lucide-react';
+import { FileText, FileCheck, Upload, Lock, Folder } from 'lucide-react';
 import DataEntrySection from '@/components/results/DataEntrySection';
 import PVValidationSection from '@/components/results/PVValidationSection';
 import PublishSection from '@/components/results/PublishSection';
+import DocumentsSection from '@/components/results/DocumentsSection';
+import ResultsFilterBar, { ResultsFilters, EMPTY_FILTERS } from '@/components/results/ResultsFilterBar';
 import { useRBAC } from '@/hooks/useRBAC';
 import { getElectionElectorsTotal } from '@/utils/electionCalculations';
 
@@ -28,9 +30,10 @@ interface GlobalStats {
 
 // ─── Définition des onglets disponibles par permission ───────────────────────
 const TAB_DEFS = [
-  { value: 'entry',      icon: FileText,  label: 'Saisir les résultats',   labelShort: 'Saisir',  permission: 'results:entry'    as const },
-  { value: 'validation', icon: FileCheck, label: 'Valider les résultats',  labelShort: 'Valider', permission: 'results:validate' as const },
-  { value: 'publish',    icon: Upload,    label: 'Publier les résultats',   labelShort: 'Publier', permission: 'results:publish'  as const },
+  { value: 'entry',      icon: FileText,  label: 'Saisir les résultats',   labelShort: 'Saisir',    permission: 'results:entry'      as const },
+  { value: 'validation', icon: FileCheck, label: 'Valider les résultats',  labelShort: 'Valider',   permission: 'results:validate'   as const },
+  { value: 'publish',    icon: Upload,    label: 'Publier les résultats',   labelShort: 'Publier',   permission: 'results:publish'    as const },
+  { value: 'documents',  icon: Folder,    label: 'Documents',               labelShort: 'Documents', permission: 'results:documents'  as const },
 ];
 
 // ─── Standalone fetch functions ───────────────────────────────────────────────
@@ -177,6 +180,7 @@ const Results = () => {
     queryFn: () => fetchElectionsFn({ isGlobalAdmin, assignedElectionIds }),
     staleTime: 5 * 60 * 1000,
   });
+  const [filters, setFilters] = useState<ResultsFilters>(EMPTY_FILTERS);
 
   // Derive loading state: only show spinner when first load (no cached data yet)
   const loading = electionsQueryLoading && !electionsQueryData;
@@ -217,6 +221,7 @@ const Results = () => {
     if (isGlobalAdmin && selectedElection) {
       localStorage.setItem('results_selected_election', selectedElection);
     }
+    setFilters(EMPTY_FILTERS); // Réinitialiser les filtres à chaque changement d'élection
   }, [selectedElection, isGlobalAdmin]);
 
   useEffect(() => {
@@ -304,6 +309,13 @@ const Results = () => {
           </Card>
         </div>
 
+        {/* Barre de filtres partagée */}
+        <ResultsFilterBar
+          selectedElection={selectedElection}
+          filters={filters}
+          onChange={setFilters}
+        />
+
         {/* Onglets — seuls ceux autorisés sont affichés */}
         <Card className="gov-card">
           <CardContent className="p-0">
@@ -334,15 +346,19 @@ const Results = () => {
 
               <div className="p-3 sm:p-4 lg:p-6">
                 <TabsContent value="entry" className="space-y-6 mt-0">
-                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} />
+                  <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} filters={filters} />
                 </TabsContent>
 
                 <TabsContent value="validation" className="space-y-6 mt-0">
-                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} />
+                  <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} filters={filters} />
                 </TabsContent>
 
                 <TabsContent value="publish" className="space-y-6 mt-0">
-                  <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} />
+                  <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} filters={filters} />
+                </TabsContent>
+
+                <TabsContent value="documents" className="space-y-6 mt-0">
+                  <DocumentsSection selectedElection={selectedElection} filters={filters} />
                 </TabsContent>
               </div>
             </Tabs>
