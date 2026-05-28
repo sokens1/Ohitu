@@ -21,6 +21,7 @@ import {
 } from '@/utils/electionCalculations';
 import { isElectionPublishedForPublic } from '@/utils/electionVisibility';
 import SimulationResultsSection from '@/components/results/SimulationResultsSection';
+import FloatingChatbot from '@/components/FloatingChatbot';
 
 type CollegeDetailRow = {
   collegeName: string;
@@ -279,12 +280,12 @@ const CandidateCard: React.FC<{
 
           {/* Barre de progression moderne */}
           <div className="mb-3 sm:mb-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
-                {candidate.seats !== undefined ? `${candidate.seats} sièges` : candidate.total_votes.toLocaleString()}
+            <div className="flex flex-wrap justify-between items-baseline gap-x-2 gap-y-1 mb-2">
+              <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 whitespace-nowrap">
+                {candidate.seats !== undefined ? `${candidate.seats} siège${candidate.seats !== 1 ? 's' : ''}` : candidate.total_votes.toLocaleString()}
               </span>
-              <span className="text-sm sm:text-base lg:text-lg font-semibold text-blue-600">
-                {candidate.seats !== undefined ? `(${candidate.total_votes.toLocaleString()} voix - ${percentage.toFixed(2)}%)` : `${percentage.toFixed(2)}%`}
+              <span className="text-sm sm:text-base font-semibold text-blue-600 whitespace-nowrap">
+                {candidate.seats !== undefined ? `(${candidate.total_votes.toLocaleString()} voix · ${percentage.toFixed(2)}%)` : `${percentage.toFixed(2)}%`}
               </span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2 sm:h-3 overflow-hidden">
@@ -325,7 +326,7 @@ const ElectionResults: React.FC = () => {
   const [results, setResults] = useState<ElectionResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'center' | 'college'>('center');
+  const [viewMode, setViewMode] = useState<'center' | 'bureau' | 'college'>('center');
   const [centerRows, setCenterRows] = useState<any[]>([]);
   const [bureauRows, setBureauRows] = useState<any[]>([]);
   const [collegeDetailRows, setCollegeDetailRows] = useState<CollegeDetailRow[]>([]);
@@ -352,6 +353,11 @@ const ElectionResults: React.FC = () => {
   const [bureauxAvecResultats, setBureauxAvecResultats] = useState<number>(0);
   const [mobileRetryCount, setMobileRetryCount] = useState<number>(0);
   const [isDataEstimated, setIsDataEstimated] = useState<boolean>(false);
+  // Couverture des sièges (élections professionnelles)
+  const [totalSeats, setTotalSeats] = useState<number>(0);
+  const [publishedSeats, setPublishedSeats] = useState<number>(0);
+  // Modal politique de confidentialité
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   
   // État pour stocker les IDs des bureaux avec PV publiés
   const [publishedBureauIds, setPublishedBureauIds] = useState<Set<string>>(new Set());
@@ -920,8 +926,7 @@ const ElectionResults: React.FC = () => {
 
       let filteredSummaryData = Array.from(candidateVotesMap.values());
 
-      // Calculer les sièges par collège (Art. 17 quotient + Art. 18 plus forte moyenne)
-      // Même méthode que l'admin (PublishSection) : application par collège puis sommation
+      // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
       if (isProfessional) {
         const { data: ecRows } = await supabase
           .from('electoral_colleges')
@@ -929,11 +934,16 @@ const ElectionResults: React.FC = () => {
           .eq('election_id', id);
         electoralCollegesForPro = ecRows || [];
 
-        const seatsPerCollegeType = new Map<string, number>(
-          electoralCollegesForPro.map((ec: any) => [ec.college_type, Number(ec.seats_to_fill) || 0])
-        );
+        // seats_to_fill = total de l'élection pour ce collège
+        // Prendre la première valeur par college_type (évite l'accumulation si plusieurs lignes)
+        const seatsPerCollegeType = new Map<string, number>();
+        electoralCollegesForPro.forEach((ec: any) => {
+          if (ec.college_type && !seatsPerCollegeType.has(ec.college_type)) {
+            seatsPerCollegeType.set(ec.college_type, Number(ec.seats_to_fill) || 0);
+          }
+        });
 
-        // Agréger votes par (college_type, syndicat) via le college_type du PV
+        // Grouper votes par college_type (global — tous établissements confondus)
         const votesPerCollegeSyndicat = new Map<string, Map<string, number>>();
         (candidateResultsData || []).forEach((cr: any) => {
           const colType = pvToCollegeType.get(String(cr.pv_id)) || '';
@@ -947,7 +957,7 @@ const ElectionResults: React.FC = () => {
         // Réinitialiser les sièges
         filteredSummaryData.forEach(c => { c.seats = 0; });
 
-        // --- ARTICLE 17 (quotient) + ARTICLE 18 (plus forte moyenne) par collège ---
+        // Algorithme par collège : quotient (Art. 17) + plus forte moyenne (Art. 18)
         for (const [colType, syndicatMap] of votesPerCollegeSyndicat) {
           const totalCollegeSeats = seatsPerCollegeType.get(colType) || 0;
           if (totalCollegeSeats <= 0) continue;
@@ -976,7 +986,7 @@ const ElectionResults: React.FC = () => {
             i++;
           }
 
-          // Cumuler les sièges par syndicat toutes collèges confondus
+          // Cumuler les sièges par syndicat (tous collèges confondus)
           for (const [syndicat, seats] of colSeats) {
             const entry = filteredSummaryData.find(c => c.candidate_id === syndicat);
             if (entry) entry.seats = (entry.seats || 0) + seats;
@@ -1077,6 +1087,17 @@ const ElectionResults: React.FC = () => {
               });
             });
         }
+      }
+
+      // Sièges totaux / publiés pour élections professionnelles
+      if (isProfessional) {
+        const tSeats = electoralCollegesForPro.reduce((s: number, ec: any) => s + (Number(ec.seats_to_fill) || 0), 0);
+        const pSeats = finalCandidates.reduce((s, c) => s + (c.seats || 0), 0);
+        setTotalSeats(tSeats);
+        setPublishedSeats(pSeats);
+      } else {
+        setTotalSeats(0);
+        setPublishedSeats(0);
       }
 
       // Utiliser les données filtrées (uniquement bureaux publiés)
@@ -1979,12 +2000,35 @@ const ElectionResults: React.FC = () => {
           </section>
         )}
 
-        {/* Section Couverture des bureaux - Version dynamique */}
+        {/* Section Couverture */}
         {showPublicResults && (
         <section className="py-6 sm:py-8 lg:py-12 bg-gray-50">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center">
-              {(() => {
+              {/* Carte sièges pour élections pro */}
+              {isProResults && totalSeats > 0 ? (
+                <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
+                  <div className="text-center">
+                    <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-2">
+                      Couverture des sièges
+                    </h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mb-4">
+                      Taux de couverture des sièges à pourvoir
+                    </p>
+                    <div className={`${publishedSeats >= totalSeats ? 'bg-green-100' : 'bg-orange-100'} rounded-lg p-3 sm:p-4 mb-3`}>
+                      <div className={`text-xl sm:text-2xl font-bold ${publishedSeats >= totalSeats ? 'text-green-800' : 'text-orange-800'} mb-1`}>
+                        {totalSeats > 0 ? Math.round((publishedSeats / totalSeats) * 100) : 0}%
+                      </div>
+                      <div className="text-xs sm:text-sm text-gray-600">
+                        {publishedSeats} sur {totalSeats} sièges
+                      </div>
+                    </div>
+                    <div className="text-xs sm:text-sm text-gray-600">
+                      {publishedSeats >= totalSeats ? "Tous les sièges ont été attribués" : "Sièges attribués / Total sièges"}
+                    </div>
+                  </div>
+                </div>
+              ) : (() => {
                 // Calculer le taux de couverture basé sur les données réelles
                 // Utiliser totalBureaux si disponible, sinon utiliser un fallback intelligent
                 let totalBureauxCount = totalBureaux;
@@ -3200,11 +3244,43 @@ const ElectionResults: React.FC = () => {
               </div >
             </div >
 
-            {/* Copyright */}
-            < div className="mt-6 sm:mt-8 lg:mt-12 text-center font-semibold text-[10px] sm:text-xs lg:text-sm whitespace-nowrap" >© {new Date(results.last_updated).getFullYear()} o'Hitu. Tous droits réservés.</div>
-          </div >
-        </footer >
-      </div >
+            {/* Copyright + liens légaux */}
+            <div className="mt-6 sm:mt-8 lg:mt-12 text-center space-y-1.5">
+              <div className="font-semibold text-[10px] sm:text-xs lg:text-sm">
+                © {new Date(results.last_updated).getFullYear()} o'Hitu. Tous droits réservés.
+              </div>
+              <div className="flex items-center justify-center gap-3 text-[10px] sm:text-xs text-white/70">
+                <button
+                  onClick={() => setPrivacyOpen(true)}
+                  className="hover:text-white underline underline-offset-2 transition-colors"
+                >
+                  Politique de confidentialité
+                </button>
+              </div>
+            </div>
+          </div>
+        </footer>
+      </div>
+
+      {/* Modal Politique de confidentialité */}
+      <Dialog open={privacyOpen} onOpenChange={setPrivacyOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              Politique de confidentialité
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-6 text-center text-gray-500 text-sm">
+            <p className="font-medium text-gray-700 mb-2">Contenu à venir</p>
+            <p className="text-xs text-gray-400">
+              La politique de confidentialité de la plateforme o'Hitu sera publiée prochainement.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Chatbot flottant */}
+      <FloatingChatbot />
     </>
   );
 };
