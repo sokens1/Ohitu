@@ -15,11 +15,11 @@ import {
   TrendingUp,
   Users,
   Flag,
-  Plus
+  Plus,
+  Search,
 } from 'lucide-react';
 import PVEntrySection from './PVEntrySection';
 import { toast } from 'sonner';
-import type { ResultsFilters } from './ResultsFilterBar';
 
 // Retry automatique sur erreurs réseau (ERR_CONNECTION_RESET, ERR_HTTP2_PING_FAILED)
 async function sbQuery<T>(
@@ -54,13 +54,15 @@ interface DataEntrySectionProps {
   };
   selectedElection: string;
   readOnly?: boolean;
-  filters?: ResultsFilters;
   refreshKey?: number;
 }
 
-const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false, filters, refreshKey }) => {
+const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false, refreshKey }) => {
   const [expandedCenters, setExpandedCenters] = useState<string[]>([]);
   const [showAnomaliesOnly, setShowAnomaliesOnly] = useState(false);
+  const [searchFilter, setSearchFilter] = useState('');
+  const [centerFilter, setCenterFilter] = useState('');
+  const [filterCenters, setFilterCenters] = useState<{ id: string; name: string }[]>([]);
   const [showPVEntry, setShowPVEntry] = useState(false);
   const [pvPrefill, setPvPrefill] = useState<{ centreId: string; bureauId: string; collegeType: string | null } | null>(null);
   const [votingCenters, setVotingCenters] = useState<any[]>([]);
@@ -227,6 +229,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         }) || [];
 
         setVotingCenters(transformedCenters);
+        setFilterCenters((data || []).map((c: any) => ({ id: String(c.id), name: c.name })));
       } catch (error) {
         console.error('Erreur lors du chargement des centres de vote:', error);
       } finally {
@@ -318,15 +321,9 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     let result: typeof votingCenters = showAnomaliesOnly
       ? votingCenters.filter(center => center.bureaux.some((b: any) => b.status === 'anomaly'))
       : [...votingCenters];
-
-    if (filters?.centerId) {
-      result = result.filter(c => c.id === filters.centerId);
-    }
-    if (filters?.collegeType) {
-      result = result.filter(c => c.bureaux.some((b: any) => b.college_type === filters.collegeType));
-    }
-    if (filters?.search?.trim()) {
-      const q = filters.search.trim().toLowerCase();
+    if (centerFilter) result = result.filter(c => c.id === centerFilter);
+    if (searchFilter.trim()) {
+      const q = searchFilter.trim().toLowerCase();
       result = result.filter(c =>
         c.name.toLowerCase().includes(q) ||
         c.bureaux.some((b: any) => b.name.toLowerCase().includes(q))
@@ -394,7 +391,34 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         </div>
       )}
 
-      {/* KPIs retirés sur demande */}
+      {/* Barre de filtre locale */}
+      {filterCenters.length > 1 && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          <div className="relative flex-1 min-w-48">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Rechercher un bureau, un établissement…"
+              value={searchFilter}
+              onChange={e => setSearchFilter(e.target.value)}
+              className="w-full pl-9 pr-3 h-9 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-400 outline-none transition-colors"
+            />
+          </div>
+          <select
+            value={centerFilter}
+            onChange={e => setCenterFilter(e.target.value)}
+            className="h-9 text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 focus:border-blue-400 outline-none"
+          >
+            <option value="">Tous les établissements</option>
+            {filterCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {(searchFilter || centerFilter) && (
+            <button onClick={() => { setSearchFilter(''); setCenterFilter(''); }} className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">
+              Effacer
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Vue hiérarchique */}
       <Card className="gov-card">

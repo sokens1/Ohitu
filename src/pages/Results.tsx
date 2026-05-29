@@ -11,7 +11,6 @@ import DataEntrySection from '@/components/results/DataEntrySection';
 import PVValidationSection from '@/components/results/PVValidationSection';
 import PublishSection from '@/components/results/PublishSection';
 import DocumentsSection from '@/components/results/DocumentsSection';
-import ResultsFilterBar, { ResultsFilters, EMPTY_FILTERS } from '@/components/results/ResultsFilterBar';
 import { useRBAC } from '@/hooks/useRBAC';
 import { getElectionElectorsTotal } from '@/utils/electionCalculations';
 
@@ -194,8 +193,6 @@ const Results = () => {
     queryFn: () => fetchElectionsFn({ isGlobalAdmin, assignedElectionIds }),
     staleTime: 5 * 60 * 1000,
   });
-  const [filters, setFilters] = useState<ResultsFilters>(EMPTY_FILTERS);
-
   // Derive loading state: only show spinner when first load (no cached data yet)
   const loading = electionsQueryLoading && !electionsQueryData;
 
@@ -235,7 +232,6 @@ const Results = () => {
     if (isGlobalAdmin && selectedElection) {
       localStorage.setItem('results_selected_election', selectedElection);
     }
-    setFilters(EMPTY_FILTERS); // Réinitialiser les filtres à chaque changement d'élection
   }, [selectedElection, isGlobalAdmin]);
 
   useEffect(() => {
@@ -323,13 +319,6 @@ const Results = () => {
           </Card>
         </div>
 
-        {/* Barre de filtres partagée */}
-        <ResultsFilterBar
-          selectedElection={selectedElection}
-          filters={filters}
-          onChange={setFilters}
-        />
-
         {/* Onglets — seuls ceux autorisés sont affichés */}
         <Card className="gov-card">
           <CardContent className="p-0">
@@ -363,25 +352,25 @@ const Results = () => {
                 {/* hidden : masque le contenu inactif via l'attribut HTML hidden (display:none) */}
                 <TabsContent value="documents" forceMount hidden={activeTab !== 'documents'} className="space-y-6 mt-0">
                   {mountedTabs.has('documents') && (
-                    <DocumentsSection selectedElection={selectedElection} filters={filters} />
+                    <DocumentsSection selectedElection={selectedElection} />
                   )}
                 </TabsContent>
 
                 <TabsContent value="entry" forceMount hidden={activeTab !== 'entry'} className="space-y-6 mt-0">
                   {mountedTabs.has('entry') && (
-                    <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} filters={filters} />
+                    <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} />
                   )}
                 </TabsContent>
 
                 <TabsContent value="validation" forceMount hidden={activeTab !== 'validation'} className="space-y-6 mt-0">
                   {mountedTabs.has('validation') && (
-                    <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} filters={filters} />
+                    <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} />
                   )}
                 </TabsContent>
 
                 <TabsContent value="publish" forceMount hidden={activeTab !== 'publish'} className="space-y-6 mt-0">
                   {mountedTabs.has('publish') && (
-                    <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} filters={filters} />
+                    <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} />
                   )}
                 </TabsContent>
               </div>

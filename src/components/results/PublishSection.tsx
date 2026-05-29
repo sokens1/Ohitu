@@ -1,3 +1,5 @@
+/* eslint-disable prefer-const */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -36,8 +38,6 @@ import {
   getRegisteredVotersLabel,
   isProfessionalElection,
 } from '@/utils/electionCalculations';
-import type { ResultsFilters } from './ResultsFilterBar';
-
 // Normalise n'importe quelle étiquette de collège vers la clé brute DB utilisée dans procès_verbaux
 function normalizeCollegeKey(val: string | null | undefined): string | null {
   if (!val) return null;
@@ -141,10 +141,9 @@ function allocateSeatsForCollege(syndicats: SyndicatVotes[], seatsToFill: number
 interface PublishSectionProps {
   selectedElection: string;
   readOnly?: boolean;
-  filters?: ResultsFilters;
 }
 
-const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readOnly = false, filters }) => {
+const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readOnly = false }) => {
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [showDetailedView, setShowDetailedView] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -631,8 +630,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     if (!rawResultsData || !isProfessionalElection(electionType)) return empty;
     const { crRows, pvMeta, baseVotesByCandidate, bureauSeats } = rawResultsData;
 
-    const activeCenter  = filters?.centerId   ?? '';
-    const activeCollege = filters?.collegeType ?? '';
+    const activeCenter  = '';
+    const activeCollege = '';
     const resultSeats: Record<string, number> = {};
     const manualTies: { group: string; parties: string[] }[] = [];
 
@@ -725,7 +724,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     });
 
     return { seats: resultSeats, manualTies };
-  }, [rawResultsData, electionType, filters, unionLists]);
+  }, [rawResultsData, electionType, unionLists]);
 
   const computedSeats    = computedSeatsResult.seats;
   const seatManualTies   = computedSeatsResult.manualTies;
@@ -762,55 +761,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     }));
   }, [finalResults, electionType, computedSeats]);
 
-  // Candidats filtrés par établissement / collège pour la liste affichée
-  const displayedCandidates = useMemo(() => {
-    const activeCenter  = filters?.centerId   ?? '';
-    const activeCollege = filters?.collegeType ?? '';
-
-    if (!rawResultsData || (!activeCenter && !activeCollege)) return groupedCandidates;
-
-    const filteredVotes: Record<string, number> = {};
-    const filteredEntered = new Set<string>();
-    rawResultsData.crRows.forEach((r: any) => {
-      const cid = r.candidates?.id || r.candidate_id;
-      if (!rawResultsData.baseVotesByCandidate[cid]) return;
-      const meta = rawResultsData.pvMeta.get(r.pv_id);
-      if (!meta) return;
-      if (activeCenter  && meta.centerId    !== activeCenter)  return;
-      if (activeCollege && meta.collegeType !== activeCollege) return;
-      filteredVotes[cid] = (filteredVotes[cid] || 0) + (r.votes || 0);
-      filteredEntered.add(cid);
-    });
-
-    const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
-    const result = Object.values(rawResultsData.baseVotesByCandidate)
-      .filter((c: any) => filteredEntered.has(c.id))
-      .map((c: any) => ({ ...c, votes: filteredVotes[c.id] || 0 }))
-      .sort((a: any, b: any) => b.votes - a.votes);
-
-    if (!isProfessionalElection(electionType) || result.length === 0) return result;
-
-    const partyMap = new Map<string, any>();
-    for (const c of result) {
-      const key = (c.party?.split(' — ')[0] || c.name || '').trim();
-      if (partyMap.has(key)) { partyMap.get(key).votes += c.votes; }
-      else { partyMap.set(key, { ...c }); }
-    }
-    const merged = Array.from(partyMap.values()).sort((a, b) => {
-      const aKey = (a.party?.split(' — ')[0] || a.name || '').trim();
-      const bKey = (b.party?.split(' — ')[0] || b.name || '').trim();
-      const aSeats = computedSeats[aKey] ?? 0;
-      const bSeats = computedSeats[bKey] ?? 0;
-      if (bSeats !== aSeats) return bSeats - aSeats;
-      return b.votes - a.votes;
-    });
-    const total = merged.reduce((s, c) => s + c.votes, 0);
-    return merged.map((c, idx) => ({
-      ...c,
-      percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
-      color: colorPalette[idx % colorPalette.length],
-    }));
-  }, [rawResultsData, filters, groupedCandidates, electionType, computedSeats]);
+  // Candidats — utiliser directement les candidats groupés
+  const displayedCandidates = groupedCandidates;
 
   const toCollegeLabel = (key: string) => {
     if (key === 'general') return 'Encadrement';
@@ -838,22 +790,9 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   ), [groupedCandidates]);
 
   const CenterAndBureauTables = () => {
-    // Appliquer les filtres partagés sur les tableaux de centres
-    const searchQ = filters?.search?.trim().toLowerCase() ?? '';
-    const activeCenterId = filters?.centerId ?? '';
-    const activeCollege  = filters?.collegeType ?? '';
-
-    const filterRow = (row: any) => {
-      if (activeCenterId && String(row.center_id) !== activeCenterId) return false;
-      if (searchQ && !String(row.center_name ?? '').toLowerCase().includes(searchQ)) return false;
-      return true;
-    };
-
-    const filteredNVCenter    = nonValidatedByCenter.filter(filterRow);
-    const filteredCenterBreak = centerBreakdown.filter(filterRow);
-    const filteredCollegeBreak = activeCollege
-      ? collegeBreakdown.filter((r: any) => r.college_type === activeCollege)
-      : collegeBreakdown;
+    const filteredNVCenter    = nonValidatedByCenter;
+    const filteredCenterBreak = centerBreakdown;
+    const filteredCollegeBreak = collegeBreakdown;
 
     return (
     <div className="mt-8 space-y-8">
@@ -1216,7 +1155,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
               const isPro = isProfessionalElection(electionType);
               const syndicat = isPro ? (candidate.party?.split(' — ')[0] || candidate.name || '') : '';
               // Détails candidat (titulaire/suppléant) uniquement quand un filtre est actif
-              const showCandidateDetails = !isPro || filters?.collegeType || filters?.centerId;
+              const showCandidateDetails = !isPro;
               return (
                 <div key={candidate.id || index} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl bg-white gap-4">
                   <div className="flex items-center gap-4 flex-1 min-w-0">
