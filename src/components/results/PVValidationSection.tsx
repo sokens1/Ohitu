@@ -359,12 +359,13 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           if (ecErr) throw ecErr;
           let allowedCenterIds = new Set<string>((ecRows || []).map((r: any) => r.center_id as string));
 
-          // Si l'utilisateur est validateur avec des centres/collèges assignés → filtrer davantage
-          if (user?.role === 'validateur') {
+          // Validateur et observateur : restreindre aux centres/collèges assignés
+          const isRestrictedRole = user?.role === 'validateur' || user?.role === 'observateur';
+          if (isRestrictedRole) {
             const centerColleges: Record<string, string[]> =
               user.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
                 ? user.assigned_center_colleges
-                : ((usersData?.find(u => u.id === user.id) as any)?.assigned_center_colleges ?? {});
+                : {};
 
             const assignedCenterIds = Object.keys(centerColleges);
             if (assignedCenterIds.length > 0) {
@@ -377,9 +378,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           const filteredBureaus = (bureaus || []).filter(b => allowedCenterIds.has(b.center_id));
           const filteredCenterIds = Array.from(new Set(filteredBureaus.map(b => b.center_id)));
 
-          // Construire la map centerId → collèges autorisés pour le filtre par collège
+          // Map centerId → collèges autorisés (validateur et observateur uniquement)
           const centerCollegesFilter: Record<string, string[]> =
-            user?.role === 'validateur' && user.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
+            isRestrictedRole && user?.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
               ? user.assigned_center_colleges
               : {};
 
@@ -387,9 +388,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             const bureau = filteredBureaus.find(b => b.id === r.bureau_id);
             if (!bureau) return false;
             const allowedColleges = centerCollegesFilter[bureau.center_id];
-            // Si pas de filtre collège pour ce centre (tableau vide ou non défini) → tous les collèges autorisés
+            // Tableau vide ou absent → tous les collèges du centre autorisés
             if (!allowedColleges || allowedColleges.length === 0) return true;
-            // Sinon, le college_type du PV doit être dans la liste
+            // Sinon le college_type du PV doit être dans la liste assignée
             return !r.college_type || allowedColleges.includes(r.college_type);
           });
           setPvs(filteredPvRows);
@@ -440,7 +441,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
     };
     load();
-  }, [selectedElection, user?.id, user?.assigned_center_ids, user?.assigned_center_colleges]);
+  }, [selectedElection, user?.id, user?.role, user?.assigned_center_ids, user?.assigned_center_colleges]);
 
   useEffect(() => { loadPVs(); }, [loadPVs]);
 

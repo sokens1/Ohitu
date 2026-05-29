@@ -74,7 +74,9 @@ CREATE POLICY "validators agents access pvs"
     )
   );
 
--- Observateur : lecture seule, élections assignées + centres assignés
+-- Observateur : lecture seule, élections + centres + collèges assignés
+-- assigned_center_colleges = { "center_uuid": ["cadres","employes"] }
+-- Tableau vide pour un centre = tous les collèges de ce centre
 DROP POLICY IF EXISTS "observateurs read assigned pvs" ON procès_verbaux;
 CREATE POLICY "observateurs read assigned pvs"
   ON procès_verbaux FOR SELECT
@@ -86,10 +88,23 @@ CREATE POLICY "observateurs read assigned pvs"
         AND u.role = 'observateur'
         AND u.assigned_election_ids IS NOT NULL
         AND procès_verbaux.election_id = ANY(u.assigned_election_ids)
+        -- Filtre centre
         AND (
           u.assigned_center_ids IS NULL
           OR array_length(u.assigned_center_ids, 1) IS NULL
           OR vb.center_id = ANY(u.assigned_center_ids)
+        )
+        -- Filtre collège par centre
+        AND (
+          -- Pas de map de collèges configurée : tous les collèges visibles
+          u.assigned_center_colleges IS NULL
+          OR u.assigned_center_colleges = '{}'::jsonb
+          -- Ce centre n'a pas de clé dans la map : tous ses collèges visibles
+          OR NOT (u.assigned_center_colleges ? vb.center_id::text)
+          -- Ce centre a un tableau vide : tous ses collèges visibles
+          OR jsonb_array_length(u.assigned_center_colleges -> vb.center_id::text) = 0
+          -- Le college_type du PV est dans la liste assignée pour ce centre
+          OR (u.assigned_center_colleges -> vb.center_id::text) ? procès_verbaux.college_type
         )
     )
   );
@@ -234,7 +249,7 @@ CREATE POLICY "validators staff read assigned opinions"
     )
   );
 
--- Observateur : son propre avis + avis des PVs de ses centres assignés
+-- Observateur : son propre avis + avis des PVs de ses centres + collèges assignés
 DROP POLICY IF EXISTS "observateurs read assigned opinions" ON pv_observer_opinions;
 CREATE POLICY "observateurs read assigned opinions"
   ON pv_observer_opinions FOR SELECT
@@ -248,10 +263,19 @@ CREATE POLICY "observateurs read assigned opinions"
         AND u.role = 'observateur'
         AND u.assigned_election_ids IS NOT NULL
         AND pv.election_id = ANY(u.assigned_election_ids)
+        -- Filtre centre
         AND (
           u.assigned_center_ids IS NULL
           OR array_length(u.assigned_center_ids, 1) IS NULL
           OR vb.center_id = ANY(u.assigned_center_ids)
+        )
+        -- Filtre collège par centre (même logique que sur procès_verbaux)
+        AND (
+          u.assigned_center_colleges IS NULL
+          OR u.assigned_center_colleges = '{}'::jsonb
+          OR NOT (u.assigned_center_colleges ? vb.center_id::text)
+          OR jsonb_array_length(u.assigned_center_colleges -> vb.center_id::text) = 0
+          OR (u.assigned_center_colleges -> vb.center_id::text) ? pv.college_type
         )
     )
   );
