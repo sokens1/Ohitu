@@ -1642,8 +1642,23 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         <span className="text-sm">{formData.uploadedFile.name}</span>
                         <CheckCircle className="w-4 h-4" />
                       </div>
+                    ) : selectedExistingPvUrl ? (
+                      <div className="flex items-center gap-2 text-blue-700">
+                        <FileText className="w-4 h-4" />
+                        <span className="text-sm">PV existant sélectionné</span>
+                        <CheckCircle className="w-4 h-4" />
+                        <a
+                          href={selectedExistingPvUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs underline hover:text-blue-900 ml-1"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          Voir
+                        </a>
+                      </div>
                     ) : (
-                      <div className="text-red-600 text-sm">Aucun document attaché</div>
+                      <div className="text-gray-400 text-sm italic">Aucun document attaché (optionnel)</div>
                     )}
                   </div>
                 </CardContent>

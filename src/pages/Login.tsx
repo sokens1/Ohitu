@@ -234,10 +234,10 @@ const Login = () => {
                          className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                        >
                          <div className="flex items-center justify-between">
-                           <div className="text-left min-w-0 flex-1">
-                             <h3 className="font-bold text-base lg:text-lg truncate">{election.title}</h3>
+                           <div className="text-left flex-1">
+                             <h3 className="font-bold text-sm lg:text-base leading-snug">{election.title}</h3>
                              {election.localisation && (
-                               <p className="text-xs opacity-60 mt-1 truncate">{election.localisation}</p>
+                               <p className="text-xs opacity-60 mt-1 leading-snug">{election.localisation}</p>
                              )}
                            </div>
                            <ArrowRight className="w-4 h-4 lg:w-5 lg:h-5 transition-transform text-white/60" />
@@ -348,10 +348,10 @@ const Login = () => {
                         className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-left flex-1 min-w-0">
-                            <h3 className="font-bold text-base truncate">{election.title}</h3>
+                          <div className="text-left flex-1">
+                            <h3 className="font-bold text-sm leading-snug">{election.title}</h3>
                             {election.localisation && (
-                              <p className="text-xs opacity-60 mt-1 truncate">{election.localisation}</p>
+                              <p className="text-xs opacity-60 mt-1 leading-snug">{election.localisation}</p>
                             )}
                           </div>
                           <ArrowRight className="w-4 h-4 text-white/60 shrink-0" />
