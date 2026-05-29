@@ -103,7 +103,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   useEffect(() => {
     if (!selectedElection) return;
     load();
-  }, [selectedElection, user?.id]);
+  }, [selectedElection, user?.id, user?.assigned_center_bureaux]);
 
   const load = async () => {
     setLoading(true);
@@ -111,9 +111,9 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
       // 1. Déterminer les centres accessibles
       let centerIds: string[] = [];
 
-      if (canUpload && user?.assigned_center_colleges) {
-        // Président d'établissement : ses centres assignés
-        centerIds = Object.keys(user.assigned_center_colleges);
+      if (canUpload && user?.assigned_center_bureaux) {
+        // Président d'établissement : centres issus de assigned_center_bureaux
+        centerIds = Object.keys(user.assigned_center_bureaux);
       } else {
         // Admin / agent-saisie : tous les centres de l'élection
         const { data: ecRows } = await supabase
@@ -135,7 +135,8 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
       const builtCenters: Center[] = centerIds.map(cid => ({
         id: cid,
         name: (centerMap.get(cid) ?? cid) as string,
-        assignedColleges: user?.assigned_center_colleges?.[cid] ?? [],
+        // Le président utilise assigned_center_bureaux (pas de restriction par collège sur les documents)
+        assignedColleges: canUpload ? [] : (user?.assigned_center_colleges?.[cid] ?? []),
       }));
       setCenters(builtCenters);
 

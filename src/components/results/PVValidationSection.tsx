@@ -359,39 +359,53 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           if (ecErr) throw ecErr;
           let allowedCenterIds = new Set<string>((ecRows || []).map((r: any) => r.center_id as string));
 
-          // Validateur et observateur : restreindre aux centres/collèges assignés
-          const isRestrictedRole = user?.role === 'validateur' || user?.role === 'observateur';
-          if (isRestrictedRole) {
-            const centerColleges: Record<string, string[]> =
-              user.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
-                ? user.assigned_center_colleges
-                : {};
+          // ── Filtrage par rôle ─────────────────────────────────────────────────
+          // validateur, agent-saisie, observateur → centres + collèges assignés
+          // president-etablissement               → centres + bureaux assignés
+          const roleColleges  = user?.role === 'validateur' || user?.role === 'agent-saisie' || user?.role === 'observateur';
+          const roleBureaux   = user?.role === 'president-etablissement';
 
-            const assignedCenterIds = Object.keys(centerColleges);
+          if (roleColleges) {
+            // Restreindre allowedCenterIds aux centres présents dans assigned_center_colleges
+            const assignedCenterIds = Object.keys(user.assigned_center_colleges ?? {});
             if (assignedCenterIds.length > 0) {
-              allowedCenterIds = new Set(
-                [...allowedCenterIds].filter(id => assignedCenterIds.includes(id))
-              );
+              allowedCenterIds = new Set([...allowedCenterIds].filter(id => assignedCenterIds.includes(id)));
+            }
+          } else if (roleBureaux) {
+            // Restreindre allowedCenterIds aux centres présents dans assigned_center_bureaux
+            const assignedCenterIds = Object.keys(user.assigned_center_bureaux ?? {});
+            if (assignedCenterIds.length > 0) {
+              allowedCenterIds = new Set([...allowedCenterIds].filter(id => assignedCenterIds.includes(id)));
             }
           }
 
           const filteredBureaus = (bureaus || []).filter(b => allowedCenterIds.has(b.center_id));
           const filteredCenterIds = Array.from(new Set(filteredBureaus.map(b => b.center_id)));
 
-          // Map centerId → collèges autorisés (validateur et observateur uniquement)
-          const centerCollegesFilter: Record<string, string[]> =
-            isRestrictedRole && user?.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
-              ? user.assigned_center_colleges
-              : {};
+          const centerCollegesFilter: Record<string, string[]> = roleColleges ? (user.assigned_center_colleges ?? {}) : {};
+          const centerBureauxFilter:  Record<string, string[]> = roleBureaux  ? (user.assigned_center_bureaux  ?? {}) : {};
 
           const filteredPvRows = (pvRows || []).filter(r => {
             const bureau = filteredBureaus.find(b => b.id === r.bureau_id);
             if (!bureau) return false;
-            const allowedColleges = centerCollegesFilter[bureau.center_id];
-            // Tableau vide ou absent → tous les collèges du centre autorisés
-            if (!allowedColleges || allowedColleges.length === 0) return true;
-            // Sinon le college_type du PV doit être dans la liste assignée
-            return !r.college_type || allowedColleges.includes(r.college_type);
+
+            if (roleColleges) {
+              // Filtre collège : vide = tous autorisés
+              const allowedColleges = centerCollegesFilter[bureau.center_id];
+              if (allowedColleges && allowedColleges.length > 0) {
+                if (r.college_type && !allowedColleges.includes(r.college_type)) return false;
+              }
+            }
+
+            if (roleBureaux) {
+              // Filtre bureau : vide = tous autorisés pour ce centre
+              const allowedBureaux = centerBureauxFilter[bureau.center_id];
+              if (allowedBureaux && allowedBureaux.length > 0) {
+                if (!allowedBureaux.includes(r.bureau_id)) return false;
+              }
+            }
+
+            return true;
           });
           setPvs(filteredPvRows);
 
@@ -441,7 +455,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
     };
     load();
-  }, [selectedElection, user?.id, user?.role, user?.assigned_center_ids, user?.assigned_center_colleges]);
+  }, [selectedElection, user?.id, user?.role, user?.assigned_center_ids, user?.assigned_center_colleges, user?.assigned_center_bureaux]);
 
   useEffect(() => { loadPVs(); }, [loadPVs]);
 
