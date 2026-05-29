@@ -308,7 +308,7 @@ const UserManagement = () => {
     setFElectionIds(ids);
     if (ROLES_WITH_BUREAUX.includes(u.role)) {
       setFCenterBureaux(u.assigned_center_bureaux ?? {});
-      setFCenterColleges({});
+      setFCenterColleges(u.assigned_center_colleges ?? {});
     } else {
       setFCenterColleges(u.assigned_center_colleges ?? {});
       setFCenterBureaux({});
@@ -342,7 +342,23 @@ const UserManagement = () => {
               .filter(b => !/^college/i.test(b.name.trim()))
               .map(b => ({ id: b.id, name: b.name, centerId: b.center_id }))
           );
-          setAvailableColleges([]);
+          // Charger aussi les collèges pour le président (assigned_center_colleges)
+          const { data: collegesData } = await supabase
+            .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
+          const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
+          const COLLEGE_LABELS: Record<string, string> = {
+            cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+          };
+          setAvailableColleges(
+            distinctTypes.length > 0
+              ? distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }))
+              : [
+                  { value: 'cadres',   label: 'Cadres' },
+                  { value: 'employes', label: 'Maîtrise' },
+                  { value: 'ouvriers', label: 'Exécution' },
+                  { value: 'general',  label: 'Encadrement' },
+                ]
+          );
         } else {
           const { data: collegesData } = await supabase
             .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
@@ -405,7 +421,7 @@ const UserManagement = () => {
             : null,
           assigned_center_bureaux: ROLES_WITH_BUREAUX.includes(fRole) && Object.keys(fCenterBureaux).length > 0
             ? fCenterBureaux : null,
-          assigned_center_colleges: ROLES_WITH_COLLEGES.includes(fRole) && Object.keys(fCenterColleges).length > 0
+          assigned_center_colleges: (ROLES_WITH_COLLEGES.includes(fRole) || ROLES_WITH_BUREAUX.includes(fRole)) && Object.keys(fCenterColleges).length > 0
             ? fCenterColleges : null,
           created_by: currentUser?.id || null,
         }),
@@ -468,7 +484,7 @@ const UserManagement = () => {
       if (ROLES_WITH_BUREAUX.includes(fRole)) {
         updatePayload.assigned_center_ids      = Object.keys(fCenterBureaux);
         updatePayload.assigned_center_bureaux  = Object.keys(fCenterBureaux).length > 0 ? fCenterBureaux : null;
-        updatePayload.assigned_center_colleges = null;
+        updatePayload.assigned_center_colleges = Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null;
       } else if (ROLES_WITH_COLLEGES.includes(fRole)) {
         updatePayload.assigned_center_ids      = Object.keys(fCenterColleges);
         updatePayload.assigned_center_colleges = Object.keys(fCenterColleges).length > 0 ? fCenterColleges : null;
@@ -621,8 +637,8 @@ const UserManagement = () => {
           ? { border: 'border-indigo-200', bg: 'bg-indigo-50/30', text: 'text-indigo-700', sub: 'text-indigo-600', chip: 'border-indigo-600 bg-indigo-600', chipOff: 'border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100', accent: 'accent-indigo-700', rowHover: 'hover:bg-indigo-50', rowBorder: 'border-indigo-100', colBg: 'bg-indigo-50/50 border-indigo-100' }
           : { border: 'border-teal-200',   bg: 'bg-teal-50/30',   text: 'text-teal-700',   sub: 'text-teal-600',   chip: 'border-teal-600 bg-teal-600',     chipOff: 'border-teal-200 bg-white text-teal-700 hover:bg-teal-100',     accent: 'accent-teal-700',   rowHover: 'hover:bg-teal-50',   rowBorder: 'border-teal-100',   colBg: 'bg-teal-50/50 border-teal-100'   };
 
-        const sectionLabel = isBureaux ? 'Établissements & Bureaux' : 'Établissements & Collèges';
-        const subLabel     = isBureaux ? 'tous les bureaux'         : 'tous les collèges';
+        const sectionLabel = isBureaux ? 'Établissements, Bureaux & Collèges' : 'Établissements & Collèges';
+        const subLabel     = isBureaux ? 'tous les bureaux'                   : 'tous les collèges';
 
         const allCentersSelected = availableCenters.length > 0 && availableCenters.every(c => c.id in currentMap);
         const toggleAllCenters = () => {
@@ -729,6 +745,50 @@ const UserManagement = () => {
                         <span className={`text-[10px] ${cfg.sub} italic`}>{subLabel} de cet établissement</span>
                       </div>
                     )}
+
+                    {/* Collèges assignés — uniquement pour president-etablissement */}
+                    {isBureaux && isSelected && availableColleges.length > 0 && (() => {
+                      const selColleges   = fCenterColleges[c.id] ?? [];
+                      const allColSel     = availableColleges.length > 0 && availableColleges.every(col => selColleges.includes(col.value));
+                      const toggleCollege = (val: string) =>
+                        setFCenterColleges(prev => {
+                          const list = prev[c.id] ?? [];
+                          return { ...prev, [c.id]: list.includes(val) ? list.filter(v => v !== val) : [...list, val] };
+                        });
+                      const toggleAllCol = () =>
+                        setFCenterColleges(prev => ({
+                          ...prev,
+                          [c.id]: allColSel ? [] : availableColleges.map(col => col.value),
+                        }));
+                      return (
+                        <div className="px-3 pb-2 pt-1.5 bg-teal-50/70 border-t border-teal-100 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-medium text-teal-600">Collèges</span>
+                            <button type="button" onClick={toggleAllCol} className="text-[10px] font-semibold text-teal-700 hover:underline">
+                              {allColSel ? 'Aucun' : 'Tous'}
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {availableColleges.map(col => (
+                              <label
+                                key={col.value}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-xs font-medium transition-all ${
+                                  selColleges.includes(col.value)
+                                    ? 'border-teal-500 bg-teal-500 text-white'
+                                    : 'border-teal-200 bg-white text-teal-700 hover:bg-teal-50'
+                                }`}
+                              >
+                                <input type="checkbox" checked={selColleges.includes(col.value)} onChange={() => toggleCollege(col.value)} className="sr-only" />
+                                {col.label}
+                              </label>
+                            ))}
+                          </div>
+                          {selColleges.length === 0 && (
+                            <span className="text-[10px] text-teal-500 italic">tous les collèges</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}

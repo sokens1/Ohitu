@@ -91,8 +91,9 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
   const [docs, setDocs]           = useState<EstablishmentDocument[]>([]);
   const [centers, setCenters]     = useState<Center[]>([]);
+  const [allCollegeTypes, setAllCollegeTypes] = useState<string[]>([]);
   const [loading, setLoading]     = useState(true);
-  const [uploading, setUploading] = useState<string | null>(null); // "centerId|docType"
+  const [uploading, setUploading] = useState<string | null>(null); // "centerId|college|docType"
   const [review, setReview]       = useState<ReviewState | null>(null);
   const [expanded, setExpanded]   = useState<Set<string>>(new Set());
 
@@ -111,11 +112,12 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
       // 1. Déterminer les centres accessibles
       let centerIds: string[] = [];
 
-      if (canUpload && user?.assigned_center_bureaux) {
-        // Président d'établissement : centres issus de assigned_center_bureaux
-        centerIds = Object.keys(user.assigned_center_bureaux);
+      if (canUpload) {
+        // Président : UNIQUEMENT ses centres assignés via assigned_center_bureaux
+        // Si null → aucun centre → l'écran affiche "Aucun établissement assigné"
+        centerIds = Object.keys(user?.assigned_center_bureaux ?? {});
       } else {
-        // Admin / agent-saisie : tous les centres de l'élection
+        // Admin / agent-saisie / validateur : tous les centres de l'élection
         const { data: ecRows } = await supabase
           .from('election_centers')
           .select('center_id')
@@ -123,7 +125,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         centerIds = (ecRows ?? []).map((r: any) => r.center_id);
       }
 
-      if (centerIds.length === 0) { setDocs([]); setCenters([]); return; }
+      if (centerIds.length === 0) { setDocs([]); setCenters([]); setAllCollegeTypes([]); return; }
 
       // 2. Noms des centres
       const { data: vcRows } = await supabase
@@ -132,21 +134,58 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         .in('id', centerIds);
       const centerMap = new Map((vcRows ?? []).map((v: any) => [v.id, v.name]));
 
-      const builtCenters: Center[] = centerIds.map(cid => ({
-        id: cid,
-        name: (centerMap.get(cid) ?? cid) as string,
-        // Le président utilise assigned_center_bureaux (pas de restriction par collège sur les documents)
-        assignedColleges: canUpload ? [] : (user?.assigned_center_colleges?.[cid] ?? []),
-      }));
+      // 3. Collèges disponibles pour cette élection (référence)
+      const { data: ecColleges } = await supabase
+        .from('electoral_colleges')
+        .select('college_type')
+        .eq('election_id', selectedElection);
+      const distinctColleges: string[] = Array.from(
+        new Set((ecColleges ?? []).map((r: any) => r.college_type).filter(Boolean))
+      );
+      const electionColleges = distinctColleges.length > 0
+        ? distinctColleges
+        : ['cadres', 'employes', 'ouvriers', 'general'];
+      setAllCollegeTypes(electionColleges);
+
+      const builtCenters: Center[] = centerIds.map(cid => {
+        if (canUpload) {
+          // Président : UNIQUEMENT les collèges assignés pour ce centre
+          // Si liste vide → "vide = tous" → tous les collèges de l'élection
+          const assigned = user?.assigned_center_colleges?.[cid] ?? [];
+          return {
+            id: cid,
+            name: (centerMap.get(cid) ?? cid) as string,
+            assignedColleges: assigned.length > 0 ? assigned : electionColleges,
+          };
+        }
+        return {
+          id: cid,
+          name: (centerMap.get(cid) ?? cid) as string,
+          assignedColleges: user?.assigned_center_colleges?.[cid] ?? [],
+        };
+      });
       setCenters(builtCenters);
 
       // 3. Documents
-      const { data: docRows, error } = await supabase
+      // Collèges autorisés pour le président : union de tous ses colleges par centre
+      let docQuery = supabase
         .from('establishment_documents')
         .select('*')
         .eq('election_id', selectedElection)
-        .in('center_id', centerIds)
-        .order('uploaded_at', { ascending: false });
+        .in('center_id', centerIds);
+
+      if (canUpload) {
+        // Restreindre aux collèges explicitement assignés (tous centres confondus)
+        const allAssignedColleges = Array.from(new Set(
+          Object.values(user?.assigned_center_colleges ?? {}).flat()
+        ));
+        if (allAssignedColleges.length > 0) {
+          docQuery = docQuery.in('college_type', allAssignedColleges);
+        }
+        // Si aucun collège assigné (vide = tous) → pas de filtre college_type
+      }
+
+      const { data: docRows, error } = await docQuery.order('uploaded_at', { ascending: false });
 
       if (error) { toast.error('Erreur chargement documents'); return; }
 
@@ -180,7 +219,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     e.target.value = '';
 
     const { centerId, collegeType, docType } = uploadContext.current;
-    const key = `${centerId}|${docType}`;
+    const key = `${centerId}|${collegeType ?? ''}|${docType}`;
     setUploading(key);
 
     try {
@@ -344,71 +383,78 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         )}
 
         {centers.map(center => {
-          const colleges: (string | null)[] = center.assignedColleges.length > 0
-            ? center.assignedColleges
-            : [null]; // null = tous les collèges
+          const COLLEGE_LABELS: Record<string, string> = {
+            cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+          };
 
           return (
-            <Card key={center.id} className="border border-teal-100">
-              <CardHeader className="pb-3 pt-4 px-4">
+            <Card key={center.id} className="border border-teal-200">
+              <CardHeader className="pb-2 pt-4 px-4">
                 <CardTitle className="flex items-center gap-2 text-sm font-semibold text-teal-800">
                   <Building2 className="w-4 h-4" />
                   {center.name}
                 </CardTitle>
               </CardHeader>
               <CardContent className="px-4 pb-4 space-y-3">
-                {colleges.map((college, ci) => (
-                  <div key={ci} className="border rounded-lg p-3 bg-gray-50 space-y-3">
-                    {college && (
-                      <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
-                        <BookOpen className="w-3.5 h-3.5" /> Collège : {college}
-                      </div>
-                    )}
-                    {(['pv', 'participation_list'] as const).map(docType => {
-                      const existing = docs.find(
-                        d => d.center_id === center.id
-                          && d.college_type === college
-                          && d.document_type === docType
-                      );
-                      const isUp = uploading === `${center.id}|${docType}`;
+                {center.assignedColleges.map(college => (
+                  <div key={college} className="border border-teal-100 rounded-xl overflow-hidden">
+                    {/* En-tête collège */}
+                    <div className="flex items-center gap-1.5 px-3 py-2 bg-teal-50 border-b border-teal-100">
+                      <BookOpen className="w-3.5 h-3.5 text-teal-600" />
+                      <span className="text-xs font-semibold text-teal-700">
+                        {COLLEGE_LABELS[college] ?? college}
+                      </span>
+                    </div>
 
-                      return (
-                        <div key={docType} className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="flex items-center gap-2 text-sm">
-                            {existing ? <FileIcon name={existing.file_name} /> : <FileText className="w-4 h-4 text-gray-300" />}
-                            <span className="font-medium text-gray-700">{DOC_TYPE_LABEL[docType]}</span>
-                            {existing && <StatusBadge status={existing.status} />}
-                            {existing?.review_comment && (
-                              <span className="text-xs text-gray-500 italic truncate max-w-xs" title={existing.review_comment}>
-                                "{existing.review_comment}"
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {existing && (
+                    {/* Documents PV + Liste */}
+                    <div className="divide-y divide-gray-100">
+                      {(['pv', 'participation_list'] as const).map(docType => {
+                        const existing = docs.find(
+                          d => d.center_id === center.id
+                            && d.college_type === college
+                            && d.document_type === docType
+                        );
+                        const uploadKey = `${center.id}|${college}|${docType}`;
+                        const isUp = uploading === uploadKey;
+
+                        return (
+                          <div key={docType} className="flex items-center justify-between gap-3 px-3 py-2.5 flex-wrap bg-white">
+                            <div className="flex items-center gap-2 text-sm">
+                              {existing ? <FileIcon name={existing.file_name} /> : <FileText className="w-4 h-4 text-gray-300" />}
+                              <span className="font-medium text-gray-700">{DOC_TYPE_LABEL[docType]}</span>
+                              {existing && <StatusBadge status={existing.status} />}
+                              {existing?.review_comment && (
+                                <span className="text-xs text-gray-500 italic truncate max-w-xs" title={existing.review_comment}>
+                                  "{existing.review_comment}"
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {existing && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-blue-600 hover:text-blue-700 h-7 px-2"
+                                  onClick={() => window.open(existing.file_url, '_blank')}
+                                >
+                                  <Eye className="w-3.5 h-3.5 mr-1" />
+                                </Button>
+                              )}
                               <Button
-                                variant="ghost"
+                                variant="outline"
                                 size="sm"
-                                className="text-blue-600 hover:text-blue-700 h-7 px-2"
-                                onClick={() => window.open(existing.file_url, '_blank')}
+                                disabled={isUp}
+                                className="border-teal-400 text-teal-700 hover:bg-teal-50 h-7 px-3 text-xs"
+                                onClick={() => triggerUpload(center.id, college, docType)}
                               >
-                                <Eye className="w-3.5 h-3.5 mr-1" /> 
+                                <Upload className="w-3.5 h-3.5 mr-1" />
+                                {isUp ? 'Envoi…' : existing ? 'Remplacer' : 'Joindre'}
                               </Button>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={isUp}
-                              className="border-teal-400 text-teal-700 hover:bg-teal-50 h-7 px-3 text-xs"
-                              onClick={() => triggerUpload(center.id, college, docType)}
-                            >
-                              <Upload className="w-3.5 h-3.5 mr-1" />
-                              {isUp ? 'Envoi…' : existing ? 'Remplacer' : 'Joindre'}
-                            </Button>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 ))}
               </CardContent>
