@@ -11,7 +11,6 @@ import DataEntrySection from '@/components/results/DataEntrySection';
 import PVValidationSection from '@/components/results/PVValidationSection';
 import PublishSection from '@/components/results/PublishSection';
 import DocumentsSection from '@/components/results/DocumentsSection';
-import ResultsFilterBar, { ResultsFilters, EMPTY_FILTERS } from '@/components/results/ResultsFilterBar';
 import { useRBAC } from '@/hooks/useRBAC';
 import { getElectionElectorsTotal } from '@/utils/electionCalculations';
 
@@ -194,8 +193,6 @@ const Results = () => {
     queryFn: () => fetchElectionsFn({ isGlobalAdmin, assignedElectionIds }),
     staleTime: 5 * 60 * 1000,
   });
-  const [filters, setFilters] = useState<ResultsFilters>(EMPTY_FILTERS);
-
   // Derive loading state: only show spinner when first load (no cached data yet)
   const loading = electionsQueryLoading && !electionsQueryData;
 
@@ -235,7 +232,6 @@ const Results = () => {
     if (isGlobalAdmin && selectedElection) {
       localStorage.setItem('results_selected_election', selectedElection);
     }
-    setFilters(EMPTY_FILTERS); // Réinitialiser les filtres à chaque changement d'élection
   }, [selectedElection, isGlobalAdmin]);
 
   useEffect(() => {
@@ -323,13 +319,6 @@ const Results = () => {
           </Card>
         </div>
 
-        {/* Barre de filtres partagée */}
-        <ResultsFilterBar
-          selectedElection={selectedElection}
-          filters={filters}
-          onChange={setFilters}
-        />
-
         {/* Onglets — seuls ceux autorisés sont affichés */}
         <Card className="gov-card">
           <CardContent className="p-0">
@@ -339,22 +328,26 @@ const Results = () => {
                   className={`grid w-full bg-transparent h-auto p-0`}
                   style={{ gridTemplateColumns: `repeat(${allowedTabs.length}, 1fr)` }}
                 >
-                  {allowedTabs.map(tab => (
-                    <TabsTrigger
-                      key={tab.value}
-                      value={tab.value}
-                      className="flex items-center justify-center space-x-1 sm:space-x-2 py-3 sm:py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50 text-xs sm:text-sm"
-                    >
-                      <tab.icon className="w-4 h-4 sm:w-5 sm:h-5" />
-                      <span className="hidden sm:inline">{tab.label}</span>
-                      <span className="sm:hidden">{tab.labelShort}</span>
-                      {tab.value === 'validation' && globalStats.pvsEnAttente > 0 && (
-                        <Badge className="bg-red-500 text-white text-xs ml-1">
-                          {globalStats.pvsEnAttente}
-                        </Badge>
-                      )}
-                    </TabsTrigger>
-                  ))}
+                  {allowedTabs.map(tab => {
+                    const label      = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.label;
+                    const labelShort = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.labelShort;
+                    return (
+                      <TabsTrigger
+                        key={tab.value}
+                        value={tab.value}
+                        className="flex items-center justify-center space-x-1 sm:space-x-2 py-3 sm:py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50 text-xs sm:text-sm"
+                      >
+                        <tab.icon className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span className="hidden sm:inline">{label}</span>
+                        <span className="sm:hidden">{labelShort}</span>
+                        {tab.value === 'validation' && role !== 'observateur' && globalStats.pvsEnAttente > 0 && (
+                          <Badge className="bg-red-500 text-white text-xs ml-1">
+                            {globalStats.pvsEnAttente}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                    );
+                  })}
                 </TabsList>
               </div>
 
@@ -363,25 +356,25 @@ const Results = () => {
                 {/* hidden : masque le contenu inactif via l'attribut HTML hidden (display:none) */}
                 <TabsContent value="documents" forceMount hidden={activeTab !== 'documents'} className="space-y-6 mt-0">
                   {mountedTabs.has('documents') && (
-                    <DocumentsSection selectedElection={selectedElection} filters={filters} />
+                    <DocumentsSection selectedElection={selectedElection} />
                   )}
                 </TabsContent>
 
                 <TabsContent value="entry" forceMount hidden={activeTab !== 'entry'} className="space-y-6 mt-0">
                   {mountedTabs.has('entry') && (
-                    <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} filters={filters} />
+                    <DataEntrySection stats={globalStats} selectedElection={selectedElection} readOnly={entryReadOnly} refreshKey={dataRefreshKey} />
                   )}
                 </TabsContent>
 
                 <TabsContent value="validation" forceMount hidden={activeTab !== 'validation'} className="space-y-6 mt-0">
                   {mountedTabs.has('validation') && (
-                    <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} filters={filters} />
+                    <PVValidationSection selectedElection={selectedElection} readOnly={validationReadOnly} onDataRefresh={() => setDataRefreshKey(k => k + 1)} />
                   )}
                 </TabsContent>
 
                 <TabsContent value="publish" forceMount hidden={activeTab !== 'publish'} className="space-y-6 mt-0">
                   {mountedTabs.has('publish') && (
-                    <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} filters={filters} />
+                    <PublishSection selectedElection={selectedElection} readOnly={publishReadOnly} />
                   )}
                 </TabsContent>
               </div>

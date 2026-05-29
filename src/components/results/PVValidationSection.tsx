@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +17,7 @@ import {
   RotateCcw,
   PenLine,
   X as XIcon,
+  Search,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -29,6 +31,14 @@ interface ObserverOpinion {
   id: string; observer_id: string; observer_name: string;
   annotation: string | null; conformity: 'conforme' | 'non_conforme' | null;
   annotated_at_str: string;
+  reactions?: Array<{
+    id: string;
+    reactor_id: string;
+    reactor_name: string;
+    type: 'approved' | 'overridden';
+    comment: string | null;
+    reacted_at: string;
+  }>;
 }
 
 interface PVTimelineProps {
@@ -47,11 +57,12 @@ interface PVTimelineProps {
 }
 
 const STEP_COLORS = {
-  done:    { dot: 'bg-[#1B2E5A] border-[#1B2E5A]', line: 'bg-[#1B2E5A]', text: 'text-[#1B2E5A]' },
-  active:  { dot: 'bg-amber-500 border-amber-500',  line: 'bg-gray-200',  text: 'text-amber-600'  },
-  pending: { dot: 'bg-white border-gray-300',        line: 'bg-gray-200',  text: 'text-gray-400'  },
-  error:   { dot: 'bg-red-500 border-red-500',       line: 'bg-gray-200',  text: 'text-red-600'   },
-  info:    { dot: 'bg-purple-500 border-purple-500', line: 'bg-gray-200',  text: 'text-purple-700'},
+  done:    { dot: 'bg-emerald-600 border-emerald-600', line: 'bg-emerald-500', text: 'text-emerald-700' },
+  active:  { dot: 'bg-amber-500 border-amber-500',     line: 'bg-gray-200',   text: 'text-amber-600'   },
+  pending: { dot: 'bg-white border-gray-300',           line: 'bg-gray-200',   text: 'text-gray-400'   },
+  error:   { dot: 'bg-red-500 border-red-500',          line: 'bg-gray-200',   text: 'text-red-600'    },
+  info:    { dot: 'bg-purple-500 border-purple-500',    line: 'bg-gray-200',   text: 'text-purple-700' },
+  reserve: { dot: 'bg-amber-500 border-amber-500',      line: 'bg-gray-200',   text: 'text-amber-700'  },
 };
 
 const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
@@ -66,13 +77,13 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   const hasAnyOpinion    = opinions.length > 0;
   const hasNonConforme   = nonConformeCount > 0;
   const aggConformity    = hasAnyOpinion ? (hasNonConforme ? 'non_conforme' : 'conforme') : null;
-  // Libellé sous le point : "2 conformes, 1 non conforme" ou nom unique
+  // Libellé sous le point : "2 conformes, 1 réserve" ou nom unique
   const aggSublabel = hasAnyOpinion
     ? (opinions.length === 1
         ? opinions[0].observer_name
-        : `${conformeCount} conforme${conformeCount > 1 ? 's' : ''} · ${nonConformeCount} non conforme${nonConformeCount > 1 ? 's' : ''}`)
+        : `${conformeCount} conforme${conformeCount > 1 ? 's' : ''} · ${nonConformeCount} réserve${nonConformeCount > 1 ? 's' : ''}`)
     : null;
-  const conformityLabel  = aggConformity === 'conforme' ? 'Conforme' : aggConformity === 'non_conforme' ? 'Non conforme' : null;
+  const conformityLabel  = aggConformity === 'conforme' ? 'Conforme' : aggConformity === 'non_conforme' ? 'Réserve' : null;
 
   const steps = [
     {
@@ -105,7 +116,7 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
       color: aggConformity === 'conforme'
         ? STEP_COLORS.done
         : aggConformity === 'non_conforme'
-          ? STEP_COLORS.error
+          ? STEP_COLORS.reserve
           : hasAnyOpinion ? STEP_COLORS.info : STEP_COLORS.pending,
       description: '',
       isInfo: true
@@ -150,14 +161,13 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   );
 };
 
-import type { ResultsFilters } from './ResultsFilterBar';
+interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; onDataRefresh?: () => void; }
 
-interface PVValidationSectionProps { selectedElection: string; readOnly?: boolean; filters?: ResultsFilters; onDataRefresh?: () => void; }
-
-const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false, filters, onDataRefresh }) => {
+const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false, onDataRefresh }) => {
   const { role } = useRBAC();
   const { user } = useAuth();
   const isObserver = role === 'observateur';
+  const canReact = role === 'super-admin' || role === 'admin' || role === 'president-etablissement';
 
   const [selectedPV, setSelectedPV] = useState<string | null>(null);
   const [observerAnnotation, setObserverAnnotation] = useState('');
@@ -184,12 +194,25 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [usersMap, setUsersMap] = useState<Map<string, string>>(new Map());
 
+  // Filtres internes
+  const [searchFilter, setSearchFilter] = useState('');
+  const [centerFilter, setCenterFilter] = useState('');
+  const [filterCenters, setFilterCenters] = useState<{ id: string; name: string }[]>([]);
+
   // Avis multiples d'observateurs  { pvId -> opinion[] }
   const [observerOpinions, setObserverOpinions] = useState<Map<string, Array<{
     id: string; observer_id: string; observer_name: string;
     annotation: string | null; conformity: 'conforme' | 'non_conforme' | null;
     annotated_at_str: string;
+    reactions?: Array<{
+      id: string; reactor_id: string; reactor_name: string;
+      type: 'approved' | 'overridden'; comment: string | null; reacted_at: string;
+    }>;
   }>>>(new Map());
+
+  // Réactions
+  const [reactionTarget, setReactionTarget] = useState<{ opinionId: string; comment: string } | null>(null);
+  const [submittingReaction, setSubmittingReaction] = useState(false);
 
   // Rejet PV
   const [showRejectDialog, setShowRejectDialog] = useState(false);
@@ -239,6 +262,69 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     return publicUrlData.publicUrl;
   };
 
+  const submitReaction = async (opinionId: string, type: 'approved' | 'overridden', comment: string) => {
+    if (type === 'overridden' && !comment.trim()) {
+      toast.error('Un commentaire est obligatoire pour annuler une réserve.');
+      return;
+    }
+    setSubmittingReaction(true);
+    try {
+      const { data: authUser } = await supabase.auth.getUser();
+      const reactorId = authUser.user?.id ?? '';
+      const reactorName = usersMap.get(reactorId) || 'Inconnu';
+      const newReaction = {
+        id: crypto.randomUUID(),
+        reactor_id: reactorId,
+        reactor_name: reactorName,
+        type,
+        comment: comment.trim() || null,
+        reacted_at: new Date().toISOString(),
+      };
+      // Fetch current reactions first
+      const { data: opRow } = await supabase
+        .from('pv_observer_opinions')
+        .select('reactions, conformity')
+        .eq('id', opinionId)
+        .single();
+      const existing = opRow?.reactions ?? [];
+      const updatedReactions = [...existing, newReaction];
+      const updatePayload: Record<string, any> = { reactions: updatedReactions };
+      if (type === 'overridden') updatePayload.conformity = 'conforme';
+      const { data: updatedData, error } = await supabase
+        .from('pv_observer_opinions')
+        .update(updatePayload)
+        .eq('id', opinionId)
+        .select('id');
+      if (error) { toast.error('Erreur lors de la réaction'); return; }
+      if (!updatedData?.length) {
+        toast.error('Mise à jour bloquée — appliquez la migration 20260529_opinion_reactions.sql dans Supabase.');
+        return;
+      }
+      toast.success(type === 'approved' ? 'Réserve approuvée' : 'Réserve rejetée — avis mis à jour en conforme');
+      setReactionTarget(null);
+      // Mise à jour optimiste immédiate de l'UI
+      setObserverOpinions(prev => {
+        const newMap = new Map(prev);
+        const pvId = selectedPV;
+        if (pvId) {
+          const ops = (newMap.get(pvId) ?? []).map(op => {
+            if (op.id !== opinionId) return op;
+            return {
+              ...op,
+              reactions: [...(op.reactions ?? []), newReaction],
+              ...(type === 'overridden' ? { conformity: 'conforme' as const } : {}),
+            };
+          });
+          newMap.set(pvId, ops);
+        }
+        return newMap;
+      });
+      loadPVs();
+    } finally {
+      setSubmittingReaction(false);
+    }
+  };
+
   const loadPVs = useCallback(async () => {
     const load = async () => {
       try {
@@ -273,38 +359,53 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           if (ecErr) throw ecErr;
           let allowedCenterIds = new Set<string>((ecRows || []).map((r: any) => r.center_id as string));
 
-          // Si l'utilisateur est validateur avec des centres/collèges assignés → filtrer davantage
-          if (user?.role === 'validateur') {
-            const centerColleges: Record<string, string[]> =
-              user.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
-                ? user.assigned_center_colleges
-                : ((usersData?.find(u => u.id === user.id) as any)?.assigned_center_colleges ?? {});
+          // ── Filtrage par rôle ─────────────────────────────────────────────────
+          // validateur, agent-saisie, observateur → centres + collèges assignés
+          // president-etablissement               → centres + bureaux assignés
+          const roleColleges  = user?.role === 'validateur' || user?.role === 'agent-saisie' || user?.role === 'observateur';
+          const roleBureaux   = user?.role === 'president-etablissement';
 
-            const assignedCenterIds = Object.keys(centerColleges);
+          if (roleColleges) {
+            // Restreindre allowedCenterIds aux centres présents dans assigned_center_colleges
+            const assignedCenterIds = Object.keys(user.assigned_center_colleges ?? {});
             if (assignedCenterIds.length > 0) {
-              allowedCenterIds = new Set(
-                [...allowedCenterIds].filter(id => assignedCenterIds.includes(id))
-              );
+              allowedCenterIds = new Set([...allowedCenterIds].filter(id => assignedCenterIds.includes(id)));
+            }
+          } else if (roleBureaux) {
+            // Restreindre allowedCenterIds aux centres présents dans assigned_center_bureaux
+            const assignedCenterIds = Object.keys(user.assigned_center_bureaux ?? {});
+            if (assignedCenterIds.length > 0) {
+              allowedCenterIds = new Set([...allowedCenterIds].filter(id => assignedCenterIds.includes(id)));
             }
           }
 
           const filteredBureaus = (bureaus || []).filter(b => allowedCenterIds.has(b.center_id));
           const filteredCenterIds = Array.from(new Set(filteredBureaus.map(b => b.center_id)));
 
-          // Construire la map centerId → collèges autorisés pour le filtre par collège
-          const centerCollegesFilter: Record<string, string[]> =
-            user?.role === 'validateur' && user.assigned_center_colleges && Object.keys(user.assigned_center_colleges).length > 0
-              ? user.assigned_center_colleges
-              : {};
+          const centerCollegesFilter: Record<string, string[]> = roleColleges ? (user.assigned_center_colleges ?? {}) : {};
+          const centerBureauxFilter:  Record<string, string[]> = roleBureaux  ? (user.assigned_center_bureaux  ?? {}) : {};
 
           const filteredPvRows = (pvRows || []).filter(r => {
             const bureau = filteredBureaus.find(b => b.id === r.bureau_id);
             if (!bureau) return false;
-            const allowedColleges = centerCollegesFilter[bureau.center_id];
-            // Si pas de filtre collège pour ce centre (tableau vide ou non défini) → tous les collèges autorisés
-            if (!allowedColleges || allowedColleges.length === 0) return true;
-            // Sinon, le college_type du PV doit être dans la liste
-            return !r.college_type || allowedColleges.includes(r.college_type);
+
+            if (roleColleges) {
+              // Filtre collège : vide = tous autorisés
+              const allowedColleges = centerCollegesFilter[bureau.center_id];
+              if (allowedColleges && allowedColleges.length > 0) {
+                if (r.college_type && !allowedColleges.includes(r.college_type)) return false;
+              }
+            }
+
+            if (roleBureaux) {
+              // Filtre bureau : vide = tous autorisés pour ce centre
+              const allowedBureaux = centerBureauxFilter[bureau.center_id];
+              if (allowedBureaux && allowedBureaux.length > 0) {
+                if (!allowedBureaux.includes(r.bureau_id)) return false;
+              }
+            }
+
+            return true;
           });
           setPvs(filteredPvRows);
 
@@ -314,13 +415,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           if (cErr) throw cErr;
           setBureauxMap(new Map(filteredBureaus.map(b => [b.id, b])));
           setCentersMap(new Map((centers || []).map(c => [c.id, c])));
+          setFilterCenters((centers || []).map(c => ({ id: String(c.id), name: c.name })));
 
           // Charger les avis observateurs pour les PV filtrés
           if (filteredPvRows.length > 0) {
             const pvIds = filteredPvRows.map(r => r.id);
             const { data: opinions } = await supabase
               .from('pv_observer_opinions')
-              .select('id, pv_id, observer_id, annotation, conformity, annotated_at')
+              .select('id, pv_id, observer_id, annotation, conformity, annotated_at, reactions')
               .in('pv_id', pvIds)
               .order('annotated_at', { ascending: true });
             const opinionsMap = new Map<string, any[]>();
@@ -335,6 +437,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 annotated_at_str: op.annotated_at
                   ? new Date(op.annotated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(op.annotated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
                   : '',
+                reactions: op.reactions ?? [],
               });
               opinionsMap.set(op.pv_id, list);
             });
@@ -352,7 +455,19 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
     };
     load();
-  }, [selectedElection, user?.id, user?.assigned_center_ids, user?.assigned_center_colleges]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedElection,
+    user?.id,
+    user?.role,
+    // Dépendances sérialisées pour éviter les re-renders infinis sur objets
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(user?.assigned_center_ids),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(user?.assigned_center_colleges),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(user?.assigned_center_bureaux),
+  ]);
 
   useEffect(() => { loadPVs(); }, [loadPVs]);
 
@@ -390,17 +505,16 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     return enriched.filter(e => {
       if (e.status === 'en_cours') return false; // PV réinitialisé — retirer de la validation
       if (filter !== 'all' && e.status !== filter) return false;
-      if (filters?.centerId && e.centerId !== filters.centerId) return false;
-      if (filters?.collegeType && e.college_type !== filters.collegeType) return false;
-      if (filters?.search?.trim()) {
-        const q = filters.search.trim().toLowerCase();
+      if (centerFilter && e.centerId !== centerFilter) return false;
+      if (searchFilter.trim()) {
+        const q = searchFilter.trim().toLowerCase();
         if (!e.bureauLabel.toLowerCase().includes(q) &&
             !e.centerName.toLowerCase().includes(q) &&
             !e.bureauName.toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [pvs, bureauxMap, centersMap, filter, filters, observerOpinions]);
+  }, [pvs, bureauxMap, centersMap, filter, centerFilter, searchFilter, observerOpinions]);
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -492,7 +606,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         return next;
       });
 
-      toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Non conforme');
+      toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Réserve');
       setDetailOpen(false);
     } finally {
       setSavingAnnotation(false);
@@ -658,6 +772,34 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Barre de filtre locale */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Rechercher un bureau, un établissement…"
+                value={searchFilter}
+                onChange={e => setSearchFilter(e.target.value)}
+                className="w-full pl-9 pr-3 h-9 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-400 outline-none transition-colors"
+              />
+            </div>
+            {filterCenters.length > 1 && (
+              <select
+                value={centerFilter}
+                onChange={e => setCenterFilter(e.target.value)}
+                className="h-9 text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 focus:border-blue-400 outline-none"
+              >
+                <option value="">Tous les établissements</option>
+                {filterCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+            {(searchFilter || centerFilter) && (
+              <button onClick={() => { setSearchFilter(''); setCenterFilter(''); }} className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">
+                Effacer
+              </button>
+            )}
+          </div>
           {/* Filtres statut */}
           <div className="flex flex-wrap gap-2 items-center">
             <div className="flex flex-wrap gap-1.5">
@@ -1068,22 +1210,22 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           type="button"
                           disabled={savingAnnotation || observerAnnotation.trim().length === 0}
                           onClick={() => submitObserverConformity('non_conforme')}
-                          title={observerAnnotation.trim().length === 0 ? 'Veuillez saisir un motif avant de signaler une non-conformité' : ''}
+                          title={observerAnnotation.trim().length === 0 ? 'Veuillez saisir un motif avant de signaler une réserve' : ''}
                           className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
                             observerConformity === 'non_conforme'
-                              ? 'border-red-600 bg-red-600 text-white shadow-sm'
-                              : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
+                              ? 'border-amber-600 bg-amber-600 text-white shadow-sm'
+                              : 'border-amber-500 bg-amber-50 text-amber-700 hover:bg-amber-100'
                           }`}
                         >
                           <XCircle className="w-4 h-4" />
-                          Non conforme
+                          Réserve
                         </button>
                       </div>
-                      {/* Message d'aide pour non conforme */}
+                      {/* Message d'aide pour signaler une réserve */}
                       {observerAnnotation.trim().length === 0 && (
-                        <p className="text-[11px] text-red-500 px-1 flex items-center gap-1">
+                        <p className="text-[11px] text-amber-600 px-1 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                          Un motif est requis pour signaler un avis non conforme.
+                          Un motif est requis pour signaler une réserve.
                         </p>
                       )}
                     </div>
@@ -1100,11 +1242,22 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                             <span className="font-medium text-slate-600 whitespace-nowrap">{op.observer_name}</span>
                             <span className="text-slate-400 whitespace-nowrap">{op.annotated_at_str}</span>
                             {op.conformity && (
-                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ${op.conformity === 'conforme' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                {op.conformity === 'conforme' ? <><CheckCircle className="w-3 h-3" /> Conforme</> : <><XCircle className="w-3 h-3" /> Non conforme</>}
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ${op.conformity === 'conforme' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {op.conformity === 'conforme' ? <><CheckCircle className="w-3 h-3" /> Conforme</> : <><AlertTriangle className="w-3 h-3" /> Réserve</>}
                               </span>
                             )}
                             {op.annotation && <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>}
+                            {((op as any).reactions ?? []).length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1 pl-3 w-full">
+                                {((op as any).reactions ?? []).map((r: any) => (
+                                  <span key={r.id} className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                    r.type === 'overridden' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                                  }`}>
+                                    {r.type === 'overridden' ? 'Réserve rejetée' : 'Approuvé'} — {r.reactor_name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1117,25 +1270,100 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide px-1">
                         Avis observateurs ({selectedPVData!.opinions!.length})
                       </p>
-                      {selectedPVData!.opinions!.map(op => (
-                        <div key={op.id} className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs">
-                          <PenLine className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                          <span className="font-medium text-slate-600 whitespace-nowrap">{op.observer_name}</span>
-                          {op.annotated_at_str && <span className="text-slate-400 whitespace-nowrap">{op.annotated_at_str}</span>}
-                          {op.conformity && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${
-                              op.conformity === 'conforme' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                            }`}>
-                              {op.conformity === 'conforme'
-                                ? <><CheckCircle className="w-3 h-3" /> Conforme</>
-                                : <><XCircle className="w-3 h-3" /> Non conforme</>}
-                            </span>
-                          )}
-                          {op.annotation && (
-                            <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>
-                          )}
-                        </div>
-                      ))}
+                      {selectedPVData!.opinions!.map(op => {
+                        const isTargeted = reactionTarget?.opinionId === op.id;
+                        const opReactions = (op as any).reactions ?? [];
+                        return (
+                          <div key={op.id} className="border rounded-xl p-3 bg-slate-50 space-y-2">
+                            {/* Opinion row */}
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <PenLine className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                              <span className="font-medium text-slate-600 whitespace-nowrap">{op.observer_name}</span>
+                              {op.annotated_at_str && <span className="text-slate-400 whitespace-nowrap">{op.annotated_at_str}</span>}
+                              {op.conformity && (
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${
+                                  op.conformity === 'conforme' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {op.conformity === 'conforme'
+                                    ? <><CheckCircle className="w-3 h-3" /> Conforme</>
+                                    : <><AlertTriangle className="w-3 h-3" /> Réserve</>}
+                                </span>
+                              )}
+                              {op.annotation && (
+                                <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>
+                              )}
+                              {/* React button — only when opinion is réserve */}
+                              {canReact && op.conformity === 'non_conforme' && !isTargeted && (
+                                <button
+                                  type="button"
+                                  onClick={() => setReactionTarget({ opinionId: op.id, comment: '' })}
+                                  className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors whitespace-nowrap shadow-sm"
+                                >
+                                  <PenLine className="w-3 h-3" />
+                                  Valider
+                                </button>
+                              )}
+                            </div>
+                            {/* Reactions list */}
+                            {opReactions.length > 0 && (
+                              <div className="space-y-1 pl-5">
+                                {opReactions.map((r: any) => (
+                                  <div key={r.id} className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                                    <span className="font-medium text-slate-600">{r.reactor_name}</span>
+                                    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full font-semibold ${
+                                      r.type === 'overridden' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                                    }`}>
+                                      {r.type === 'overridden' ? <><CheckCircle className="w-2.5 h-2.5" /> Réserve rejetée</> : <><CheckCircle className="w-2.5 h-2.5" /> Approuvé</>}
+                                    </span>
+                                    {r.comment && <span className="italic">"{r.comment}"</span>}
+                                    <span className="text-slate-400">{new Date(r.reacted_at).toLocaleDateString('fr-FR')} à {new Date(r.reacted_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {/* Reaction form */}
+                            {canReact && isTargeted && (
+                              <div className="pl-5 space-y-2 border-t border-slate-100 pt-2">
+                                <textarea
+                                  rows={2}
+                                  placeholder="Commentaire (obligatoire pour annuler la réserve)"
+                                  value={reactionTarget!.comment}
+                                  onChange={e => setReactionTarget(prev => prev ? { ...prev, comment: e.target.value } : null)}
+                                  className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                />
+                                <div className="flex gap-2 flex-wrap">
+                                  <button
+                                    type="button"
+                                    disabled={submittingReaction}
+                                    onClick={() => submitReaction(op.id, 'approved', reactionTarget!.comment)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
+                                  >
+                                    <CheckCircle className="w-3.5 h-3.5" />
+                                    Approuver la réserve
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={submittingReaction || !reactionTarget!.comment.trim()}
+                                    onClick={() => submitReaction(op.id, 'overridden', reactionTarget!.comment)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 hover:border-red-300 px-3 py-1.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    title={!reactionTarget!.comment.trim() ? 'Commentaire obligatoire' : ''}
+                                  >
+                                    <XCircle className="w-3.5 h-3.5" />
+                                    Rejeter la réserve (→ Conforme)
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setReactionTarget(null)}
+                                    className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5"
+                                  >
+                                    Annuler
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : null
                 )}
