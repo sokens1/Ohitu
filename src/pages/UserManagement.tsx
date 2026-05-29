@@ -42,6 +42,9 @@ interface AppUser {
   assigned_election_ids?: string[] | null;
   created_by?: string | null;
   electionTitle?: string;
+  assigned_center_ids?: string[] | null;
+  assigned_center_bureaux?: Record<string, string[]> | null;
+  assigned_center_colleges?: Record<string, string[]> | null;
 }
 
 interface Election {
@@ -259,8 +262,12 @@ const UserManagement = () => {
           createdAt: new Date(u.created_at).toISOString().split('T')[0],
           lastLogin: lastLoginMap.get(u.id),
           assigned_election_id: u.assigned_election_id,
+          assigned_election_ids: u.assigned_election_ids ?? null,
           created_by: u.created_by,
           electionTitle: u.elections?.title ?? undefined,
+          assigned_center_ids:      u.assigned_center_ids      ?? null,
+          assigned_center_bureaux:  u.assigned_center_bureaux  ?? null,
+          assigned_center_colleges: u.assigned_center_colleges ?? null,
         }));
 
         setUsers(transformed);
@@ -300,10 +307,10 @@ const UserManagement = () => {
       : u.assigned_election_id ? [u.assigned_election_id] : [];
     setFElectionIds(ids);
     if (ROLES_WITH_BUREAUX.includes(u.role)) {
-      setFCenterBureaux((u as any).assigned_center_bureaux ?? {});
+      setFCenterBureaux(u.assigned_center_bureaux ?? {});
       setFCenterColleges({});
     } else {
-      setFCenterColleges((u as any).assigned_center_colleges ?? {});
+      setFCenterColleges(u.assigned_center_colleges ?? {});
       setFCenterBureaux({});
     }
     setShowEditModal(true);
@@ -472,19 +479,25 @@ const UserManagement = () => {
         updatePayload.assigned_center_colleges = null;
       }
 
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from('users')
         .update(updatePayload)
-        .eq('id', editingUser.id);
+        .eq('id', editingUser.id)
+        .select('id');
 
       if (error) {
         console.error('Erreur mise à jour utilisateur:', error);
         const msg = (error as any)?.message ?? '';
         if (msg.includes('column') && msg.includes('does not exist')) {
-          toast.error('Colonnes manquantes en base — appliquez la migration SQL dans Supabase.');
+          toast.error('Colonnes manquantes en base — appliquez les migrations SQL dans Supabase.');
         } else {
           toast.error(`Échec de la mise à jour : ${msg || 'erreur inconnue'}`);
         }
+        return;
+      }
+
+      if (!updatedRows?.length) {
+        toast.error('Mise à jour bloquée — politique RLS manquante sur la table users. Appliquez la migration 20260529_users_rls_admin.sql dans Supabase.');
         return;
       }
 
