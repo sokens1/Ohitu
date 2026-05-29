@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchElectionById, fetchPublicElections } from '../api/elections';
 import { fetchElectionSummary, fetchCenterSummary, fetchBureauSummary, fetchCenterSummaryByCandidate, fetchBureauSummaryByCandidate } from '../api/results';
@@ -28,6 +28,16 @@ type CollegeDetailRow = {
   syndicatName: string;
   votes: number;
   seats: number;
+};
+
+const getNormalizedCollegeLabel = (val: string | null | undefined): string => {
+  if (!val) return 'Général';
+  const v = val.toLowerCase().trim();
+  if (v === 'general' || v === 'encadrement') return 'Encadrement';
+  if (v === 'cadres' || v === 'cadre') return 'Cadre';
+  if (v === 'employes' || v.includes('maitrise') || v.includes('maîtrise')) return 'Maîtrise';
+  if (v === 'ouvriers' || v.includes('execution') || v.includes('exécution')) return 'Exécution';
+  return val.charAt(0).toUpperCase() + val.slice(1);
 };
 
 function allocateSeatsProportional(
@@ -843,6 +853,8 @@ const ElectionResults: React.FC = () => {
 
       // Construire les données des bureaux
       const filteredBureaux = (pvsData || []).map((pv: any) => ({
+        pv_id: pv.id,
+        college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
         bureau_id: pv.bureau_id,
         bureau_name: pv.voting_bureaux?.name || '',
         center_id: pv.voting_bureaux?.center_id || '',
@@ -1073,7 +1085,7 @@ const ElectionResults: React.FC = () => {
         filteredSummaryData.forEach(c => { c.seats = 0; });
 
         // Map pour stocker les sièges cumulés par collège et par syndicat
-        const collegeSyndicatSeats = new Map<string, number>();
+        collegeSyndicatSeats = new Map<string, number>();
 
         // 5) Calculer les sièges pour chaque PV publié et les accumuler
         pvCandidateResults.forEach((results, pvId) => {
@@ -1119,13 +1131,22 @@ const ElectionResults: React.FC = () => {
             }
 
             // Accumuler par collège électoral et par syndicat pour le tableau détaillé
-            const collegeLabel = normalizeCollegeKey(colType) === 'general' ? 'Encadrement' :
-                                normalizeCollegeKey(colType) === 'cadres' ? 'Cadre' :
-                                normalizeCollegeKey(colType) === 'employes' ? 'Maîtrise' :
-                                normalizeCollegeKey(colType) === 'ouvriers' ? 'Exécution' : colType;
+            const collegeLabel = getNormalizedCollegeLabel(colType);
             const seatKey = `${collegeLabel}_${pk}`;
             collegeSyndicatSeats.set(seatKey, (collegeSyndicatSeats.get(seatKey) || 0) + s);
           });
+
+          // Attacher les résultats syndicaux détaillés par bureau
+          const bureauSyndicats = syndicats.map(s => ({
+            syndicatName: s.partyKey,
+            votes: s.votes,
+            seats: alloc.seats[s.partyKey] || 0
+          })).sort((a, b) => b.votes - a.votes);
+
+          const bRow = filteredBureaux.find(b => String((b as any).pv_id) === String(pvId));
+          if (bRow) {
+            (bRow as any).syndicats = bureauSyndicats;
+          }
         });
 
         // Total des sièges de l'élection
@@ -1224,10 +1245,11 @@ const ElectionResults: React.FC = () => {
           Object.entries(syndicatVotes)
             .sort((a, b) => b[1] - a[1])
             .forEach(([syndicatName, votes]) => {
-              const seatKey = `${collegeName}_${syndicatName}`;
+              const collegeLabel = getNormalizedCollegeLabel(collegeName);
+              const seatKey = `${collegeLabel}_${syndicatName}`;
               const seats = collegeSyndicatSeats.get(seatKey) || 0;
               collegeRowsBuilt.push({
-                collegeName,
+                collegeName: collegeLabel,
                 syndicatName,
                 votes,
                 seats: seats,
@@ -1388,6 +1410,38 @@ const ElectionResults: React.FC = () => {
   };
 
   type BureauData = any;
+
+  // Fonction pour agréger les résultats par collège électoral au niveau de l'établissement
+  const getEstablishmentCollegeRows = (bureaux: any[]) => {
+    const collegeSyndicats = new Map<string, { college: string; syndicat: string; seats: number; votes: number }>();
+    
+    bureaux.forEach((b: any) => {
+      const collegeLabel = getNormalizedCollegeLabel(b.college_type || b.bureau_name);
+      if (b.syndicats) {
+        b.syndicats.forEach((s: any) => {
+          const key = `${collegeLabel}_${s.syndicatName}`;
+          if (!collegeSyndicats.has(key)) {
+            collegeSyndicats.set(key, {
+              college: collegeLabel,
+              syndicat: s.syndicatName,
+              seats: 0,
+              votes: 0
+            });
+          }
+          const entry = collegeSyndicats.get(key)!;
+          entry.seats += Number(s.seats) || 0;
+          entry.votes += Number(s.votes) || 0;
+        });
+      }
+    });
+
+    return Array.from(collegeSyndicats.values()).sort((a, b) => {
+      if (a.college !== b.college) {
+        return a.college.localeCompare(b.college);
+      }
+      return b.votes - a.votes;
+    });
+  };
 
   // Fonction pour trier et regrouper les données
   const getSortedAndGroupedData = (): CenterGroup[] | BureauData[] => {
@@ -2902,42 +2956,37 @@ const ElectionResults: React.FC = () => {
                 </div>
                 <p className="text-gray-600 text-sm sm:text-base lg:text-lg max-w-2xl mx-auto mb-4 sm:mb-6 lg:mb-8 px-2 sm:px-4">
                   {isProResults
-                    ? 'Explorez les résultats par établissement, par bureau ou par collège pour une analyse approfondie'
+                    ? 'Explorez les résultats par établissement pour une analyse approfondie'
                     : 'Explorez les résultats par centre de vote ou par bureau pour une analyse approfondie'}
                 </p>
 
                 {/* Boutons de navigation modernisés */}
-                <div className={`flex items-center justify-center gap-1.5 sm:gap-2 lg:gap-4 bg-white rounded-full p-0.5 sm:p-1 lg:p-2 shadow-lg border border-gray-200 mx-auto ${isProResults ? 'max-w-md sm:max-w-lg lg:max-w-2xl' : 'max-w-xs sm:max-w-sm lg:max-w-md'}`}>
-                  <button
-                    onClick={() => setViewMode('center')}
-                    className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'center'
-                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
-                      : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
-                      }`}
-                  >
-                    <Building className="w-3 h-3 sm:w-4 sm:h-4" />
-                    <span className="hidden sm:inline">
-                      {results.election?.type === 'Élection Professionnelle' ? 'Par établissement' : 'Par centre'}
-                    </span>
-                    <span className="sm:hidden">
-                      {results.election?.type === 'Élection Professionnelle' ? 'Étab.' : 'Centres'}
-                    </span>
-                  </button>
-
-                  {isProResults && (
+                {!isProResults && (
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2 lg:gap-4 bg-white rounded-full p-0.5 sm:p-1 lg:p-2 shadow-lg border border-gray-200 mx-auto max-w-xs sm:max-w-sm lg:max-w-md">
                     <button
-                      onClick={() => setViewMode('college')}
-                      className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'college'
+                      onClick={() => setViewMode('center')}
+                      className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'center'
                         ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
                         : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
                         }`}
                     >
-                      <Layers className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="hidden sm:inline">Par collège</span>
-                      <span className="sm:hidden">Collèges</span>
+                      <Building className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Par centre</span>
+                      <span className="sm:hidden">Centres</span>
                     </button>
-                  )}
-                </div>
+                    <button
+                      onClick={() => setViewMode('bureau')}
+                      className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'bureau'
+                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
+                        : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
+                        }`}
+                    >
+                      <Target className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Par bureau</span>
+                      <span className="sm:hidden">Bureaux</span>
+                    </button>
+                  </div>
+                )}
 
                 {/* Contrôles de tri - affichés seulement s'il y a des données */}
                 {(hasCenterData() || hasBureauData() || hasCollegeData()) && (
@@ -2989,195 +3038,180 @@ const ElectionResults: React.FC = () => {
                 )}
               </div>
 
-              {viewMode === 'college' && isProResults ? (
-                <div className="bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-                  <div className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 bg-gradient-to-r from-gray-50 to-blue-50 border-b border-gray-200">
-                    <h3 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-800 flex items-center gap-1.5 sm:gap-2">
-                      <Layers className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-blue-600" />
-                      Vue détaillée par collège
-                    </h3>
-                    <p className="text-[10px] sm:text-xs lg:text-sm text-gray-600 mt-0.5 sm:mt-1">
-                      Répartition des voix et des sièges par collège électoral et par syndicat
-                    </p>
-                  </div>
-                  <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
-                    <table className="w-full min-w-[520px]">
-                      <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
-                        <tr>
-                          <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs">Collège</th>
-                          <th className="text-left px-2 py-2 font-semibold text-[9px] sm:text-xs">Syndicat</th>
-                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs">Sièges obtenus</th>
-                          <th className="text-right px-2 py-2 font-semibold text-[9px] sm:text-xs">Voix</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {getSortedCollegeRows().map((row, idx) => (
-                          <tr key={`${row.collegeName}-${row.syndicatName}-${idx}`} className="hover:bg-blue-50 transition-colors duration-200">
-                            <td className="px-2 py-2 font-medium text-gray-800 text-[8px] sm:text-xs">{row.collegeName}</td>
-                            <td className="px-2 py-2 text-[8px] sm:text-xs">{row.syndicatName}</td>
-                            <td className="px-2 py-2 text-right font-bold text-blue-700 text-[8px] sm:text-xs">{row.seats}</td>
-                            <td className="px-2 py-2 text-right font-semibold text-gray-800 text-[8px] sm:text-xs">{row.votes.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                        {getSortedCollegeRows().length === 0 && (
-                          <tr>
-                            <td colSpan={4} className="px-2 py-8 text-center text-gray-500 text-sm">
-                              Aucune donnée par collège disponible.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3 sm:space-y-4 lg:space-y-6">
-                  {(getSortedAndGroupedData() as CenterGroup[]).map((group, idx) => {
-                    const c = group.center;
-                    return (
-                      <details key={`${c.center_id}-${idx}`} className="group bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300 overflow-hidden">
-                        <summary className="cursor-pointer px-3 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 lg:gap-4 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all duration-300">
-                          <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
-                            <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm lg:text-lg">
-                              {c.center_name?.charAt(0) || 'C'}
-                            </div>
-                            <div>
-                              <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800">{c.center_name}</h3>
-                              <p className="text-gray-600 text-xs sm:text-sm">Centre de vote</p>
-                            </div>
+              <div className="space-y-3 sm:space-y-4 lg:space-y-6">
+                {(getSortedAndGroupedData() as CenterGroup[]).map((group, idx) => {
+                  const c = group.center;
+                  return (
+                    <details key={`${c.center_id}-${idx}`} className="group bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300 overflow-hidden">
+                      <summary className="cursor-pointer px-3 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 lg:gap-4 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all duration-300">
+                        <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
+                          <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm lg:text-lg">
+                            {c.center_name?.charAt(0) || 'C'}
                           </div>
-                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
-                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">{electorsLabel}</div>
-                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_registered?.toLocaleString?.() || c.total_registered}</div>
-                            </div>
-                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Votants</div>
-                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_voters?.toLocaleString?.() || c.total_voters}</div>
-                            </div>
-                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Exprimés</div>
-                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_expressed_votes?.toLocaleString?.() || c.total_expressed_votes}</div>
-                            </div>
-                            {/* <div className="bg-white rounded-lg sm:rounded-xl px-2 sm:px-4 py-2 sm:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                         <div className="text-[9px] sm:text-[11px] uppercase text-gray-500 font-medium mb-1">Score</div>
-                         <div className="font-bold text-blue-600 text-sm sm:text-lg">{typeof c.score_pct === 'number' ? `${Math.min(Math.max(c.score_pct,0),100).toFixed(1)}%` : '-'}</div>
-                       </div> */}
-                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Abstention</div>
-                              <div className={`font-bold text-xs sm:text-sm lg:text-lg ${typeof c.participation_pct === 'number'
-                                ? ((100 - c.participation_pct) >= 49.51
-                                  ? 'text-red-600'
-                                  : (((100 - c.participation_pct) > 20.5 && (100 - c.participation_pct) <= 49.5) ? 'text-yellow-600' : 'text-green-600'))
-                                : 'text-green-600'}`}>
-                                {typeof c.participation_pct === 'number' ? `${(100 - Math.min(Math.max(c.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
-                              </div>
-                            </div>
-                          </div>
-                        </summary>
-                        <div className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 bg-gray-50">
-                          <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 -mx-4 sm:-mx-6 lg:-mx-8">
-                            <table className="min-w-full min-w-[500px]">
-                              <thead>
-                                <tr className="border-b border-gray-200">
-                                  <th className="text-left px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
-                                    <div className="flex items-center gap-1 sm:gap-1.5 lg:gap-2">
-                                      <Target className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                      <span className="hidden sm:inline">Bureau</span>
-                                      <span className="sm:hidden">Bur.</span>
-                                    </div>
-                                  </th>
-                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                      <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                      <span className="hidden sm:inline">{electorsLabel}</span>
-                                      <span className="sm:hidden">Insc.</span>
-                                    </div>
-                                  </th>
-                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                      <Vote className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                      <span className="hidden sm:inline">Votants</span>
-                                      <span className="sm:hidden">Vot.</span>
-                                    </div>
-                                  </th>
-                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                      <BarChart3 className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                      <span className="hidden sm:inline">Exprimés</span>
-                                      <span className="sm:hidden">Expr.</span>
-                                    </div>
-                                  </th>
-                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                      <TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                      <span className="hidden sm:inline">Abstention</span>
-                                      <span className="sm:hidden">Part.</span>
-                                    </div>
-                                  </th>
-                                  {/* <th className="text-right px-2 sm:px-4 py-2 sm:py-3 font-semibold text-gray-700 text-xs sm:text-sm">
-                               <div className="flex items-center justify-end gap-1 sm:gap-2">
-                                 <Target className="w-3 h-3 sm:w-4 sm:h-4" />
-                                 Score
-                               </div>
-                             </th> */}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-200">
-                                {group.bureaux.sort((a, b) => {
-                                  // Trier les bureaux par numéro de bureau
-                                  const numA = parseInt(a.bureau_name?.match(/\d+/)?.[0] || '0');
-                                  const numB = parseInt(b.bureau_name?.match(/\d+/)?.[0] || '0');
-                                  return numA - numB;
-                                }).map((b, i2) => (
-                                  <tr key={i2} className="hover:bg-blue-50 transition-colors duration-200">
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-medium text-gray-800 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">{b.bureau_name}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_registered?.toLocaleString() ?? '-'}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_voters?.toLocaleString() ?? '-'}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_expressed_votes?.toLocaleString() ?? '-'}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
-                                      <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
-                                        typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
-                                          'bg-green-100 text-green-800'
-                                        }`}>
-                                        {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
-                                      </span>
-                                    </td>
-                                    {/* <td className="px-2 sm:px-4 py-2 sm:py-3 text-right">
-                                 <span className={`px-1 sm:px-2 py-1 rounded-full text-xs font-medium ${
-                                   typeof b.score_pct === 'number' && b.score_pct >= 50 ? 'bg-blue-100 text-blue-800' :
-                                   typeof b.score_pct === 'number' && b.score_pct >= 30 ? 'bg-indigo-100 text-indigo-800' :
-                                   'bg-gray-100 text-gray-800'
-                                 }`}>
-                                   {typeof b.score_pct === 'number' ? `${Math.min(Math.max(b.score_pct,0),100).toFixed(1)}%` : '-'}
-                                 </span>
-                               </td> */}
-                                  </tr>
-                                ))}
-                                {group.bureaux.length === 0 && (
-                                  <tr>
-                                    <td className="px-2 sm:px-4 py-4 sm:py-6 lg:py-8 text-center text-gray-500 text-[10px] sm:text-xs lg:text-sm" colSpan={5}>
-                                      <div className="flex flex-col items-center gap-1 sm:gap-2">
-                                        <Target className="w-4 h-4 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-gray-400" />
-                                        <span>Aucun bureau disponible</span>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
+                          <div>
+                            <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800">{c.center_name}</h3>
+                            <p className="text-gray-600 text-xs sm:text-sm">
+                              {isProResults ? 'Établissement' : 'Centre de vote'}
+                            </p>
                           </div>
                         </div>
-                      </details>
-                    )
-                  })}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
+                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">{electorsLabel}</div>
+                            <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_registered?.toLocaleString?.() || c.total_registered}</div>
+                          </div>
+                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Votants</div>
+                            <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_voters?.toLocaleString?.() || c.total_voters}</div>
+                          </div>
+                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Exprimés</div>
+                            <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_expressed_votes?.toLocaleString?.() || c.total_expressed_votes}</div>
+                          </div>
+                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Abstention</div>
+                            <div className={`font-bold text-xs sm:text-sm lg:text-lg ${typeof c.participation_pct === 'number'
+                              ? ((100 - c.participation_pct) >= 49.51
+                                ? 'text-red-600'
+                                : (((100 - c.participation_pct) > 20.5 && (100 - c.participation_pct) <= 49.5) ? 'text-yellow-600' : 'text-green-600'))
+                              : 'text-green-600'}`}>
+                              {typeof c.participation_pct === 'number' ? `${(100 - Math.min(Math.max(c.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
+                            </div>
+                          </div>
+                        </div>
+                      </summary>
+                      <div className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 bg-gray-50">
+                        <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 -mx-4 sm:-mx-6 lg:-mx-8">
+                          <table className="min-w-full min-w-[500px]">
+                            <thead>
+                              <tr className="border-b border-gray-200">
+                                <th className="text-left px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                                  <div className="flex items-center gap-1 sm:gap-1.5 lg:gap-2">
+                                    <Target className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                    <span>
+                                      {results.election?.type === 'Élection Professionnelle' ? 'Bureau / Collège' : 'Bureau'}
+                                    </span>
+                                  </div>
+                                </th>
+                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                    <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                    <span className="hidden sm:inline">{electorsLabel}</span>
+                                    <span className="sm:hidden">Insc.</span>
+                                  </div>
+                                </th>
+                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                    <Vote className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                    <span className="hidden sm:inline">Votants</span>
+                                    <span className="sm:hidden">Vot.</span>
+                                  </div>
+                                </th>
+                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                    <BarChart3 className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                    <span className="hidden sm:inline">Exprimés</span>
+                                    <span className="sm:hidden">Expr.</span>
+                                  </div>
+                                </th>
+                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                    <TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                    <span className="hidden sm:inline">Abstention</span>
+                                    <span className="sm:hidden">Part.</span>
+                                  </div>
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {group.bureaux.sort((a, b) => {
+                                const numA = parseInt(a.bureau_name?.match(/\d+/)?.[0] || '0');
+                                const numB = parseInt(b.bureau_name?.match(/\d+/)?.[0] || '0');
+                                return numA - numB;
+                              }).map((b, i2) => (
+                                <tr key={i2} className="hover:bg-blue-50 transition-colors duration-200">
+                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-medium text-gray-800 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">{b.bureau_name}</td>
+                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_registered?.toLocaleString() ?? '-'}</td>
+                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_voters?.toLocaleString() ?? '-'}</td>
+                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_expressed_votes?.toLocaleString() ?? '-'}</td>
+                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
+                                    <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
+                                      typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-green-100 text-green-800'
+                                      }`}>
+                                      {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                              {group.bureaux.length === 0 && (
+                                <tr>
+                                  <td className="px-2 sm:px-4 py-4 sm:py-6 lg:py-8 text-center text-gray-500 text-[10px] sm:text-xs lg:text-sm" colSpan={5}>
+                                    <div className="flex flex-col items-center gap-1 sm:gap-2">
+                                      <Target className="w-4 h-4 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-gray-400" />
+                                      <span>Aucun bureau disponible</span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {isProResults && (
+                          <details className="group mt-4 border border-gray-200 rounded-lg bg-white overflow-hidden">
+                            <summary className="cursor-pointer px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors font-medium text-xs sm:text-sm flex items-center justify-between text-gray-700 list-none [&::-webkit-details-marker]:hidden">
+                              <div className="flex items-center gap-1.5 sm:gap-2">
+                                <Layers className="w-3.5 h-3.5 text-blue-500" />
+                                <span>Voir la répartition par collège électoral</span>
+                              </div>
+                              <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:rotate-180" />
+                            </summary>
+                            <div className="p-3 sm:p-4 border-t border-gray-200 bg-white">
+                              <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                                <table className="w-full text-left text-xs sm:text-sm">
+                                  <thead>
+                                    <tr className="border-b border-gray-200 bg-slate-50">
+                                      <th className="px-3 py-2 font-semibold text-gray-700">Collège</th>
+                                      <th className="px-3 py-2 font-semibold text-gray-700">Syndicat</th>
+                                      <th className="px-3 py-2 font-semibold text-gray-700 text-right">Sièges obtenus</th>
+                                      <th className="px-3 py-2 font-semibold text-gray-700 text-right">Voix</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {getEstablishmentCollegeRows(group.bureaux).map((row, idx2) => (
+                                      <tr key={idx2} className="border-b border-gray-100 last:border-0 hover:bg-slate-50">
+                                        <td className="px-3 py-2 text-gray-800 font-medium">{row.college}</td>
+                                        <td className="px-3 py-2 text-gray-600">{row.syndicat}</td>
+                                        <td className="px-3 py-2 text-right font-semibold text-gray-800">{row.seats}</td>
+                                        <td className="px-3 py-2 text-right text-gray-600">{row.votes?.toLocaleString() || '0'}</td>
+                                      </tr>
+                                    ))}
+                                    {getEstablishmentCollegeRows(group.bureaux).length === 0 && (
+                                      <tr>
+                                        <td colSpan={4} className="px-3 py-4 text-center text-gray-500">
+                                          Aucune donnée de répartition par collège disponible.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })}
                   {(getSortedAndGroupedData() as CenterGroup[]).length === 0 && (
-                    <div className="text-center text-gov-gray">Aucun centre à afficher.</div>
+                    <div className="text-center text-gov-gray">
+                      {isProResults ? 'Aucun établissement à afficher.' : 'Aucun centre à afficher.'}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
-          ) : (
+              </div>
+            ) : (
             /* Message d'état vide quand pas de données */
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
               <div className="text-center">
