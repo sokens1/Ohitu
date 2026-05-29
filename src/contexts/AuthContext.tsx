@@ -16,6 +16,8 @@ export interface User {
   assigned_center_ids?: string[] | null;
   /** map centerId → college_types[] (vide = tous les collèges du centre) */
   assigned_center_colleges?: Record<string, string[]> | null;
+  /** map centerId → bureauIds[] (vide = tous les bureaux du centre) */
+  assigned_center_bureaux?: Record<string, string[]> | null;
   created_by?: string | null;
 }
 
@@ -62,6 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               assigned_election_ids: userData.assigned_election_ids ?? null,
               assigned_center_ids: userData.assigned_center_ids ?? null,
               assigned_center_colleges: userData.assigned_center_colleges ?? null,
+              assigned_center_bureaux: userData.assigned_center_bureaux ?? null,
               created_by: userData.created_by
             };
             setUser(u);
@@ -134,6 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           assigned_election_ids: userData.assigned_election_ids ?? null,
           assigned_center_ids: userData.assigned_center_ids ?? null,
           assigned_center_colleges: userData.assigned_center_colleges ?? null,
+          assigned_center_bureaux: userData.assigned_center_bureaux ?? null,
           created_by: userData.created_by
         };
 
