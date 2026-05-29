@@ -328,22 +328,26 @@ const Results = () => {
                   className={`grid w-full bg-transparent h-auto p-0`}
                   style={{ gridTemplateColumns: `repeat(${allowedTabs.length}, 1fr)` }}
                 >
-                  {allowedTabs.map(tab => (
-                    <TabsTrigger
-                      key={tab.value}
-                      value={tab.value}
-                      className="flex items-center justify-center space-x-1 sm:space-x-2 py-3 sm:py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50 text-xs sm:text-sm"
-                    >
-                      <tab.icon className="w-4 h-4 sm:w-5 sm:h-5" />
-                      <span className="hidden sm:inline">{tab.label}</span>
-                      <span className="sm:hidden">{tab.labelShort}</span>
-                      {tab.value === 'validation' && globalStats.pvsEnAttente > 0 && (
-                        <Badge className="bg-red-500 text-white text-xs ml-1">
-                          {globalStats.pvsEnAttente}
-                        </Badge>
-                      )}
-                    </TabsTrigger>
-                  ))}
+                  {allowedTabs.map(tab => {
+                    const label      = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.label;
+                    const labelShort = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.labelShort;
+                    return (
+                      <TabsTrigger
+                        key={tab.value}
+                        value={tab.value}
+                        className="flex items-center justify-center space-x-1 sm:space-x-2 py-3 sm:py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-blue-50 text-xs sm:text-sm"
+                      >
+                        <tab.icon className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span className="hidden sm:inline">{label}</span>
+                        <span className="sm:hidden">{labelShort}</span>
+                        {tab.value === 'validation' && role !== 'observateur' && globalStats.pvsEnAttente > 0 && (
+                          <Badge className="bg-red-500 text-white text-xs ml-1">
+                            {globalStats.pvsEnAttente}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                    );
+                  })}
                 </TabsList>
               </div>
 

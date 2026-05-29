@@ -455,7 +455,19 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
     };
     load();
-  }, [selectedElection, user?.id, user?.role, user?.assigned_center_ids, user?.assigned_center_colleges, user?.assigned_center_bureaux]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedElection,
+    user?.id,
+    user?.role,
+    // Dépendances sérialisées pour éviter les re-renders infinis sur objets
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(user?.assigned_center_ids),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(user?.assigned_center_colleges),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(user?.assigned_center_bureaux),
+  ]);
 
   useEffect(() => { loadPVs(); }, [loadPVs]);
 

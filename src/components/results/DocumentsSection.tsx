@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
@@ -100,13 +100,12 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadContext = useRef<{ centerId: string; collegeType: string | null; docType: 'pv' | 'participation_list' } | null>(null);
 
-  // ── Chargement des centres & documents ──────────────────────────────────────
-  useEffect(() => {
-    if (!selectedElection) return;
-    load();
-  }, [selectedElection, user?.id, user?.assigned_center_bureaux]);
+  // Clés stables pour éviter les re-renders infinis sur les dépendances objets
+  const centerBureauxKey = JSON.stringify(user?.assigned_center_bureaux ?? null);
+  const centerCollegesKey = JSON.stringify(user?.assigned_center_colleges ?? null);
 
-  const load = async () => {
+  // ── Chargement des centres & documents ──────────────────────────────────────
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       // 1. Déterminer les centres accessibles
@@ -205,7 +204,13 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     } finally {
       setLoading(false);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedElection, user?.id, canUpload, centerBureauxKey, centerCollegesKey]);
+
+  useEffect(() => {
+    if (!selectedElection) return;
+    load();
+  }, [load]);
 
   // ── Upload ──────────────────────────────────────────────────────────────────
   const triggerUpload = (centerId: string, collegeType: string | null, docType: 'pv' | 'participation_list') => {
