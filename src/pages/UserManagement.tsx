@@ -330,7 +330,11 @@ const UserManagement = () => {
         if (ROLES_WITH_BUREAUX.includes(fRole)) {
           const { data: bureauxData } = await supabase
             .from('voting_bureaux').select('id, name, center_id').in('center_id', centerIds).order('name');
-          setAvailableBureaux((bureauxData || []).map(b => ({ id: b.id, name: b.name, centerId: b.center_id })));
+          setAvailableBureaux(
+            (bureauxData || [])
+              .filter(b => !/^college/i.test(b.name.trim()))
+              .map(b => ({ id: b.id, name: b.name, centerId: b.center_id }))
+          );
           setAvailableColleges([]);
         } else {
           const { data: collegesData } = await supabase
@@ -420,6 +424,9 @@ const UserManagement = () => {
         assigned_election_ids: ids,
         created_by: inserted.created_by,
         electionTitle,
+        assigned_center_ids:      inserted.assigned_center_ids      ?? null,
+        assigned_center_bureaux:  inserted.assigned_center_bureaux  ?? null,
+        assigned_center_colleges: inserted.assigned_center_colleges ?? null,
       }, ...prev]);
 
       toast.success('Utilisateur créé avec succès');
@@ -488,7 +495,19 @@ const UserManagement = () => {
 
       const electionTitle = fElectionIds.map(id => allElections.find(e => e.id === id)?.title).filter(Boolean).join(', ');
       setUsers(prev => prev.map(u => u.id === editingUser.id
-        ? { ...u, name: fName.trim(), email: fEmail.trim(), role: fRole, isActive: fActive, assigned_election_id: fElectionIds[0] ?? null, assigned_election_ids: fElectionIds, electionTitle }
+        ? {
+            ...u,
+            name: fName.trim(),
+            email: fEmail.trim(),
+            role: fRole,
+            isActive: fActive,
+            assigned_election_id: fElectionIds[0] ?? null,
+            assigned_election_ids: fElectionIds,
+            electionTitle,
+            assigned_center_ids:      updatePayload.assigned_center_ids as string[] | null,
+            assigned_center_bureaux:  updatePayload.assigned_center_bureaux  as Record<string, string[]> | null,
+            assigned_center_colleges: updatePayload.assigned_center_colleges as Record<string, string[]> | null,
+          }
         : u
       ));
       toast.success('Utilisateur mis à jour');
