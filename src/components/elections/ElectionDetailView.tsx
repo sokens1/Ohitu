@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
@@ -142,6 +142,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
   const [candidatesSearch, setCandidatesSearch] = useState('');
   const [candidatesCollegeFilter, setCandidatesCollegeFilter] = useState('all');
+  const [candidatesEtablissementFilter, setCandidatesEtablissementFilter] = useState('all');
+  const [candidatesSyndicatFilter, setCandidatesSyndicatFilter] = useState('all');
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(new Set());
   const [candidatesPage, setCandidatesPage] = useState(1);
   const [candidatesGridPage, setCandidatesGridPage] = useState(1);
@@ -339,6 +341,21 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const candidates: Candidate[] = candidatesData ?? [];
   const enterprise = enterpriseData ?? null;
   const loading = centersLoading;
+
+  // Valeurs dérivées pour les filtres établissement et syndicat
+  const allEtablissements = useMemo(() => {
+    const set = new Set<string>();
+    candidates.forEach((c: any) => {
+      c.titulaires?.forEach((t: any) => { if (t.etablissement) set.add(t.etablissement); });
+    });
+    return Array.from(set).sort();
+  }, [candidates]);
+
+  const allSyndicats = useMemo(() => {
+    const set = new Set<string>();
+    candidates.forEach((c: any) => { if (c.party) set.add(c.party); });
+    return Array.from(set).sort();
+  }, [candidates]);
 
 
   // Mettre à jour les statistiques quand les données changent
@@ -796,7 +813,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     const matchCollege =
       candidatesCollegeFilter === 'all' || c.college === candidatesCollegeFilter;
 
-    return matchSearch && matchCollege;
+    const matchEtablissement =
+      candidatesEtablissementFilter === 'all' ||
+      ((c as any).titulaires ?? []).some((t: any) => t.etablissement === candidatesEtablissementFilter);
+
+    const matchSyndicat =
+      candidatesSyndicatFilter === 'all' || c.party === candidatesSyndicatFilter;
+
+    return matchSearch && matchCollege && matchEtablissement && matchSyndicat;
   });
 
   const totalCandidatesPages = Math.max(1, Math.ceil(filteredCandidates.length / CANDIDATES_PAGE_SIZE));
@@ -1573,36 +1597,76 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             </div>
 
             {/* Barre de recherche + filtres */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  placeholder={election.type === 'Élection Professionnelle' ? 'Rechercher syndicat, tête de liste, établissement…' : 'Rechercher candidat, parti…'}
-                  value={candidatesSearch}
-                  onChange={(e) => { setCandidatesSearch(e.target.value); setCandidatesPage(1); setCandidatesGridPage(1); }}
-                  className="pl-9"
-                />
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
+                {/* Recherche - réduite */}
+                <div className="relative sm:w-56">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    placeholder={election.type === 'Élection Professionnelle' ? 'Rechercher…' : 'Rechercher candidat, parti…'}
+                    value={candidatesSearch}
+                    onChange={(e) => { setCandidatesSearch(e.target.value); setCandidatesPage(1); setCandidatesGridPage(1); }}
+                    className="pl-9 h-9 text-sm"
+                  />
+                </div>
+
+                {election.type === 'Élection Professionnelle' && (
+                  <>
+                    {/* Filtre collège */}
+                    <Select
+                      value={candidatesCollegeFilter}
+                      onValueChange={(v) => { setCandidatesCollegeFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
+                    >
+                      <SelectTrigger className="w-full sm:w-40 h-9 text-sm">
+                        <SelectValue placeholder="Collège" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tous les collèges</SelectItem>
+                        <SelectItem value="general">Encadrement</SelectItem>
+                        <SelectItem value="cadres">Cadre</SelectItem>
+                        <SelectItem value="employes">Maîtrise</SelectItem>
+                        <SelectItem value="ouvriers">Exécution</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Filtre établissement */}
+                    <Select
+                      value={candidatesEtablissementFilter}
+                      onValueChange={(v) => { setCandidatesEtablissementFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
+                    >
+                      <SelectTrigger className="w-full sm:w-44 h-9 text-sm">
+                        <SelectValue placeholder="Établissement" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tous les établissements</SelectItem>
+                        {allEtablissements.map((etab) => (
+                          <SelectItem key={etab} value={etab}>{etab}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    {/* Filtre syndicat */}
+                    <Select
+                      value={candidatesSyndicatFilter}
+                      onValueChange={(v) => { setCandidatesSyndicatFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
+                    >
+                      <SelectTrigger className="w-full sm:w-48 h-9 text-sm">
+                        <SelectValue placeholder="Syndicat" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tous les syndicats</SelectItem>
+                        {allSyndicats.map((synd) => (
+                          <SelectItem key={synd} value={synd}>{synd}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </>
+                )}
+
+                <span className="self-center text-xs text-gray-500 whitespace-nowrap ml-auto">
+                  {filteredCandidates.length} résultat{filteredCandidates.length !== 1 ? 's' : ''}
+                </span>
               </div>
-              {election.type === 'Élection Professionnelle' && (
-                <Select
-                  value={candidatesCollegeFilter}
-                  onValueChange={(v) => { setCandidatesCollegeFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
-                >
-                  <SelectTrigger className="w-full sm:w-48">
-                    <SelectValue placeholder="Tous les collèges" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tous les collèges</SelectItem>
-                    <SelectItem value="general">Encadrement</SelectItem>
-                    <SelectItem value="cadres">Cadre</SelectItem>
-                    <SelectItem value="employes">Maîtrise</SelectItem>
-                    <SelectItem value="ouvriers">Exécution</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-              <span className="self-center text-xs text-gray-500 whitespace-nowrap">
-                {filteredCandidates.length} résultat{filteredCandidates.length !== 1 ? 's' : ''}
-              </span>
             </div>
 
             {/* Action de suppression groupée (vue liste) */}
@@ -1646,6 +1710,20 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   >
                     <CardContent className="p-3 sm:p-4">
                       <div className="flex flex-col items-center text-center space-y-4 pt-2">
+                        {/* Badge collège en haut à gauche */}
+                        {election.type === 'Élection Professionnelle' && candidate.college && (
+                          <Badge variant="outline" className={`self-start text-[10px] font-bold px-2.5 py-0.5 -mb-2 ${
+                            candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                            candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                            candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                            'bg-purple-50 text-purple-700 border-purple-200'
+                          }`}>
+                            {candidate.college === 'general' ? 'Encadrement' :
+                             candidate.college === 'cadres' ? 'Cadre' :
+                             candidate.college === 'employes' ? 'Maîtrise' :
+                             candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
+                          </Badge>
+                        )}
                         <div className="relative">
                           {election.type === 'Élection Professionnelle' ? (
                             <>
@@ -1680,24 +1758,25 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                               ? candidate.titulaires[0].name
                               : candidate.name}
                           </h3>
+                          {election.type === 'Élection Professionnelle' && (candidate.titulaires?.[0]?.genre || candidate.titulaires?.[0]?.anciennete != null) && (
+                            <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
+                              {candidate.titulaires?.[0]?.genre && (
+                                <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-100">
+                                  {candidate.titulaires[0].genre}
+                                </span>
+                              )}
+                              {candidate.titulaires?.[0]?.anciennete != null && candidate.titulaires[0].anciennete !== '' && (
+                                <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
+                                  {candidate.titulaires[0].anciennete} ans d'ancienneté
+                                </span>
+                              )}
+                            </div>
+                          )}
                           <p className="text-xs sm:text-sm text-blue-600 font-bold uppercase tracking-widest opacity-80">
                             {election.type === 'Élection Professionnelle'
                               ? `${candidate.name} (${candidate.party})`
                               : candidate.party}
                           </p>
-                          {election.type === 'Élection Professionnelle' && candidate.college && (
-                            <Badge variant="outline" className={`text-[10px] font-bold px-2 py-0.5 mt-1 mx-auto block w-fit ${
-                              candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                              candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                              candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
-                              'bg-purple-50 text-purple-700 border-purple-200'
-                            }`}>
-                              {candidate.college === 'general' ? 'Encadrement' :
-                               candidate.college === 'cadres' ? 'Cadre' :
-                               candidate.college === 'employes' ? 'Maîtrise' :
-                               candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
-                            </Badge>
-                          )}
                           {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0]?.etablissement && (
                             <p className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">{candidate.titulaires[0].etablissement}</p>
                           )}
