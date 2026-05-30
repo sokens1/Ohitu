@@ -349,6 +349,7 @@ const ElectionResults: React.FC = () => {
   const [resultsMenuOpen, setResultsMenuOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'center' | 'participation' | 'score' | 'votes'>('center');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [selectedEstablishmentId, setSelectedEstablishmentId] = useState<string>('');
 
   // États de tri pour les modales des candidats
   const [candidateModalSortBy, setCandidateModalSortBy] = useState<'center' | 'participation' | 'score' | 'votes'>('center');
@@ -1411,36 +1412,48 @@ const ElectionResults: React.FC = () => {
 
   type BureauData = any;
 
-  // Fonction pour agréger les résultats par collège électoral au niveau de l'établissement
-  const getEstablishmentCollegeRows = (bureaux: any[]) => {
-    const collegeSyndicats = new Map<string, { college: string; syndicat: string; seats: number; votes: number }>();
-    
+  // Agrège les données par collège pour la vue Pro (table fixe par établissement)
+  const getProCollegeTableRows = (bureaux: any[]) => {
+    const collegeMap = new Map<string, {
+      collegeName: string;
+      total_registered: number;
+      total_voters: number;
+      total_expressed_votes: number;
+      syndicats: Map<string, { syndicat: string; seats: number; votes: number }>;
+    }>();
+
     bureaux.forEach((b: any) => {
-      const collegeLabel = getNormalizedCollegeLabel(b.college_type || b.bureau_name);
+      const collegeName = getNormalizedCollegeLabel(b.college_type || b.bureau_name);
+      if (!collegeMap.has(collegeName)) {
+        collegeMap.set(collegeName, {
+          collegeName,
+          total_registered: 0,
+          total_voters: 0,
+          total_expressed_votes: 0,
+          syndicats: new Map()
+        });
+      }
+      const entry = collegeMap.get(collegeName)!;
+      entry.total_registered += Number(b.total_registered) || 0;
+      entry.total_voters += Number(b.total_voters) || 0;
+      entry.total_expressed_votes += Number(b.total_expressed_votes) || 0;
+
       if (b.syndicats) {
         b.syndicats.forEach((s: any) => {
-          const key = `${collegeLabel}_${s.syndicatName}`;
-          if (!collegeSyndicats.has(key)) {
-            collegeSyndicats.set(key, {
-              college: collegeLabel,
-              syndicat: s.syndicatName,
-              seats: 0,
-              votes: 0
-            });
+          if (!entry.syndicats.has(s.syndicatName)) {
+            entry.syndicats.set(s.syndicatName, { syndicat: s.syndicatName, seats: 0, votes: 0 });
           }
-          const entry = collegeSyndicats.get(key)!;
-          entry.seats += Number(s.seats) || 0;
-          entry.votes += Number(s.votes) || 0;
+          const sEntry = entry.syndicats.get(s.syndicatName)!;
+          sEntry.seats += Number(s.seats) || 0;
+          sEntry.votes += Number(s.votes) || 0;
         });
       }
     });
 
-    return Array.from(collegeSyndicats.values()).sort((a, b) => {
-      if (a.college !== b.college) {
-        return a.college.localeCompare(b.college);
-      }
-      return b.votes - a.votes;
-    });
+    return Array.from(collegeMap.values()).map(c => ({
+      ...c,
+      syndicats: Array.from(c.syndicats.values()).sort((a, b) => b.votes - a.votes)
+    })).sort((a, b) => a.collegeName.localeCompare(b.collegeName));
   };
 
   // Fonction pour trier et regrouper les données
@@ -2988,228 +3001,354 @@ const ElectionResults: React.FC = () => {
                   </div>
                 )}
 
-                {/* Contrôles de tri - affichés seulement s'il y a des données */}
+                {/* Filtre par établissement (PRO) ou contrôles de tri (non-PRO) */}
                 {(hasCenterData() || hasBureauData() || hasCollegeData()) && (
-                  <div className="mt-4 sm:mt-6 lg:mt-8 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 lg:gap-4 bg-white rounded-xl p-2 sm:p-3 lg:p-4 shadow-lg border border-gray-200 max-w-xs sm:max-w-lg lg:max-w-4xl mx-auto">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
-                      <span className="text-xs sm:text-sm font-medium text-gray-700 flex items-center gap-1.5 sm:gap-2">
-                        <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                        <span className="hidden sm:inline">Trier par:</span>
-                        <span className="sm:hidden">Tri:</span>
+                  isProResults ? (
+                    /* Filtre par établissement pour élections professionnelles */
+                    <div className="mt-4 sm:mt-6 lg:mt-8 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 bg-white rounded-xl p-3 sm:p-4 shadow-lg border border-gray-200 max-w-xs sm:max-w-lg lg:max-w-2xl mx-auto">
+                      <span className="text-xs sm:text-sm font-medium text-gray-700 flex items-center gap-1.5 sm:gap-2 shrink-0">
+                        <Building className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500" />
+                        <span>Établissement :</span>
                       </span>
                       <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as any)}
-                        className="px-1.5 sm:px-2 lg:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full sm:w-auto"
+                        value={selectedEstablishmentId || (getSortedAndGroupedData() as CenterGroup[])[0]?.center.center_id || ''}
+                        onChange={(e) => setSelectedEstablishmentId(e.target.value)}
+                        className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full sm:w-auto bg-white"
                       >
-                        <option value="center">
-                          {results.election?.type === 'Élection Professionnelle' ? 'Établissement' : 'Centre'}
-                        </option>
-                        <option value="participation">Abstention</option>
-                        {/* <option value="score">Score</option> */}
-                        <option value="votes">Votes</option>
+                        {(getSortedAndGroupedData() as CenterGroup[]).map((group) => (
+                          <option key={group.center.center_id} value={group.center.center_id}>
+                            {group.center.center_name}
+                          </option>
+                        ))}
                       </select>
                     </div>
-
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <button
-                        onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                        className={`px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 flex items-center gap-1.5 sm:gap-2 ${sortOrder === 'asc'
-                          ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                          : 'bg-gray-100 text-gray-700 border border-gray-200'
-                          }`}
-                      >
-                        {sortOrder === 'asc' ? (
-                          <>
-                            <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                            <span className="hidden sm:inline">Croissant</span>
-                            <span className="sm:hidden">↑</span>
-                          </>
-                        ) : (
-                          <>
-                            <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" />
-                            <span className="hidden sm:inline">Décroissant</span>
-                            <span className="sm:hidden">↓</span>
-                          </>
-                        )}
-                      </button>
+                  ) : (
+                    /* Contrôles de tri pour élections non-pro */
+                    <div className="mt-4 sm:mt-6 lg:mt-8 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 lg:gap-4 bg-white rounded-xl p-2 sm:p-3 lg:p-4 shadow-lg border border-gray-200 max-w-xs sm:max-w-lg lg:max-w-4xl mx-auto">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+                        <span className="text-xs sm:text-sm font-medium text-gray-700 flex items-center gap-1.5 sm:gap-2">
+                          <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
+                          <span className="hidden sm:inline">Trier par:</span>
+                          <span className="sm:hidden">Tri:</span>
+                        </span>
+                        <select
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value as any)}
+                          className="px-1.5 sm:px-2 lg:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full sm:w-auto"
+                        >
+                          <option value="center">Centre</option>
+                          <option value="participation">Abstention</option>
+                          <option value="votes">Votes</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-1.5 sm:gap-2">
+                        <button
+                          onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                          className={`px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 flex items-center gap-1.5 sm:gap-2 ${sortOrder === 'asc'
+                            ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                            : 'bg-gray-100 text-gray-700 border border-gray-200'
+                            }`}
+                        >
+                          {sortOrder === 'asc' ? (
+                            <>
+                              <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
+                              <span className="hidden sm:inline">Croissant</span>
+                              <span className="sm:hidden">↑</span>
+                            </>
+                          ) : (
+                            <>
+                              <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" />
+                              <span className="hidden sm:inline">Décroissant</span>
+                              <span className="sm:hidden">↓</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )
                 )}
               </div>
 
-              <div className="space-y-3 sm:space-y-4 lg:space-y-6">
-                {(getSortedAndGroupedData() as CenterGroup[]).map((group, idx) => {
-                  const c = group.center;
+              {/* Vue PRO : table fixe par établissement sélectionné */}
+              {isProResults ? (() => {
+                const proGroups = getSortedAndGroupedData() as CenterGroup[];
+                const selectedGroup = proGroups.find(g => g.center.center_id === selectedEstablishmentId) || proGroups[0];
+                if (!selectedGroup) {
                   return (
-                    <details key={`${c.center_id}-${idx}`} className="group bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300 overflow-hidden">
-                      <summary className="cursor-pointer px-3 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 lg:gap-4 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all duration-300">
-                        <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
-                          <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm lg:text-lg">
-                            {c.center_name?.charAt(0) || 'C'}
-                          </div>
-                          <div>
-                            <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800">{c.center_name}</h3>
-                            <p className="text-gray-600 text-xs sm:text-sm">
-                              {isProResults ? 'Établissement' : 'Centre de vote'}
-                            </p>
+                    <div className="text-center text-gray-500 py-8">Aucun établissement à afficher.</div>
+                  );
+                }
+                const c = selectedGroup.center;
+                const collegeRows = getProCollegeTableRows(selectedGroup.bureaux);
+                return (
+                  <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                    {/* En-tête établissement avec stats globales */}
+                    <div className="px-4 sm:px-6 py-4 sm:py-5 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm sm:text-base shrink-0">
+                          {c.center_name?.charAt(0) || 'E'}
+                        </div>
+                        <div>
+                          <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800">{c.center_name}</h3>
+                          <p className="text-gray-500 text-xs sm:text-sm">Établissement</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
+                          <div className="font-bold text-gray-800 text-sm sm:text-base">{c.total_registered?.toLocaleString?.() || c.total_registered || '-'}</div>
+                        </div>
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Votants</div>
+                          <div className="font-bold text-gray-800 text-sm sm:text-base">{c.total_voters?.toLocaleString?.() || c.total_voters || '-'}</div>
+                        </div>
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Exprimés</div>
+                          <div className="font-bold text-gray-800 text-sm sm:text-base">{c.total_expressed_votes?.toLocaleString?.() || c.total_expressed_votes || '-'}</div>
+                        </div>
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Abstention</div>
+                          <div className={`font-bold text-sm sm:text-base ${typeof c.participation_pct === 'number'
+                            ? ((100 - c.participation_pct) >= 49.51 ? 'text-red-600' : ((100 - c.participation_pct) > 20.5 ? 'text-yellow-600' : 'text-green-600'))
+                            : 'text-gray-400'}`}>
+                            {typeof c.participation_pct === 'number' ? `${(100 - Math.min(Math.max(c.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
-                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">{electorsLabel}</div>
-                            <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_registered?.toLocaleString?.() || c.total_registered}</div>
-                          </div>
-                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Votants</div>
-                            <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_voters?.toLocaleString?.() || c.total_voters}</div>
-                          </div>
-                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Exprimés</div>
-                            <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_expressed_votes?.toLocaleString?.() || c.total_expressed_votes}</div>
-                          </div>
-                          <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
-                            <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Abstention</div>
-                            <div className={`font-bold text-xs sm:text-sm lg:text-lg ${typeof c.participation_pct === 'number'
-                              ? ((100 - c.participation_pct) >= 49.51
-                                ? 'text-red-600'
-                                : (((100 - c.participation_pct) > 20.5 && (100 - c.participation_pct) <= 49.5) ? 'text-yellow-600' : 'text-green-600'))
-                              : 'text-green-600'}`}>
-                              {typeof c.participation_pct === 'number' ? `${(100 - Math.min(Math.max(c.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
-                            </div>
-                          </div>
-                        </div>
-                      </summary>
-                      <div className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 bg-gray-50">
-                        <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 -mx-4 sm:-mx-6 lg:-mx-8">
-                          <table className="min-w-full min-w-[500px]">
-                            <thead>
-                              <tr className="border-b border-gray-200">
-                                <th className="text-left px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
-                                  <div className="flex items-center gap-1 sm:gap-1.5 lg:gap-2">
-                                    <Target className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                    <span>
-                                      {results.election?.type === 'Élection Professionnelle' ? 'Bureau / Collège' : 'Bureau'}
-                                    </span>
-                                  </div>
-                                </th>
-                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                    <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                    <span className="hidden sm:inline">{electorsLabel}</span>
-                                    <span className="sm:hidden">Insc.</span>
-                                  </div>
-                                </th>
-                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                    <Vote className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                    <span className="hidden sm:inline">Votants</span>
-                                    <span className="sm:hidden">Vot.</span>
-                                  </div>
-                                </th>
-                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                    <BarChart3 className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                    <span className="hidden sm:inline">Exprimés</span>
-                                    <span className="sm:hidden">Expr.</span>
-                                  </div>
-                                </th>
-                                <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
-                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
-                                    <TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
-                                    <span className="hidden sm:inline">Abstention</span>
-                                    <span className="sm:hidden">Part.</span>
-                                  </div>
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                              {group.bureaux.sort((a, b) => {
-                                const numA = parseInt(a.bureau_name?.match(/\d+/)?.[0] || '0');
-                                const numB = parseInt(b.bureau_name?.match(/\d+/)?.[0] || '0');
-                                return numA - numB;
-                              }).map((b, i2) => (
-                                <tr key={i2} className="hover:bg-blue-50 transition-colors duration-200">
-                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-medium text-gray-800 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">{b.bureau_name}</td>
-                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_registered?.toLocaleString() ?? '-'}</td>
-                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_voters?.toLocaleString() ?? '-'}</td>
-                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_expressed_votes?.toLocaleString() ?? '-'}</td>
-                                  <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
-                                    <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
-                                      typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
-                                        'bg-green-100 text-green-800'
-                                      }`}>
-                                      {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                              {group.bureaux.length === 0 && (
-                                <tr>
-                                  <td className="px-2 sm:px-4 py-4 sm:py-6 lg:py-8 text-center text-gray-500 text-[10px] sm:text-xs lg:text-sm" colSpan={5}>
-                                    <div className="flex flex-col items-center gap-1 sm:gap-2">
-                                      <Target className="w-4 h-4 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-gray-400" />
-                                      <span>Aucun bureau disponible</span>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
+                      </div>
+                    </div>
 
-                        {isProResults && (
-                          <details className="group mt-4 border border-gray-200 rounded-lg bg-white overflow-hidden">
-                            <summary className="cursor-pointer px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors font-medium text-xs sm:text-sm flex items-center justify-between text-gray-700 list-none [&::-webkit-details-marker]:hidden">
-                              <div className="flex items-center gap-1.5 sm:gap-2">
-                                <Layers className="w-3.5 h-3.5 text-blue-500" />
-                                <span>Voir la répartition par collège électoral</span>
+                    {/* En-tête de tableau (desktop) */}
+                    <div className="hidden sm:grid grid-cols-5 px-4 sm:px-6 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                      <div className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-blue-400" />Collège</div>
+                      <div className="text-right">{electorsLabel}</div>
+                      <div className="text-right">Votants</div>
+                      <div className="text-right">Exprimés</div>
+                      <div className="text-right">Abstention</div>
+                    </div>
+
+                    {/* Lignes par collège avec accordéon syndicats */}
+                    <div className="divide-y divide-gray-100">
+                      {collegeRows.length > 0 ? collegeRows.map((row, rIdx) => {
+                        const abstPct = row.total_registered > 0
+                          ? (100 - (row.total_voters / row.total_registered * 100))
+                          : null;
+                        const abstColor = abstPct === null ? 'text-gray-400'
+                          : abstPct >= 49.51 ? 'text-red-600'
+                          : abstPct > 20.5 ? 'text-yellow-600'
+                          : 'text-green-600';
+                        const abstBadge = abstPct === null ? 'bg-gray-100 text-gray-400'
+                          : abstPct >= 49.51 ? 'bg-red-100 text-red-700'
+                          : abstPct > 20.5 ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-green-100 text-green-700';
+                        return (
+                          <details key={rIdx} className="group/col">
+                            <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                              {/* Ligne desktop : 5 colonnes */}
+                              <div className="hidden sm:grid grid-cols-5 px-4 sm:px-6 py-3 hover:bg-blue-50 transition-colors items-center">
+                                <div className="flex items-center gap-2 font-semibold text-gray-800 text-sm">
+                                  <ChevronDown className="w-4 h-4 text-blue-400 transition-transform duration-200 group-open/col:rotate-180 shrink-0" />
+                                  {row.collegeName}
+                                </div>
+                                <div className="text-right text-sm text-gray-700">{row.total_registered?.toLocaleString() || '-'}</div>
+                                <div className="text-right text-sm text-gray-700">{row.total_voters?.toLocaleString() || '-'}</div>
+                                <div className="text-right text-sm text-gray-700">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
+                                <div className="text-right">
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>
+                                    {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}
+                                  </span>
+                                </div>
                               </div>
-                              <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:rotate-180" />
+                              {/* Ligne mobile : card */}
+                              <div className="sm:hidden px-4 py-3 hover:bg-blue-50 transition-colors">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2 font-semibold text-gray-800 text-sm">
+                                    <ChevronDown className="w-4 h-4 text-blue-400 transition-transform duration-200 group-open/col:rotate-180 shrink-0" />
+                                    {row.collegeName}
+                                  </div>
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>
+                                    Abs. {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}
+                                  </span>
+                                </div>
+                                <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-center ml-6">
+                                  <div>
+                                    <div className="text-gray-500 uppercase">{electorsLabel}</div>
+                                    <div className="font-semibold text-gray-800">{row.total_registered?.toLocaleString() || '-'}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-gray-500 uppercase">Votants</div>
+                                    <div className="font-semibold text-gray-800">{row.total_voters?.toLocaleString() || '-'}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-gray-500 uppercase">Exprimés</div>
+                                    <div className="font-semibold text-gray-800">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
+                                  </div>
+                                </div>
+                              </div>
                             </summary>
-                            <div className="p-3 sm:p-4 border-t border-gray-200 bg-white">
-                              <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
-                                <table className="w-full text-left text-xs sm:text-sm">
-                                  <thead>
-                                    <tr className="border-b border-gray-200 bg-slate-50">
-                                      <th className="px-3 py-2 font-semibold text-gray-700">Collège</th>
-                                      <th className="px-3 py-2 font-semibold text-gray-700">Syndicat</th>
-                                      <th className="px-3 py-2 font-semibold text-gray-700 text-right">Sièges obtenus</th>
-                                      <th className="px-3 py-2 font-semibold text-gray-700 text-right">Voix</th>
+                            {/* Accordéon syndicats */}
+                            <div className="px-4 sm:px-8 lg:px-12 py-3 bg-slate-50 border-t border-gray-100">
+                              <table className="w-full text-xs sm:text-sm">
+                                <thead>
+                                  <tr className="border-b border-gray-200">
+                                    <th className="text-left py-1.5 font-semibold text-gray-600">Syndicat</th>
+                                    <th className="text-right py-1.5 font-semibold text-gray-600">Sièges obtenus</th>
+                                    <th className="text-right py-1.5 font-semibold text-gray-600">Voix</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {row.syndicats.length > 0 ? row.syndicats.map((s, si) => (
+                                    <tr key={si} className="hover:bg-white transition-colors">
+                                      <td className="py-2 font-medium text-gray-800">{s.syndicat}</td>
+                                      <td className="py-2 text-right font-bold text-blue-700">{s.seats}</td>
+                                      <td className="py-2 text-right text-gray-600">{s.votes?.toLocaleString() || '0'}</td>
                                     </tr>
-                                  </thead>
-                                  <tbody>
-                                    {getEstablishmentCollegeRows(group.bureaux).map((row, idx2) => (
-                                      <tr key={idx2} className="border-b border-gray-100 last:border-0 hover:bg-slate-50">
-                                        <td className="px-3 py-2 text-gray-800 font-medium">{row.college}</td>
-                                        <td className="px-3 py-2 text-gray-600">{row.syndicat}</td>
-                                        <td className="px-3 py-2 text-right font-semibold text-gray-800">{row.seats}</td>
-                                        <td className="px-3 py-2 text-right text-gray-600">{row.votes?.toLocaleString() || '0'}</td>
-                                      </tr>
-                                    ))}
-                                    {getEstablishmentCollegeRows(group.bureaux).length === 0 && (
-                                      <tr>
-                                        <td colSpan={4} className="px-3 py-4 text-center text-gray-500">
-                                          Aucune donnée de répartition par collège disponible.
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </tbody>
-                                </table>
-                              </div>
+                                  )) : (
+                                    <tr>
+                                      <td colSpan={3} className="py-3 text-center text-gray-400 text-xs">
+                                        Aucune donnée syndicale disponible
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
                             </div>
                           </details>
-                        )}
-                      </div>
-                    </details>
-                  );
-                })}
-                  {(getSortedAndGroupedData() as CenterGroup[]).length === 0 && (
-                    <div className="text-center text-gov-gray">
-                      {isProResults ? 'Aucun établissement à afficher.' : 'Aucun centre à afficher.'}
+                        );
+                      }) : (
+                        <div className="px-4 py-8 text-center text-gray-500 text-sm">
+                          <Layers className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                          Aucun collège disponible pour cet établissement.
+                        </div>
+                      )}
                     </div>
+                  </div>
+                );
+              })() : (
+                /* Vue non-PRO : accordions par centre */
+                <div className="space-y-3 sm:space-y-4 lg:space-y-6">
+                  {(getSortedAndGroupedData() as CenterGroup[]).map((group, idx) => {
+                    const c = group.center;
+                    return (
+                      <details key={`${c.center_id}-${idx}`} className="group bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300 overflow-hidden">
+                        <summary className="cursor-pointer px-3 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 lg:gap-4 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all duration-300">
+                          <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
+                            <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm lg:text-lg">
+                              {c.center_name?.charAt(0) || 'C'}
+                            </div>
+                            <div>
+                              <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800">{c.center_name}</h3>
+                              <p className="text-gray-600 text-xs sm:text-sm">Centre de vote</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
+                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">{electorsLabel}</div>
+                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_registered?.toLocaleString?.() || c.total_registered}</div>
+                            </div>
+                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Votants</div>
+                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_voters?.toLocaleString?.() || c.total_voters}</div>
+                            </div>
+                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Exprimés</div>
+                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_expressed_votes?.toLocaleString?.() || c.total_expressed_votes}</div>
+                            </div>
+                            <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
+                              <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Abstention</div>
+                              <div className={`font-bold text-xs sm:text-sm lg:text-lg ${typeof c.participation_pct === 'number'
+                                ? ((100 - c.participation_pct) >= 49.51
+                                  ? 'text-red-600'
+                                  : (((100 - c.participation_pct) > 20.5 && (100 - c.participation_pct) <= 49.5) ? 'text-yellow-600' : 'text-green-600'))
+                                : 'text-green-600'}`}>
+                                {typeof c.participation_pct === 'number' ? `${(100 - Math.min(Math.max(c.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
+                              </div>
+                            </div>
+                          </div>
+                        </summary>
+                        <div className="px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 bg-gray-50">
+                          <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 -mx-4 sm:-mx-6 lg:-mx-8">
+                            <table className="min-w-full min-w-[500px]">
+                              <thead>
+                                <tr className="border-b border-gray-200">
+                                  <th className="text-left px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                                    <div className="flex items-center gap-1 sm:gap-1.5 lg:gap-2">
+                                      <Target className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                      <span>Bureau</span>
+                                    </div>
+                                  </th>
+                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                      <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                      <span className="hidden sm:inline">{electorsLabel}</span>
+                                      <span className="sm:hidden">Insc.</span>
+                                    </div>
+                                  </th>
+                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                      <Vote className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                      <span className="hidden sm:inline">Votants</span>
+                                      <span className="sm:hidden">Vot.</span>
+                                    </div>
+                                  </th>
+                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                      <BarChart3 className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                      <span className="hidden sm:inline">Exprimés</span>
+                                      <span className="sm:hidden">Expr.</span>
+                                    </div>
+                                  </th>
+                                  <th className="text-right px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">
+                                    <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
+                                      <TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" />
+                                      <span className="hidden sm:inline">Abstention</span>
+                                      <span className="sm:hidden">Part.</span>
+                                    </div>
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-200">
+                                {group.bureaux.sort((a, b) => {
+                                  const numA = parseInt(a.bureau_name?.match(/\d+/)?.[0] || '0');
+                                  const numB = parseInt(b.bureau_name?.match(/\d+/)?.[0] || '0');
+                                  return numA - numB;
+                                }).map((b, i2) => (
+                                  <tr key={i2} className="hover:bg-blue-50 transition-colors duration-200">
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-medium text-gray-800 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">{b.bureau_name}</td>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_registered?.toLocaleString() ?? '-'}</td>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_voters?.toLocaleString() ?? '-'}</td>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_expressed_votes?.toLocaleString() ?? '-'}</td>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
+                                      <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
+                                        typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
+                                          'bg-green-100 text-green-800'
+                                        }`}>
+                                        {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {group.bureaux.length === 0 && (
+                                  <tr>
+                                    <td className="px-2 sm:px-4 py-4 sm:py-6 lg:py-8 text-center text-gray-500 text-[10px] sm:text-xs lg:text-sm" colSpan={5}>
+                                      <div className="flex flex-col items-center gap-1 sm:gap-2">
+                                        <Target className="w-4 h-4 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-gray-400" />
+                                        <span>Aucun bureau disponible</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </details>
+                    );
+                  })}
+                  {(getSortedAndGroupedData() as CenterGroup[]).length === 0 && (
+                    <div className="text-center text-gov-gray">Aucun centre à afficher.</div>
                   )}
                 </div>
+              )}
               </div>
             ) : (
             /* Message d'état vide quand pas de données */

@@ -47,8 +47,11 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
     college: candidate.college || 'general',
     teteDeListeName: candidate.titulaires?.[0]?.name || '',
     teteDeListePhoto: candidate.titulaires?.[0]?.photo || '',
+    teteDeListeGenre: candidate.titulaires?.[0]?.genre || '',
+    teteDeListeAnciennete: candidate.titulaires?.[0]?.anciennete?.toString() || '',
     suppleantName: candidate.suppleants?.[0]?.name || '',
     suppleantPhoto: candidate.suppleants?.[0]?.photo || '',
+    suppleantGenre: candidate.suppleants?.[0]?.genre || '',
   });
 
   const [files, setFiles] = useState<{
@@ -163,13 +166,35 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
           }
         }
 
+        // Conserver les données existantes non éditées (matricule, age, etablissement…)
+        const existingTete = (candidate.titulaires?.[0] as any) || {};
+        const existingSupp = (candidate.suppleants?.[0] as any) || {};
+
+        const newTitulaire = {
+          ...existingTete,
+          name: formData.teteDeListeName.trim(),
+          photo: tetePhotoUrl || null,
+          role: 'Tête de liste',
+          genre: formData.teteDeListeGenre || existingTete.genre || null,
+          anciennete: formData.teteDeListeAnciennete !== ''
+            ? Number(formData.teteDeListeAnciennete)
+            : existingTete.anciennete ?? null,
+        };
+        const newSuppleant = {
+          ...existingSupp,
+          name: formData.suppleantName.trim(),
+          photo: suppleantPhotoUrl || null,
+          role: 'Suppléant',
+          genre: formData.suppleantGenre || existingSupp.genre || null,
+        };
+
         // Mettre à jour union_lists
         const { error } = await supabase
           .from('union_lists')
           .update({
             college: formData.college,
-            titulaires: [{ name: formData.teteDeListeName.trim(), photo: tetePhotoUrl || null, role: 'Tête de liste' }],
-            suppleants: [{ name: formData.suppleantName.trim(), photo: suppleantPhotoUrl || null, role: 'Suppléant' }]
+            titulaires: [newTitulaire],
+            suppleants: [newSuppleant],
           })
           .eq('id', candidate.id);
 
@@ -182,8 +207,8 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
         const updatedCandidate: Candidate = {
           ...candidate,
           college: formData.college,
-          titulaires: [{ name: formData.teteDeListeName.trim(), photo: tetePhotoUrl, role: 'Tête de liste' }],
-          suppleants: [{ name: formData.suppleantName.trim(), photo: suppleantPhotoUrl, role: 'Suppléant' }],
+          titulaires: [newTitulaire],
+          suppleants: [newSuppleant],
           unionLogo: logoUrl || candidate.unionLogo,
         };
 
@@ -321,6 +346,22 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                           onChange={(e) => handleInputChange('teteDeListeName', e.target.value)}
                           required
                         />
+                        <FloatingSelect
+                          label="Genre"
+                          value={formData.teteDeListeGenre}
+                          onChange={(val) => handleInputChange('teteDeListeGenre', val)}
+                          options={[
+                            { value: '', label: 'Non renseigné' },
+                            { value: 'Homme', label: 'Homme' },
+                            { value: 'Femme', label: 'Femme' },
+                          ]}
+                        />
+                        <FloatingInput
+                          label="Ancienneté (ans)"
+                          type="number"
+                          value={formData.teteDeListeAnciennete}
+                          onChange={(e) => handleInputChange('teteDeListeAnciennete', e.target.value)}
+                        />
                         <div className="space-y-2">
                           <Label className="text-xs text-gray-600 font-semibold">Photo du représentant</Label>
                           <div className="flex flex-col gap-2">
@@ -354,6 +395,16 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                           value={formData.suppleantName}
                           onChange={(e) => handleInputChange('suppleantName', e.target.value)}
                           required
+                        />
+                        <FloatingSelect
+                          label="Genre"
+                          value={formData.suppleantGenre}
+                          onChange={(val) => handleInputChange('suppleantGenre', val)}
+                          options={[
+                            { value: '', label: 'Non renseigné' },
+                            { value: 'Homme', label: 'Homme' },
+                            { value: 'Femme', label: 'Femme' },
+                          ]}
                         />
                         <div className="space-y-2">
                           <Label className="text-xs text-gray-600 font-semibold">Photo du suppléant</Label>
