@@ -1819,74 +1819,36 @@ const ElectionResults: React.FC = () => {
 
   // Générer les meta tags dynamiques pour le partage
   const generateSEOData = () => {
-    const normalizeCandidateName = (name?: string) => {
-      if (!name) return name;
-      let fixed = name;
-      
-      // Normaliser les espaces
-      fixed = fixed.replace(/\s+/g, ' ').trim();
-      
-      // Corrections spécifiques pour LEBOMO
-      if (/LEBOMO/i.test(fixed)) {
-        // Remplacer Albert par Arnauld (priorité haute)
-        fixed = fixed.replace(/\bAlbert\b/gi, 'Arnauld');
-        // Remplacer Arnaud par Arnauld
-        fixed = fixed.replace(/\bArnaud\b/gi, 'Arnauld');
-        // Remplacer Claubert par Clobert
-        fixed = fixed.replace(/\bClaubert\b/gi, 'Clobert');
-        
-        // Forcer la correction pour LEBOMO spécifiquement
-        const parts = fixed.split(' ');
-        if (parts.length >= 3 && /^(LEBOMO)$/i.test(parts[0])) {
-          parts[1] = 'Arnauld';
-          parts[2] = 'Clobert';
-          fixed = parts.join(' ');
-        }
-      } else {
-        // Corrections générales pour tous les autres candidats
-        fixed = fixed.replace(/\bAlbert\b/gi, 'Arnauld');
-        fixed = fixed.replace(/\bArnaud\b/gi, 'Arnauld');
-        fixed = fixed.replace(/\bClaubert\b/gi, 'Clobert');
-      }
-      
-      return fixed;
-    };
     if (!results?.election) {
       return {
-        title: 'Résultats d\'élection | o\'Hitu',
-        description: 'Consultez les résultats électoraux en temps réel sur o\'Hitu - République Gabonaise',
+        title: "Résultats d'élection | o'Hitu",
+        description: "Consultez les résultats électoraux en temps réel sur o'Hitu.",
         image: 'https://www.ohitu.com/images/resultat_election.jpg?v=3'
       };
     }
 
     const election = results.election;
     const winner = results.candidates.find(c => c.rank === 1);
-    const winnerName = normalizeCandidateName(winner?.candidate_name);
     const abstentionVal = typeof results.participation_rate === 'number' ? (100 - results.participation_rate) : undefined;
     const participation = abstentionVal !== undefined ? `${abstentionVal.toFixed(1)}%` : 'En cours';
 
-    // Titre optimisé pour WhatsApp
-    const title = winnerName
-      ? `${winnerName} en tête | Résultats Élections Moanda (1er Arr.)`
-      : `Résultats des Élections Locales et Législatives Moanda, 1er Arr.`;
+    const title = winner
+      ? `${winner.candidate_name} en tête | ${election.title}`
+      : `Résultats — ${election.title}`;
 
-    // Description optimisée pour le partage
-    let description = `🗳️ Résultats des Élections Locales et Législatives Moanda, 1 Arr.\n\n`;
-
+    let description = `🗳️ ${election.title}\n\n`;
     if (winner) {
-      description += `🏆 ${winnerName || winner.candidate_name} en tête\n`;
+      description += `🏆 ${winner.candidate_name} en tête\n`;
       description += `📊 ${winner.total_votes.toLocaleString()} voix (${winner.percentage.toFixed(1)}%)\n`;
     }
-
-    description += `📉 Abstention: ${participation}\n`;
-    description += `📱 Suivez les résultats en temps réel sur o'Hitu\n`;
-    description += `🌍 République Gabonaise`;
+    description += `📉 Abstention : ${participation}\n`;
+    description += `📱 Suivez les résultats en temps réel sur o'Hitu`;
 
     return {
       title,
       description,
-      image: 'https://www.ohitu.com/images/resultat_election.jpg?v=3',
-      url: `https://www.ohitu.com/election/${electionId}/results?v=3`
+      image: election.cover_image_url || 'https://www.ohitu.com/images/resultat_election.jpg?v=3',
+      url: `https://www.ohitu.com/election/${electionId}/results`
     };
   };
 

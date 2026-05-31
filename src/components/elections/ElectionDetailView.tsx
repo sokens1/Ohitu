@@ -346,14 +346,20 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const allEtablissements = useMemo(() => {
     const set = new Set<string>();
     candidates.forEach((c: any) => {
-      c.titulaires?.forEach((t: any) => { if (t.etablissement) set.add(t.etablissement); });
+      c.titulaires?.forEach((t: any) => {
+        const v = t.etablissement?.toString().trim();
+        if (v) set.add(v);
+      });
     });
     return Array.from(set).sort();
   }, [candidates]);
 
   const allSyndicats = useMemo(() => {
     const set = new Set<string>();
-    candidates.forEach((c: any) => { if (c.party) set.add(c.party); });
+    candidates.forEach((c: any) => {
+      const v = c.name?.toString().trim();
+      if (v) set.add(v);
+    });
     return Array.from(set).sort();
   }, [candidates]);
 
@@ -815,10 +821,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
     const matchEtablissement =
       candidatesEtablissementFilter === 'all' ||
-      ((c as any).titulaires ?? []).some((t: any) => t.etablissement === candidatesEtablissementFilter);
+      ((c as any).titulaires ?? []).some(
+        (t: any) => t.etablissement?.toString().trim() === candidatesEtablissementFilter
+      );
 
     const matchSyndicat =
-      candidatesSyndicatFilter === 'all' || c.party === candidatesSyndicatFilter;
+      candidatesSyndicatFilter === 'all' ||
+      c.name?.toString().trim() === candidatesSyndicatFilter;
 
     return matchSearch && matchCollege && matchEtablissement && matchSyndicat;
   });
@@ -1612,24 +1621,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
                 {election.type === 'Élection Professionnelle' && (
                   <>
-                    {/* Filtre collège */}
-                    <Select
-                      value={candidatesCollegeFilter}
-                      onValueChange={(v) => { setCandidatesCollegeFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
-                    >
-                      <SelectTrigger className="w-full sm:w-40 h-9 text-sm">
-                        <SelectValue placeholder="Collège" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Tous les collèges</SelectItem>
-                        <SelectItem value="general">Encadrement</SelectItem>
-                        <SelectItem value="cadres">Cadre</SelectItem>
-                        <SelectItem value="employes">Maîtrise</SelectItem>
-                        <SelectItem value="ouvriers">Exécution</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    {/* Filtre établissement */}
+                    {/* 1 — Filtre établissement */}
                     <Select
                       value={candidatesEtablissementFilter}
                       onValueChange={(v) => { setCandidatesEtablissementFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1645,7 +1637,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       </SelectContent>
                     </Select>
 
-                    {/* Filtre syndicat */}
+                    {/* 2 — Filtre syndicat */}
                     <Select
                       value={candidatesSyndicatFilter}
                       onValueChange={(v) => { setCandidatesSyndicatFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1658,6 +1650,23 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                         {allSyndicats.map((synd) => (
                           <SelectItem key={synd} value={synd}>{synd}</SelectItem>
                         ))}
+                      </SelectContent>
+                    </Select>
+
+                    {/* 3 — Filtre collège */}
+                    <Select
+                      value={candidatesCollegeFilter}
+                      onValueChange={(v) => { setCandidatesCollegeFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
+                    >
+                      <SelectTrigger className="w-full sm:w-40 h-9 text-sm">
+                        <SelectValue placeholder="Collège" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tous les collèges</SelectItem>
+                        <SelectItem value="general">Encadrement</SelectItem>
+                        <SelectItem value="cadres">Cadre</SelectItem>
+                        <SelectItem value="employes">Maîtrise</SelectItem>
+                        <SelectItem value="ouvriers">Exécution</SelectItem>
                       </SelectContent>
                     </Select>
                   </>
