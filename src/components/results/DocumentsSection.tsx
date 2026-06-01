@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   Upload, Download, FileText, FileImage, Building2, BookOpen,
   CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp,
-  X as XIcon, ZoomIn, ZoomOut, RotateCw, ExternalLink,
+  ZoomIn, ZoomOut, RotateCw, ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -435,8 +435,8 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                 </span>
               </div>
             </div>
-            {/* Actions barre haute */}
-            <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Actions barre haute — mr-8 pour ne pas chevaucher la croix native du DialogContent */}
+            <div className="flex items-center gap-1.5 flex-shrink-0 mr-8">
               {!isPDF(previewDoc.file_url) && (
                 <>
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
@@ -462,10 +462,6 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
               <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
                 title="Ouvrir dans un nouvel onglet" onClick={() => window.open(previewDoc.file_url, '_blank')}>
                 <ExternalLink className="w-4 h-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-700"
-                title="Fermer" onClick={closePreview}>
-                <XIcon className="w-4 h-4" />
               </Button>
             </div>
           </div>
