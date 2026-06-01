@@ -50,11 +50,12 @@ const getNotificationIcon = (severity: string) => {
 };
 
 const ALL_MENU_ITEMS = [
-  { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard', permission: 'view:dashboard'  as const },
-  { icon: Calendar, label: 'Élections',             path: '/elections', permission: 'view:elections'  as const },
-  { icon: BarChart3,label: 'Résultats',             path: '/results',   permission: 'view:results'    as const },
-  { icon: Users,    label: 'Gestion Utilisateurs',  path: '/users',     permission: 'view:users'      as const },
-  { icon: FileText, label: 'Piste d\'Audit',        path: '/audit',     permission: 'view:audit'      as const },
+  { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard',     permission: 'view:dashboard'  as const },
+  { icon: Calendar, label: 'Élections',             path: '/elections',     permission: 'view:elections'  as const },
+  { icon: BarChart3,label: 'Résultats',             path: '/results',       permission: 'view:results'    as const },
+  { icon: Users,    label: 'Gestion Utilisateurs',  path: '/users',         permission: 'view:users'      as const },
+  { icon: FileText, label: 'Piste d\'Audit',        path: '/audit',         permission: 'view:audit'      as const },
+  { icon: Bell,     label: 'Notifications',         path: '/notifications', permission: 'view:dashboard'  as const },
 ];
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
@@ -111,24 +112,38 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         <nav className="flex-1 p-2 sm:p-4 overflow-y-auto">
           <ul className="space-y-1 sm:space-y-2">
-            {menuItems.map((item) => (
-              <li key={item.path}>
-                <Link
-                  to={item.path}
-                  onClick={() => isMobile && setSidebarOpen(false)}
-                  className={`flex items-center space-x-3 p-2 sm:p-3 rounded-lg transition-colors ${
-                    location.pathname === item.path
-                      ? 'bg-white text-gov-blue'
-                      : 'text-blue-100 hover:bg-gov-blue-light'
-                  }`}
-                >
-                  <item.icon size={20} className="flex-shrink-0" />
-                  {(sidebarOpen || isMobile) && (
-                    <span className="text-sm font-medium truncate">{item.label}</span>
-                  )}
-                </Link>
-              </li>
-            ))}
+            {menuItems.map((item) => {
+              const isActive = location.pathname === item.path;
+              const isNotif  = item.path === '/notifications';
+              return (
+                <li key={item.path}>
+                  <Link
+                    to={item.path}
+                    onClick={() => isMobile && setSidebarOpen(false)}
+                    className={`flex items-center space-x-3 p-2 sm:p-3 rounded-lg transition-colors ${
+                      isActive ? 'bg-white text-gov-blue' : 'text-blue-100 hover:bg-gov-blue-light'
+                    }`}
+                  >
+                    <div className="relative flex-shrink-0">
+                      <item.icon size={20} />
+                      {isNotif && unreadCount > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full h-3.5 w-3.5 flex items-center justify-center leading-none">
+                          {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
+                      )}
+                    </div>
+                    {(sidebarOpen || isMobile) && (
+                      <span className="text-sm font-medium truncate flex-1">{item.label}</span>
+                    )}
+                    {(sidebarOpen || isMobile) && isNotif && unreadCount > 0 && (
+                      <span className="ml-auto bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 
