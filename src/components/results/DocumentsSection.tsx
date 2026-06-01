@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   Upload, Download, FileText, FileImage, Building2, BookOpen,
   CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp,
-  ZoomIn, ZoomOut, RotateCw, ExternalLink,
+  ZoomIn, ZoomOut, RotateCw, ExternalLink, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -94,6 +94,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const canUpload   = can('documents:upload');
   const canReview   = can('documents:review');
   const canDownload = can('documents:download');
+  const canDelete   = user?.role === 'super-admin';
 
   const [docs, setDocs]           = useState<EstablishmentDocument[]>([]);
   const [centers, setCenters]     = useState<Center[]>([]);
@@ -102,6 +103,16 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const [uploading, setUploading] = useState<string | null>(null); // "centerId|college|docType"
   const [review, setReview]       = useState<ReviewState | null>(null);
   const [expanded, setExpanded]   = useState<Set<string>>(new Set());
+  const [electionStatus, setElectionStatus] = useState<string | null>(null);
+  const [deleting, setDeleting]   = useState<string | null>(null); // docId en cours de suppression
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState<'pv' | 'participation_list' | null>(null); // type à supprimer en masse
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  // Peut supprimer un document quand l'élection est "À venir"
+  const electionUpcoming = electionStatus === 'À venir';
+  // Admin et président peuvent supprimer leurs propres docs uniquement si l'élection est à venir
+  const canDeleteWhenUpcoming = electionUpcoming &&
+    (user?.role === 'admin' || user?.role === 'president-etablissement');
 
   // ── Prévisualisation document ─────────────────────────────────────────────
   const [previewDoc, setPreviewDoc] = useState<EstablishmentDocument | null>(null);
@@ -125,6 +136,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // 0. Statut de l'élection (pour les droits de suppression)
+      const { data: elecData } = await supabase
+        .from('elections').select('status').eq('id', selectedElection).single();
+      setElectionStatus(elecData?.status ?? null);
+
       // 1. Déterminer les centres accessibles
       let centerIds: string[] = [];
 
@@ -503,6 +519,36 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     </Dialog>
   );
 
+  // ── Suppression (super-admin uniquement) ────────────────────────────────────
+  const handleDeleteDoc = async (docId: string) => {
+    setDeleting(docId);
+    try {
+      const { error } = await supabase.from('establishment_documents').delete().eq('id', docId);
+      if (error) { toast.error('Erreur lors de la suppression'); return; }
+      setDocs(prev => prev.filter(d => d.id !== docId));
+      toast.success('Document supprimé');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleDeleteAllByType = async (docType: 'pv' | 'participation_list') => {
+    setDeletingAll(true);
+    try {
+      const { error } = await supabase
+        .from('establishment_documents')
+        .delete()
+        .eq('election_id', selectedElection)
+        .eq('document_type', docType);
+      if (error) { toast.error('Erreur lors de la suppression'); return; }
+      setDocs(prev => prev.filter(d => d.document_type !== docType));
+      setDeleteAllConfirm(null);
+      toast.success(`Tous les ${docType === 'pv' ? 'procès-verbaux' : 'listes de participation'} ont été supprimés`);
+    } finally {
+      setDeletingAll(false);
+    }
+  };
+
   // ── Rendu ────────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -605,6 +651,19 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                 <Upload className="w-3.5 h-3.5 mr-1" />
                                 {isUp ? 'Envoi…' : existing ? 'Remplacer' : 'Joindre'}
                               </Button>
+                              {/* Supprimer son propre document si l'élection est "À venir" */}
+                              {existing && (canDelete || canDeleteWhenUpcoming) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={deleting === existing.id}
+                                  className="text-red-400 hover:text-red-600 hover:bg-red-50 h-7 w-7 p-0"
+                                  title="Supprimer ce document"
+                                  onClick={() => handleDeleteDoc(existing.id)}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
                             </div>
                           </div>
                         );
@@ -640,6 +699,46 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         <p className="text-sm text-gray-500">
           Consultez et téléchargez les documents joints par les présidents de bureau.
         </p>
+      )}
+
+      {/* Barre suppression en masse — super-admin uniquement */}
+      {canDelete && docs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200">
+          <Trash2 className="w-4 h-4 text-red-500 flex-shrink-0" />
+          <span className="text-xs font-semibold text-red-700 flex-1">Suppression en masse</span>
+          {deleteAllConfirm ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-700 font-medium">
+                Confirmer la suppression de tous les {deleteAllConfirm === 'pv' ? 'PV' : 'listes'} ?
+              </span>
+              <Button size="sm" disabled={deletingAll}
+                className="bg-red-600 hover:bg-red-700 text-white h-7 px-3 text-xs"
+                onClick={() => handleDeleteAllByType(deleteAllConfirm)}>
+                {deletingAll ? 'Suppression…' : 'Oui, supprimer'}
+              </Button>
+              <Button size="sm" variant="outline" disabled={deletingAll}
+                className="h-7 px-3 text-xs border-red-300 text-red-600 hover:bg-red-50"
+                onClick={() => setDeleteAllConfirm(null)}>
+                Annuler
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Button size="sm" variant="outline"
+                className="border-red-300 text-red-600 hover:bg-red-100 h-7 px-3 text-xs"
+                onClick={() => setDeleteAllConfirm('pv')}
+                disabled={!docs.some(d => d.document_type === 'pv')}>
+                <Trash2 className="w-3 h-3 mr-1" /> Tous les PV
+              </Button>
+              <Button size="sm" variant="outline"
+                className="border-red-300 text-red-600 hover:bg-red-100 h-7 px-3 text-xs"
+                onClick={() => setDeleteAllConfirm('participation_list')}
+                disabled={!docs.some(d => d.document_type === 'participation_list')}>
+                <Trash2 className="w-3 h-3 mr-1" /> Toutes les listes
+              </Button>
+            </>
+          )}
+        </div>
       )}
 
       {docsByCenter.every(c => c.docs.length === 0) && (
@@ -733,6 +832,21 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                               onClick={() => setReview(isReviewing ? null : { docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
                             >
                               {isReviewing ? 'Annuler' : 'Validation'}
+                            </Button>
+                          )}
+                          {(canDelete ||
+                            (canDeleteWhenUpcoming &&
+                              (user?.role === 'admin' || doc.uploaded_by === user?.id))
+                          ) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={deleting === doc.id}
+                              className="text-red-400 hover:text-red-600 hover:bg-red-50 h-7 w-7 p-0"
+                              title="Supprimer ce document"
+                              onClick={() => handleDeleteDoc(doc.id)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           )}
                         </div>
