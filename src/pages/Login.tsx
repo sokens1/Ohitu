@@ -143,7 +143,13 @@ const Login = () => {
       if (error?.message === 'EMAIL_NOT_CONFIRMED') {
         toast({
           title: "Email non confirmé",
-          description: "Ce compte n'a pas encore été confirmé. Contactez votre administrateur pour qu'il confirme votre compte depuis le tableau de bord Supabase.",
+          description: "Ce compte n'a pas encore été confirmé. Contactez votre administrateur.",
+          variant: "destructive",
+        });
+      } else if (error?.message === 'ACCOUNT_DISABLED') {
+        toast({
+          title: "Compte désactivé",
+          description: "Votre compte a été suspendu. Contactez votre administrateur.",
           variant: "destructive",
         });
       } else {

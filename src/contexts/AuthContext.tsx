@@ -54,6 +54,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .eq('id', session.user.id)
             .single();
           if (userData) {
+            // Compte désactivé → déconnexion immédiate même si session active
+            if (!userData.is_active) {
+              localStorage.removeItem('ohitu-user');
+              await supabase.auth.signOut();
+              setUser(null);
+              return;
+            }
             const u: User = {
               id: userData.id,
               name: userData.name,
@@ -125,6 +132,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(defaultUser);
           localStorage.setItem('ohitu-user', JSON.stringify(defaultUser));
           return true;
+        }
+
+        // Compte désactivé → refuser l'accès et déconnecter
+        if (!userData.is_active) {
+          await supabase.auth.signOut();
+          throw new Error('ACCOUNT_DISABLED');
         }
 
         const user: User = {

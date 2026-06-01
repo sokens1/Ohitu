@@ -632,13 +632,13 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     <div className="space-y-4">
       {canReview && (
         <p className="text-sm text-gray-500">
-          Donnez votre avis sur les documents joints par les présidents d'établissement.
+          Donnez votre avis sur les documents joints par les présidents de bureau.
           Un commentaire est obligatoire pour les statuts <strong>Réserve</strong> et <strong>Rejet</strong>.
         </p>
       )}
       {canDownload && !canReview && (
         <p className="text-sm text-gray-500">
-          Consultez et téléchargez les documents joints par les présidents d'établissement.
+          Consultez et téléchargez les documents joints par les présidents de bureau.
         </p>
       )}
 

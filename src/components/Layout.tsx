@@ -157,7 +157,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   : user?.role === 'validateur' ? 'Validateur'
                   : user?.role === 'agent-saisie' ? 'Agent de Saisie'
                   : user?.role === 'observateur' ? 'Observateur'
-                  : user?.role === 'president-bureau' ? 'Président de Bureau'
+                  : user?.role === 'president-bureau'        ? 'Président de Bureau'
+                  : user?.role === 'president-etablissement' ? 'Président de Bureau'
                   : user?.role}
               </p>
             </div>
