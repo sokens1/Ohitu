@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
 import {
   DBNotification,
   fetchMyNotifications,
@@ -12,6 +13,13 @@ import {
 
 export type { DBNotification as Notification };
 
+/** Compatibilité : ancienne signature utilisée par Dashboard et DashboardModernSimple */
+export interface LegacyNotificationPayload {
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+}
+
 interface NotificationContextType {
   notifications: DBNotification[];
   unreadCount: number;
@@ -20,6 +28,8 @@ interface NotificationContextType {
   markAllAsRead: () => Promise<void>;
   removeNotification: (id: string) => Promise<void>;
   reload: () => Promise<void>;
+  /** @deprecated Utiliser notificationService directement — ce shim affiche juste un toast local */
+  addNotification: (n: LegacyNotificationPayload) => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -78,9 +88,23 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
         (payload) => {
           const newNotif = payload.new as DBNotification;
           setNotifications(prev => {
-            // Déduplication par id
             if (prev.some(n => n.id === newNotif.id)) return prev;
             return [newNotif, ...prev];
+          });
+
+          // ── Toast popup d'alerte immédiate ────────────────────────────────
+          const toastFn =
+            newNotif.severity === 'success' ? toast.success :
+            newNotif.severity === 'warning' ? toast.warning :
+            newNotif.severity === 'error'   ? toast.error   :
+            toast.info;
+
+          toastFn(newNotif.title, {
+            description: newNotif.message,
+            duration:    6000,
+            position:    'top-right',
+            closeButton: true,
+            style:       { maxWidth: '380px' },
           });
         },
       )
@@ -131,6 +155,15 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
     await deleteNotification(id);
   }, []);
 
+  // Shim de compatibilité : affiche un toast local sans écrire en base
+  const addNotification = useCallback((n: LegacyNotificationPayload) => {
+    const fn = n.type === 'success' ? toast.success
+             : n.type === 'warning' ? toast.warning
+             : n.type === 'error'   ? toast.error
+             : toast.info;
+    fn(n.title, { description: n.message, duration: 5000, position: 'top-right' });
+  }, []);
+
   return (
     <NotificationContext.Provider value={{
       notifications,
@@ -140,6 +173,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
       markAllAsRead,
       removeNotification,
       reload,
+      addNotification,
     }}>
       {children}
     </NotificationContext.Provider>
