@@ -102,9 +102,6 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
           toastFn(newNotif.title, {
             description: newNotif.message,
             duration:    6000,
-            position:    'top-right',
-            closeButton: true,
-            style:       { maxWidth: '380px' },
           });
         },
       )
@@ -161,7 +158,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
              : n.type === 'warning' ? toast.warning
              : n.type === 'error'   ? toast.error
              : toast.info;
-    fn(n.title, { description: n.message, duration: 5000, position: 'top-right' });
+    fn(n.title, { description: n.message, duration: 5000 });
   }, []);
 
   return (
