@@ -48,10 +48,14 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
     teteDeListeName: candidate.titulaires?.[0]?.name || '',
     teteDeListePhoto: candidate.titulaires?.[0]?.photo || '',
     teteDeListeGenre: candidate.titulaires?.[0]?.genre || '',
+    teteDeListeAge: candidate.titulaires?.[0]?.age?.toString() || '',
     teteDeListeAnciennete: candidate.titulaires?.[0]?.anciennete?.toString() || '',
+    teteDeListeEtablissement: candidate.titulaires?.[0]?.etablissement || '',
     suppleantName: candidate.suppleants?.[0]?.name || '',
     suppleantPhoto: candidate.suppleants?.[0]?.photo || '',
     suppleantGenre: candidate.suppleants?.[0]?.genre || '',
+    suppleantAge: candidate.suppleants?.[0]?.age?.toString() || '',
+    suppleantAnciennete: candidate.suppleants?.[0]?.anciennete?.toString() || '',
   });
 
   const [files, setFiles] = useState<{
@@ -176,9 +180,11 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
           photo: tetePhotoUrl || null,
           role: 'Tête de liste',
           genre: formData.teteDeListeGenre || existingTete.genre || null,
+          age: formData.teteDeListeAge !== '' ? Number(formData.teteDeListeAge) : existingTete.age ?? null,
           anciennete: formData.teteDeListeAnciennete !== ''
             ? Number(formData.teteDeListeAnciennete)
             : existingTete.anciennete ?? null,
+          etablissement: formData.teteDeListeEtablissement.trim() || existingTete.etablissement || null,
         };
         const newSuppleant = {
           ...existingSupp,
@@ -186,6 +192,8 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
           photo: suppleantPhotoUrl || null,
           role: 'Suppléant',
           genre: formData.suppleantGenre || existingSupp.genre || null,
+          age: formData.suppleantAge !== '' ? Number(formData.suppleantAge) : existingSupp.age ?? null,
+          anciennete: formData.suppleantAnciennete !== '' ? Number(formData.suppleantAnciennete) : existingSupp.anciennete ?? null,
         };
 
         // Mettre à jour union_lists
@@ -333,6 +341,12 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                     { value: 'ouvriers', label: 'Exécution' }
                   ]}
                 />
+                <FloatingInput
+                  label="Établissement"
+                  value={formData.teteDeListeEtablissement}
+                  onChange={(e) => handleInputChange('teteDeListeEtablissement', e.target.value)}
+                  placeholder="Ex: Ancien Siège"
+                />
 
                 <div className="space-y-4 pt-4 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-700">Représentants de la liste</h4>
@@ -355,6 +369,12 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                             { value: 'Homme', label: 'Homme' },
                             { value: 'Femme', label: 'Femme' },
                           ]}
+                        />
+                        <FloatingInput
+                          label="Âge (ans)"
+                          type="number"
+                          value={formData.teteDeListeAge}
+                          onChange={(e) => handleInputChange('teteDeListeAge', e.target.value)}
                         />
                         <FloatingInput
                           label="Ancienneté (ans)"
@@ -405,6 +425,18 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                             { value: 'Homme', label: 'Homme' },
                             { value: 'Femme', label: 'Femme' },
                           ]}
+                        />
+                        <FloatingInput
+                          label="Âge (ans)"
+                          type="number"
+                          value={formData.suppleantAge}
+                          onChange={(e) => handleInputChange('suppleantAge', e.target.value)}
+                        />
+                        <FloatingInput
+                          label="Ancienneté (ans)"
+                          type="number"
+                          value={formData.suppleantAnciennete}
+                          onChange={(e) => handleInputChange('suppleantAnciennete', e.target.value)}
                         />
                         <div className="space-y-2">
                           <Label className="text-xs text-gray-600 font-semibold">Photo du suppléant</Label>

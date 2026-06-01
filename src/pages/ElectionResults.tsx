@@ -876,7 +876,8 @@ const ElectionResults: React.FC = () => {
             total_registered: 0,
             total_voters: 0,
             total_expressed_votes: 0,
-            total_null_votes: 0
+            total_null_votes: 0,
+            participation_pct: 0
           });
         }
         const center = centersMap.get(b.center_id);
@@ -884,6 +885,10 @@ const ElectionResults: React.FC = () => {
         center.total_voters += b.total_voters;
         center.total_expressed_votes += b.total_expressed_votes;
         center.total_null_votes += b.total_null_votes;
+      });
+
+      // Calculer les pourcentages de participation APRÈS avoir cumulé tous les chiffres
+      centersMap.forEach((center: any) => {
         center.participation_pct = center.total_registered > 0 ? (center.total_voters / center.total_registered) * 100 : 0;
       });
 
@@ -2723,7 +2728,7 @@ const ElectionResults: React.FC = () => {
                                 {c.seats ?? 0}
                               </td>
                             )}
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right text-xs sm:text-sm">{c.total_votes?.toLocaleString?.() ?? c.total_votes}</td>
+                            <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right text-xs sm:text-sm">{typeof c.total_votes === 'number' ? c.total_votes.toLocaleString('fr-FR') : (c.total_votes ?? '-')}</td>
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right text-xs sm:text-sm">{typeof c.percentage === 'number' ? `${Math.min(Math.max(c.percentage, 0), 100).toFixed(2)}%` : '0.00%'}</td>
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border text-center">
                               <button className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-1 rounded text-blue-700 hover:text-blue-900 hover:underline text-xs sm:text-sm" onClick={(e) => { e.stopPropagation(); handleOpenCandidate(c.candidate_id); }}>
@@ -3058,15 +3063,15 @@ const ElectionResults: React.FC = () => {
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
-                          <div className="font-bold text-gray-800 text-sm sm:text-base">{c.total_registered?.toLocaleString?.() || c.total_registered || '-'}</div>
+                          <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_registered === 'number' ? c.total_registered.toLocaleString('fr-FR') : (c.total_registered || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Votants</div>
-                          <div className="font-bold text-gray-800 text-sm sm:text-base">{c.total_voters?.toLocaleString?.() || c.total_voters || '-'}</div>
+                          <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_voters === 'number' ? c.total_voters.toLocaleString('fr-FR') : (c.total_voters || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Exprimés</div>
-                          <div className="font-bold text-gray-800 text-sm sm:text-base">{c.total_expressed_votes?.toLocaleString?.() || c.total_expressed_votes || '-'}</div>
+                          <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_expressed_votes === 'number' ? c.total_expressed_votes.toLocaleString('fr-FR') : (c.total_expressed_votes || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Abstention</div>
@@ -3205,15 +3210,15 @@ const ElectionResults: React.FC = () => {
                           <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 lg:gap-4 text-xs sm:text-sm">
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
                               <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">{electorsLabel}</div>
-                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_registered?.toLocaleString?.() || c.total_registered}</div>
+                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{typeof c.total_registered === 'number' ? c.total_registered.toLocaleString('fr-FR') : (c.total_registered || '-')}</div>
                             </div>
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
                               <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Votants</div>
-                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_voters?.toLocaleString?.() || c.total_voters}</div>
+                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{typeof c.total_voters === 'number' ? c.total_voters.toLocaleString('fr-FR') : (c.total_voters || '-')}</div>
                             </div>
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
                               <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Exprimés</div>
-                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{c.total_expressed_votes?.toLocaleString?.() || c.total_expressed_votes}</div>
+                              <div className="font-bold text-gray-800 text-xs sm:text-sm lg:text-lg">{typeof c.total_expressed_votes === 'number' ? c.total_expressed_votes.toLocaleString('fr-FR') : (c.total_expressed_votes || '-')}</div>
                             </div>
                             <div className="bg-white rounded-md sm:rounded-lg lg:rounded-xl px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 border border-gray-200 shadow-sm text-center group-hover:shadow-md transition-shadow">
                               <div className="text-[8px] sm:text-[9px] lg:text-[11px] uppercase text-gray-500 font-medium mb-0.5 sm:mb-1">Abstention</div>
@@ -3276,9 +3281,9 @@ const ElectionResults: React.FC = () => {
                                 }).map((b, i2) => (
                                   <tr key={i2} className="hover:bg-blue-50 transition-colors duration-200">
                                     <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-medium text-gray-800 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">{b.bureau_name}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_registered?.toLocaleString() ?? '-'}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_voters?.toLocaleString() ?? '-'}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{b.total_expressed_votes?.toLocaleString() ?? '-'}</td>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{typeof b.total_registered === 'number' ? b.total_registered.toLocaleString('fr-FR') : (b.total_registered ?? '-')}</td>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{typeof b.total_voters === 'number' ? b.total_voters.toLocaleString('fr-FR') : (b.total_voters ?? '-')}</td>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{typeof b.total_expressed_votes === 'number' ? b.total_expressed_votes.toLocaleString('fr-FR') : (b.total_expressed_votes ?? '-')}</td>
                                     <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
                                       <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
                                         typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
@@ -3323,34 +3328,38 @@ const ElectionResults: React.FC = () => {
                   </h2>
                 </div>
                 <p className="text-gray-600 text-sm sm:text-base lg:text-lg max-w-2xl mx-auto mb-4 sm:mb-6 lg:mb-8 px-2 sm:px-4">
-                  Explorez les résultats par centre de vote ou par bureau de vote
+                  {isProResults
+                    ? 'Explorez les résultats par établissement et par collège électoral'
+                    : 'Explorez les résultats par centre de vote ou par bureau de vote'}
                 </p>
 
-                {/* Boutons de navigation - toujours visibles */}
-                <div className="flex items-center justify-center gap-1.5 sm:gap-2 lg:gap-4 bg-white rounded-full p-0.5 sm:p-1 lg:p-2 shadow-lg border border-gray-200 max-w-xs sm:max-w-sm lg:max-w-md mx-auto mb-6 sm:mb-8">
-                  <button
-                    onClick={() => setViewMode('center')}
-                    className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'center'
-                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
-                      : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
-                      }`}
-                  >
-                    <Building className="w-3 h-3 sm:w-4 sm:h-4" />
-                    <span className="hidden sm:inline">Par centre</span>
-                    <span className="sm:hidden">Centres</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode('bureau')}
-                    className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'bureau'
-                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
-                      : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
-                      }`}
-                  >
-                    <Target className="w-3 h-3 sm:w-4 sm:h-4" />
-                    <span className="hidden sm:inline">Par bureau</span>
-                    <span className="sm:hidden">Bureaux</span>
-                  </button>
-                </div>
+                {/* Boutons de navigation - uniquement pour les élections non-pro */}
+                {!isProResults && (
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2 lg:gap-4 bg-white rounded-full p-0.5 sm:p-1 lg:p-2 shadow-lg border border-gray-200 max-w-xs sm:max-w-sm lg:max-w-md mx-auto mb-6 sm:mb-8">
+                    <button
+                      onClick={() => setViewMode('center')}
+                      className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'center'
+                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
+                        : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
+                        }`}
+                    >
+                      <Building className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Par centre</span>
+                      <span className="sm:hidden">Centres</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('bureau')}
+                      className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 rounded-full font-medium transition-all duration-300 flex items-center gap-1 sm:gap-1.5 lg:gap-2 text-xs sm:text-sm ${viewMode === 'bureau'
+                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg transform scale-105'
+                        : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
+                        }`}
+                    >
+                      <Target className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Par bureau</span>
+                      <span className="sm:hidden">Bureaux</span>
+                    </button>
+                  </div>
+                )}
 
                 {/* Message d'état vide */}
                 <div className="bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 p-6 sm:p-8 lg:p-12 max-w-xl sm:max-w-2xl mx-auto">
@@ -3362,8 +3371,9 @@ const ElectionResults: React.FC = () => {
                       Données en cours de préparation
                     </h3>
                     <p className="text-gray-600 text-xs sm:text-sm lg:text-base max-w-md mx-auto">
-                      Les données détaillées des centres et bureaux de vote ne sont pas encore disponibles.
-                      Elles seront affichées dès que les résultats seront publiés.
+                      {isProResults
+                        ? 'Les résultats par établissement et collège électoral seront affichés dès que les premiers procès-verbaux seront publiés.'
+                        : 'Les données détaillées des centres et bureaux de vote ne sont pas encore disponibles. Elles seront affichées dès que les résultats seront publiés.'}
                     </p>
                   </div>
                 </div>
