@@ -36,8 +36,8 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
-const getNotificationIcon = (type: 'info' | 'success' | 'warning' | 'error') => {
-  switch (type) {
+const getNotificationIcon = (severity: string) => {
+  switch (severity) {
     case 'error':
       return <AlertCircle className="h-4 w-4 text-red-500" />;
     case 'success':
@@ -50,11 +50,12 @@ const getNotificationIcon = (type: 'info' | 'success' | 'warning' | 'error') => 
 };
 
 const ALL_MENU_ITEMS = [
-  { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard', permission: 'view:dashboard'  as const },
-  { icon: Calendar, label: 'Élections',             path: '/elections', permission: 'view:elections'  as const },
-  { icon: BarChart3,label: 'Résultats',             path: '/results',   permission: 'view:results'    as const },
-  { icon: Users,    label: 'Gestion Utilisateurs',  path: '/users',     permission: 'view:users'      as const },
-  { icon: FileText, label: 'Piste d\'Audit',        path: '/audit',     permission: 'view:audit'      as const },
+  { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard',     permission: 'view:dashboard'  as const },
+  { icon: Calendar, label: 'Élections',             path: '/elections',     permission: 'view:elections'  as const },
+  { icon: BarChart3,label: 'Résultats',             path: '/results',       permission: 'view:results'    as const },
+  { icon: Users,    label: 'Gestion Utilisateurs',  path: '/users',         permission: 'view:users'      as const },
+  { icon: FileText, label: 'Piste d\'Audit',        path: '/audit',         permission: 'view:audit'      as const },
+  { icon: Bell,     label: 'Notifications',         path: '/notifications', permission: 'view:dashboard'  as const },
 ];
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
@@ -111,24 +112,38 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         <nav className="flex-1 p-2 sm:p-4 overflow-y-auto">
           <ul className="space-y-1 sm:space-y-2">
-            {menuItems.map((item) => (
-              <li key={item.path}>
-                <Link
-                  to={item.path}
-                  onClick={() => isMobile && setSidebarOpen(false)}
-                  className={`flex items-center space-x-3 p-2 sm:p-3 rounded-lg transition-colors ${
-                    location.pathname === item.path
-                      ? 'bg-white text-gov-blue'
-                      : 'text-blue-100 hover:bg-gov-blue-light'
-                  }`}
-                >
-                  <item.icon size={20} className="flex-shrink-0" />
-                  {(sidebarOpen || isMobile) && (
-                    <span className="text-sm font-medium truncate">{item.label}</span>
-                  )}
-                </Link>
-              </li>
-            ))}
+            {menuItems.map((item) => {
+              const isActive = location.pathname === item.path;
+              const isNotif  = item.path === '/notifications';
+              return (
+                <li key={item.path}>
+                  <Link
+                    to={item.path}
+                    onClick={() => isMobile && setSidebarOpen(false)}
+                    className={`flex items-center space-x-3 p-2 sm:p-3 rounded-lg transition-colors ${
+                      isActive ? 'bg-white text-gov-blue' : 'text-blue-100 hover:bg-gov-blue-light'
+                    }`}
+                  >
+                    <div className="relative flex-shrink-0">
+                      <item.icon size={20} />
+                      {isNotif && unreadCount > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full h-3.5 w-3.5 flex items-center justify-center leading-none">
+                          {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
+                      )}
+                    </div>
+                    {(sidebarOpen || isMobile) && (
+                      <span className="text-sm font-medium truncate flex-1">{item.label}</span>
+                    )}
+                    {(sidebarOpen || isMobile) && isNotif && unreadCount > 0 && (
+                      <span className="ml-auto bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 
@@ -142,7 +157,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   : user?.role === 'validateur' ? 'Validateur'
                   : user?.role === 'agent-saisie' ? 'Agent de Saisie'
                   : user?.role === 'observateur' ? 'Observateur'
-                  : user?.role === 'president-bureau' ? 'Président de Bureau'
+                  : user?.role === 'president-bureau'        ? 'Président de Bureau'
+                  : user?.role === 'president-etablissement' ? 'Président de Bureau'
                   : user?.role}
               </p>
             </div>
@@ -227,18 +243,28 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                         className={`flex items-start gap-3 px-3 py-2 rounded-md focus:bg-gray-50 outline-none cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}
                         onClick={() => {
                           markAsRead(notification.id);
-                          const t = notification.title?.toLowerCase() || '';
-                          if (t.includes('pv')) {
+                          // Navigation contextuelle basée sur le type métier
+                          const type = notification.type ?? '';
+                          if (
+                            type.startsWith('pv_') ||
+                            type.startsWith('observer_') ||
+                            type.startsWith('opinion_') ||
+                            type.startsWith('document_') ||
+                            type.startsWith('results_')
+                          ) {
                             navigate('/results');
-                          } else if (t.includes('élection') || t.includes('election')) {
+                          } else if (type.startsWith('election_')) {
                             navigate('/elections');
-                          } else if (t.includes('électeur') || t.includes('electeur') || t.includes('votant')) {
-                            navigate('/voters');
+                          } else {
+                            // Fallback sur le titre
+                            const t = notification.title?.toLowerCase() || '';
+                            if (t.includes('pv') || t.includes('document') || t.includes('résultat')) navigate('/results');
+                            else if (t.includes('élection') || t.includes('election')) navigate('/elections');
                           }
                         }}
                       >
                         <div className="mt-0.5">
-                          {getNotificationIcon(notification.type)}
+                          {getNotificationIcon(notification.severity)}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start">
@@ -261,10 +287,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                             {notification.message}
                           </p>
                           <p className="text-xs text-gray-400 mt-1">
-                            {formatDistanceToNow(new Date(notification.date), {
-                              addSuffix: true,
-                              locale: fr,
-                            })}
+                            {(() => {
+                              try {
+                                return formatDistanceToNow(new Date(notification.created_at), { addSuffix: true, locale: fr });
+                              } catch {
+                                return '';
+                              }
+                            })()}
                           </p>
                         </div>
                       </DropdownMenuItem>

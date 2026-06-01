@@ -25,6 +25,12 @@ import { toast } from 'sonner';
 import { resolveCandidatesForElection, isProfessionalElection } from '@/lib/candidateUtils';
 import { useRBAC } from '@/hooks/useRBAC';
 import { useAuth } from '@/contexts/AuthContext';
+import {
+  notifyPVValidated,
+  notifyPVRejected,
+  notifyObserverOpinion,
+  notifyOpinionReaction,
+} from '@/lib/notificationService';
 
 // ── Composant Timeline circuit de validation ──────────────────────────────────
 interface ObserverOpinion {
@@ -301,6 +307,21 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         return;
       }
       toast.success(type === 'approved' ? 'Réserve approuvée' : 'Réserve rejetée — avis mis à jour en conforme');
+      // Notifier l'observateur concerné
+      const pvOpinions = observerOpinions.get(selectedPV ?? '') ?? [];
+      const opinion    = pvOpinions.find(op => op.id === opinionId);
+      const pvData     = pvs.find(p => p.id === selectedPV);
+      const bureau     = pvData ? bureauxMap.get(pvData.bureau_id) : null;
+      if (opinion && pvData) {
+        notifyOpinionReaction({
+          recipientId:   opinion.observer_id,
+          pvId:          selectedPV!,
+          electionId:    selectedElection,
+          bureauName:    bureau?.name ?? 'bureau',
+          reactionType:  type,
+          actorName:     reactorName,
+        }).catch(() => {/* silencieux */});
+      }
       setReactionTarget(null);
       // Mise à jour optimiste immédiate de l'UI
       setObserverOpinions(prev => {
@@ -607,6 +628,21 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       });
 
       toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Réserve');
+      // Notifier admins + président du centre
+      const pvData = pvs.find(p => p.id === selectedPV);
+      const bureau = pvData ? bureauxMap.get(pvData.bureau_id) : null;
+      const center = bureau ? centersMap.get(bureau.center_id) : null;
+      if (pvData && bureau) {
+        notifyObserverOpinion({
+          pvId:       selectedPV,
+          electionId: selectedElection,
+          centerId:   bureau.center_id,
+          centerName: center?.name ?? 'établissement',
+          bureauName: bureau.name,
+          conformity,
+          actorName:  user.name,
+        }).catch(() => {/* silencieux */});
+      }
       setDetailOpen(false);
     } finally {
       setSavingAnnotation(false);
@@ -1523,6 +1559,21 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       .eq('id', selectedPV);
                     if (!error) {
                       setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
+                      // Notification : agent + admins
+                      const pvD  = pvs.find(p => p.id === selectedPV);
+                      const bur  = pvD ? bureauxMap.get(pvD.bureau_id) : null;
+                      const ctr  = bur ? centersMap.get(bur.center_id) : null;
+                      if (pvD && bur && user) {
+                        notifyPVValidated({
+                          pvId:          selectedPV!,
+                          electionId:    selectedElection,
+                          centerId:      bur.center_id,
+                          centerName:    ctr?.name ?? 'établissement',
+                          bureauName:    bur.name,
+                          submittedById: pvD.entered_by ?? null,
+                          actorName:     user.name,
+                        }).catch(() => {});
+                      }
                       setDetailOpen(false);
                     }
                   }}
@@ -1682,6 +1733,22 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       : p
                   ));
                   toast.success('PV rejeté — renvoyé en saisie');
+                  // Notification : agent + admins
+                  const pvD2 = pvs.find(p => p.id === selectedPV);
+                  const bur2 = pvD2 ? bureauxMap.get(pvD2.bureau_id) : null;
+                  const ctr2 = bur2 ? centersMap.get(bur2.center_id) : null;
+                  if (pvD2 && bur2 && user) {
+                    notifyPVRejected({
+                      pvId:          selectedPV!,
+                      electionId:    selectedElection,
+                      centerId:      bur2.center_id,
+                      centerName:    ctr2?.name ?? 'établissement',
+                      bureauName:    bur2.name,
+                      submittedById: pvD2.entered_by ?? null,
+                      comment:       rejectComment,
+                      actorName:     user.name,
+                    }).catch(() => {});
+                  }
                   setShowRejectDialog(false);
                   setDetailOpen(false);
                 } finally {

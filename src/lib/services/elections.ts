@@ -3,6 +3,7 @@ import { isElectionPublishedForPublic, isElectionVisibleOnPublic } from '@/utils
 
 export interface ElectionEntity {
   id: string;
+  slug?: string;
   title: string;
   election_date: string;
   status: string;
@@ -133,5 +134,16 @@ export async function fetchElectionById(electionId: string): Promise<ElectionEnt
     .eq('id', electionId)
     .single();
   if (error) throw error;
+  return data as ElectionEntity;
+}
+
+/** Résout un slug d'URL vers l'élection correspondante. */
+export async function fetchElectionBySlug(slug: string): Promise<ElectionEntity | null> {
+  const { data, error } = await supabase
+    .from('elections')
+    .select('*')
+    .eq('slug', slug)
+    .single();
+  if (error) return null;
   return data as ElectionEntity;
 }
