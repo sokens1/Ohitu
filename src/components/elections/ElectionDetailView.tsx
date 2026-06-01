@@ -129,6 +129,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
   const centersFileInputRef = useRef<HTMLInputElement>(null);
   const candidatesFileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [statistics, setStatistics] = useState({
     totalVoters: 0,
     totalCenters: 0,
@@ -344,22 +345,23 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
   // Valeurs dérivées pour les filtres établissement et syndicat
   const allEtablissements = useMemo(() => {
-    const set = new Set<string>();
+    const seen = new Set<string>();
+    const result: string[] = [];
     candidates.forEach((c: any) => {
       c.titulaires?.forEach((t: any) => {
-        const v = t.etablissement?.toString().trim();
-        if (v) set.add(v);
+        const etab = t.etablissement?.toString().trim();
+        if (etab) {
+          const key = etab.toLowerCase();
+          if (!seen.has(key)) { seen.add(key); result.push(etab); }
+        }
       });
     });
-    return Array.from(set).sort();
+    return result.sort();
   }, [candidates]);
 
   const allSyndicats = useMemo(() => {
     const set = new Set<string>();
-    candidates.forEach((c: any) => {
-      const v = c.name?.toString().trim();
-      if (v) set.add(v);
-    });
+    candidates.forEach((c: any) => { if (c.name) set.add(c.name); });
     return Array.from(set).sort();
   }, [candidates]);
 
@@ -440,13 +442,10 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         toast.success("Modèle Établissements téléchargé !");
         return;
       }
-      
+
       const XLSX = await import('xlsx');
       const ws_data = [
         ["Région / Localisation", "Nom Établissement / Site", "Responsable Établissement", "Contact Téléphone", "Nom Bureau de vote", "Nombre d'électeurs", "Collège concerné"],
-        ["Libreville", "Siège Social", "Jean Dupont", "061234567", "Bureau 1", "50", "Employés"],
-        ["Libreville", "Siège Social", "Jean Dupont", "061234567", "Bureau 2", "50", "Cadres"],
-        ["Port-Gentil", "Agence Port-Gentil", "Marie Claire", "062345678", "Bureau Unique", "30", "Général"]
       ];
       const ws = XLSX.utils.aoa_to_sheet(ws_data);
       const wb = XLSX.utils.book_new();
@@ -479,11 +478,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           }
 
           const entId = enterprise?.id || election.enterpriseId || (election as any).enterprise_id;
+          setImportProgress({ done: 0, total: parsedCenters.length });
           const importResult = await importEstablishmentsToElection(
             supabase,
             election.id,
             entId,
-            parsedCenters
+            parsedCenters,
+            (done, total) => setImportProgress({ done, total })
           );
 
           if (importResult.linked === 0) {
@@ -504,6 +505,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           toast.error(err.message || "Erreur de lecture du fichier");
         } finally {
           setIsImporting(false);
+          setImportProgress(null);
           if (centersFileInputRef.current) centersFileInputRef.current.value = '';
         }
       };
@@ -609,7 +611,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
             );
           }
 
-          const importResult = await importUnionListsToElection(supabase, election.id, parsedLists);
+          setImportProgress({ done: 0, total: parsedLists.length });
+          const importResult = await importUnionListsToElection(
+            supabase,
+            election.id,
+            parsedLists,
+            (done, total) => setImportProgress({ done, total })
+          );
 
           if (importResult.imported === 0) {
             const detail = importResult.errors[0] || 'vérifiez les colonnes du modèle listes.xlsx (feuille « Listes »)';
@@ -628,6 +636,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
           toast.error(err.message || "Erreur de lecture du fichier");
         } finally {
           setIsImporting(false);
+          setImportProgress(null);
           if (candidatesFileInputRef.current) candidatesFileInputRef.current.value = '';
         }
       };
@@ -821,13 +830,12 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
     const matchEtablissement =
       candidatesEtablissementFilter === 'all' ||
-      ((c as any).titulaires ?? []).some(
-        (t: any) => t.etablissement?.toString().trim() === candidatesEtablissementFilter
+      (c.titulaires ?? []).some(
+        (t: any) => t.etablissement?.toString().trim().toLowerCase() === candidatesEtablissementFilter.toLowerCase()
       );
 
     const matchSyndicat =
-      candidatesSyndicatFilter === 'all' ||
-      c.name?.toString().trim() === candidatesSyndicatFilter;
+      candidatesSyndicatFilter === 'all' || c.name === candidatesSyndicatFilter;
 
     return matchSearch && matchCollege && matchEtablissement && matchSyndicat;
   });
@@ -1378,6 +1386,30 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </div>
             </div>
 
+            {/* Barre de progression d'import établissements */}
+            {isImporting && importProgress && (
+              <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-green-800 flex items-center gap-2">
+                    <Upload className="w-4 h-4 animate-bounce" />
+                    Import établissements en cours…
+                  </span>
+                  <span className="text-green-700 font-bold tabular-nums">
+                    {importProgress.done} / {importProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-green-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="h-2 bg-green-500 rounded-full transition-all duration-300"
+                    style={{ width: importProgress.total > 0 ? `${Math.round((importProgress.done / importProgress.total) * 100)}%` : '0%' }}
+                  />
+                </div>
+                <p className="text-xs text-green-600">
+                  {importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0}% — {importProgress.total - importProgress.done} établissement{importProgress.total - importProgress.done > 1 ? 's' : ''} restant{importProgress.total - importProgress.done > 1 ? 's' : ''}
+                </p>
+              </div>
+            )}
+
             {centersViewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {centers.map((center) => (
@@ -1605,6 +1637,30 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </div>
             </div>
 
+            {/* Barre de progression d'import */}
+            {isImporting && importProgress && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-purple-800 flex items-center gap-2">
+                    <Upload className="w-4 h-4 animate-bounce" />
+                    Import en cours…
+                  </span>
+                  <span className="text-purple-700 font-bold tabular-nums">
+                    {importProgress.done} / {importProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-purple-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="h-2 bg-purple-500 rounded-full transition-all duration-300"
+                    style={{ width: importProgress.total > 0 ? `${Math.round((importProgress.done / importProgress.total) * 100)}%` : '0%' }}
+                  />
+                </div>
+                <p className="text-xs text-purple-600">
+                  {importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0}% — {importProgress.total - importProgress.done} liste{importProgress.total - importProgress.done > 1 ? 's' : ''} restante{importProgress.total - importProgress.done > 1 ? 's' : ''}
+                </p>
+              </div>
+            )}
+
             {/* Barre de recherche + filtres */}
             <div className="flex flex-col gap-2">
               <div className="flex flex-col sm:flex-row gap-2">
@@ -1621,7 +1677,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
                 {election.type === 'Élection Professionnelle' && (
                   <>
-                    {/* 1 — Filtre établissement */}
+                    {/* Filtre établissement */}
                     <Select
                       value={candidatesEtablissementFilter}
                       onValueChange={(v) => { setCandidatesEtablissementFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1637,7 +1693,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       </SelectContent>
                     </Select>
 
-                    {/* 2 — Filtre syndicat */}
+                    {/* Filtre syndicat */}
                     <Select
                       value={candidatesSyndicatFilter}
                       onValueChange={(v) => { setCandidatesSyndicatFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1653,7 +1709,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       </SelectContent>
                     </Select>
 
-                    {/* 3 — Filtre collège */}
+                    {/* Filtre collège */}
                     <Select
                       value={candidatesCollegeFilter}
                       onValueChange={(v) => { setCandidatesCollegeFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1767,16 +1823,21 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                               ? candidate.titulaires[0].name
                               : candidate.name}
                           </h3>
-                          {election.type === 'Élection Professionnelle' && (candidate.titulaires?.[0]?.genre || candidate.titulaires?.[0]?.anciennete != null) && (
+                          {election.type === 'Élection Professionnelle' && candidate.titulaires?.[0] && (
                             <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
-                              {candidate.titulaires?.[0]?.genre && (
+                              {candidate.titulaires[0].genre && (
                                 <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-100">
                                   {candidate.titulaires[0].genre}
                                 </span>
                               )}
-                              {candidate.titulaires?.[0]?.anciennete != null && candidate.titulaires[0].anciennete !== '' && (
+                              {candidate.titulaires[0].age != null && candidate.titulaires[0].age !== '' && (
+                                <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-sky-50 text-sky-700 rounded-full border border-sky-100">
+                                  {candidate.titulaires[0].age} ans
+                                </span>
+                              )}
+                              {candidate.titulaires[0].anciennete != null && candidate.titulaires[0].anciennete !== '' && (
                                 <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
-                                  {candidate.titulaires[0].anciennete} ans d'ancienneté
+                                  {candidate.titulaires[0].anciennete} ans anc.
                                 </span>
                               )}
                             </div>
@@ -1828,8 +1889,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                               </div>
                             </div>
                           ) : candidate.suppleants?.[0] ? (
-                            // Collège 1 siège : affichage simple existant
-                            <div className="w-full mt-2 pt-3 border-t border-gray-100 flex flex-col items-center justify-center gap-2">
+                            // Collège 1 siège
+                            <div className="w-full mt-2 pt-3 border-t border-gray-100 flex flex-col items-center justify-center gap-1.5">
                               <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 border-2 border-white shadow-sm">
                                 {candidate.suppleants[0].photo ? (
                                   <img src={candidate.suppleants[0].photo} alt="Deputy" className="w-full h-full object-cover" />
@@ -1841,6 +1902,25 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                                 <p className="text-[9px] font-black text-gray-400 uppercase leading-none">Suppléant</p>
                                 <p className="text-[10px] font-bold text-gray-700 break-words">{candidate.suppleants[0].name}</p>
                               </div>
+                              {(candidate.suppleants[0].genre || candidate.suppleants[0].age != null || candidate.suppleants[0].anciennete != null) && (
+                                <div className="flex flex-wrap items-center justify-center gap-1">
+                                  {candidate.suppleants[0].genre && (
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-100">
+                                      {candidate.suppleants[0].genre}
+                                    </span>
+                                  )}
+                                  {candidate.suppleants[0].age != null && candidate.suppleants[0].age !== '' && (
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-sky-50 text-sky-700 rounded-full border border-sky-100">
+                                      {candidate.suppleants[0].age} ans
+                                    </span>
+                                  )}
+                                  {candidate.suppleants[0].anciennete != null && candidate.suppleants[0].anciennete !== '' && (
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
+                                      {candidate.suppleants[0].anciennete} ans d'anc.
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ) : null
                         )}

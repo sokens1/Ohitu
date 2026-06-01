@@ -52,7 +52,7 @@ export async function parseEstablishmentsSheet(
     const region =
       String(row['Region__Localisation'] || row['Région / Localisation'] || row['Région'] || 'Général').trim();
     const name = String(
-      row['Nom_Etablissement__Site'] || row['Nom Établissement / Site'] || row['Site'] || ''
+      row['Nom_Etablissement__Centre'] || row['Nom_Etablissement__Site'] || row['Nom Établissement / Site'] || row['Site'] || ''
     ).trim();
     if (!name) return;
 
@@ -133,6 +133,7 @@ export async function parseEstablishmentsSheet(
   if (isProfessional && bureauxRows.length > 0) {
     bureauxRows.forEach((bRow) => {
       const estName = String(
+        bRow['Nom_Etablissement__Centre'] ||
         bRow['Nom_Etablissement__Site'] ||
         bRow['Nom Établissement / Site'] ||
         bRow['Site'] ||
@@ -224,191 +225,166 @@ export async function importEstablishmentsToElection(
   supabase: SupabaseClient,
   electionId: string,
   enterpriseId: string | null | undefined,
-  centers: ParsedVotingCenter[]
+  centers: ParsedVotingCenter[],
+  onProgress?: (done: number, total: number) => void
 ): Promise<ImportEstablishmentsResult> {
   const result: ImportEstablishmentsResult = { linked: 0, created: 0, skipped: 0, errors: [] };
+  const total = centers.length;
 
-  // =======================================================================
-  // NETTOYAGE PREALABLE : Écraser les données précédentes pour cette élection
-  // =======================================================================
+  // 1. Nettoyage préalable
   try {
-    // 1. Supprimer tous les bureaux de vote / collèges rattachés à cette élection
     await supabase.from('voting_bureaux').delete().eq('election_id', electionId);
-    
-    // 2. Trouver les centres qui étaient liés à cette élection pour nettoyage éventuel
     const { data: linkedCenters } = await supabase
-      .from('election_centers')
-      .select('center_id')
-      .eq('election_id', electionId);
-      
-    // 3. Supprimer les liens de l'élection avec les centres
+      .from('election_centers').select('center_id').eq('election_id', electionId);
     await supabase.from('election_centers').delete().eq('election_id', electionId);
-    
-    // 4. Nettoyer les centres devenus orphelins
     if (linkedCenters && linkedCenters.length > 0) {
-      const centerIds = linkedCenters.map(lc => lc.center_id);
-      for (const centerId of centerIds) {
-        const { count } = await supabase
-          .from('election_centers')
-          .select('id', { count: 'exact', head: true })
-          .eq('center_id', centerId);
-
-        if (count === 0) {
-          await supabase.from('voting_centers').delete().eq('id', centerId);
-        }
+      const centerIds = linkedCenters.map((lc: any) => lc.center_id);
+      // Vérification orphelins en une seule requête
+      const { data: stillLinked } = await supabase
+        .from('election_centers').select('center_id').in('center_id', centerIds);
+      const stillLinkedIds = new Set((stillLinked || []).map((l: any) => l.center_id));
+      const orphanIds = centerIds.filter((id: string) => !stillLinkedIds.has(id));
+      if (orphanIds.length > 0) {
+        await supabase.from('voting_centers').delete().in('id', orphanIds);
       }
     }
   } catch (cleanError) {
-    console.warn("Erreur lors du nettoyage préalable à l'import des établissements:", cleanError);
+    console.warn("Nettoyage préalable établissements:", cleanError);
   }
-  // =======================================================================
 
-  for (const center of centers) {
-    try {
-      // Pour éviter les conflits 409, on fait une recherche insensible à la casse sur le nom
-      const { data: existingList } = await supabase
-        .from('voting_centers')
-        .select('id')
-        .ilike('name', center.name.trim())
-        .limit(1);
+  // 2. Pré-charger tous les centres existants en une seule requête
+  const { data: existingCenters } = await supabase
+    .from('voting_centers').select('id, name');
+  const centerByName = new Map<string, string>();
+  (existingCenters || []).forEach((c: any) => {
+    centerByName.set(c.name.toLowerCase().trim(), c.id);
+  });
 
-      const existing = existingList && existingList.length > 0 ? existingList[0] : null;
+  // 3. Traiter chaque établissement avec résolution des IDs
+  const centerRows: { center: ParsedVotingCenter; centerId: string }[] = [];
+  const toCreateCenters: { center: ParsedVotingCenter; idx: number }[] = [];
 
-      let centerId: string;
-      const totalSeats = center.booths.reduce((sum, b: any) => sum + (b.is_college ? (b.seats_to_fill || 0) : 0), 0);
+  for (let i = 0; i < centers.length; i++) {
+    const center = centers[i];
+    const existingId = centerByName.get(center.name.toLowerCase().trim());
+    if (existingId) {
+      centerRows.push({ center, centerId: existingId });
+    } else {
+      toCreateCenters.push({ center, idx: i });
+    }
+  }
 
-      if (existing?.id) {
-        centerId = existing.id;
-        const updatePayload: Record<string, unknown> = {
-          address: center.address,
-          contact_name: center.contact_name,
-          contact_phone: center.contact_phone,
-          total_voters: center.voters,
-          total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
-          total_seats: totalSeats
-        };
-        // Associer à l'entreprise si nécessaire
-        if (enterpriseId) updatePayload.enterprise_id = enterpriseId;
+  // 4. Créer les nouveaux centres en bulk
+  if (toCreateCenters.length > 0) {
+    const insertPayload = toCreateCenters.map(({ center }) => {
+      const totalSeats = center.booths.reduce((s, b: any) => s + (b.is_college ? (b.seats_to_fill || 0) : 0), 0);
+      return {
+        enterprise_id: enterpriseId || null,
+        name: center.name.trim(),
+        address: center.address,
+        contact_name: center.contact_name,
+        contact_phone: center.contact_phone,
+        total_voters: center.voters,
+        total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
+        total_seats: totalSeats,
+      };
+    });
 
-        await supabase.from('voting_centers').update(updatePayload).eq('id', centerId);
-      } else {
-        const { data: created, error: insertErr } = await supabase
+    const { data: created, error: bulkErr } = await supabase
+      .from('voting_centers').insert(insertPayload).select('id, name');
+
+    if (bulkErr) {
+      // Fallback : insertion individuelle
+      for (const { center } of toCreateCenters) {
+        const totalSeats = center.booths.reduce((s, b: any) => s + (b.is_college ? (b.seats_to_fill || 0) : 0), 0);
+        const { data: single, error: singleErr } = await supabase
           .from('voting_centers')
-          .insert({
-            enterprise_id: enterpriseId || null,
-            name: center.name.trim(),
-            address: center.address,
-            contact_name: center.contact_name,
-            contact_phone: center.contact_phone,
-            total_voters: center.voters,
-            total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
-            total_seats: totalSeats
-          })
-          .select('id')
-          .single();
-
-        if (insertErr || !created) {
-          // Gestion des cas de conflit d'unicité (code 23505 ou message contenant duplicate)
-          if (insertErr?.code === '23505' || insertErr?.message?.includes('duplicate') || insertErr?.message?.includes('already exists')) {
-            const { data: retryList } = await supabase
-              .from('voting_centers')
-              .select('id')
-              .ilike('name', center.name.trim())
-              .limit(1);
-            
-            if (retryList && retryList.length > 0) {
-              centerId = retryList[0].id;
-              const updatePayload: Record<string, unknown> = {
-                address: center.address,
-                contact_name: center.contact_name,
-                contact_phone: center.contact_phone,
-                total_voters: center.voters,
-                total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
-                total_seats: totalSeats
-              };
-              if (enterpriseId) updatePayload.enterprise_id = enterpriseId;
-              await supabase.from('voting_centers').update(updatePayload).eq('id', centerId);
-              result.created++;
-            } else {
-              result.errors.push(`${center.name}: ${insertErr.message}`);
-              result.skipped++;
-              continue;
-            }
+          .insert({ enterprise_id: enterpriseId || null, name: center.name.trim(), address: center.address, contact_name: center.contact_name, contact_phone: center.contact_phone, total_voters: center.voters, total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length), total_seats: totalSeats })
+          .select('id').single();
+        if (singleErr || !single) {
+          // Conflit d'unicité : chercher l'existant
+          const { data: retry } = await supabase.from('voting_centers').select('id').ilike('name', center.name.trim()).limit(1);
+          if (retry?.[0]) {
+            centerRows.push({ center, centerId: retry[0].id });
+            result.created++;
           } else {
-            result.errors.push(`${center.name}: ${insertErr?.message || 'insertion impossible'}`);
+            result.errors.push(`${center.name}: ${singleErr?.message || 'insertion impossible'}`);
             result.skipped++;
-            continue;
           }
         } else {
-          centerId = created.id;
+          centerRows.push({ center, centerId: single.id });
           result.created++;
         }
       }
-
-      const { data: existingLink } = await supabase
-          .from('election_centers')
-          .select('id')
-          .eq('election_id', electionId)
-          .eq('center_id', centerId)
-          .maybeSingle();
-
-      if (!existingLink) {
-        const { error: linkErr } = await supabase.from('election_centers').insert({
-          election_id: electionId,
-          center_id: centerId,
-        });
-        if (linkErr) {
-          result.errors.push(`${center.name} (liaison): ${linkErr.message}`);
+    } else {
+      const createdMap = new Map<string, string>();
+      (created || []).forEach((c: any) => createdMap.set(c.name.toLowerCase().trim(), c.id));
+      for (const { center } of toCreateCenters) {
+        const cId = createdMap.get(center.name.toLowerCase().trim());
+        if (cId) {
+          centerRows.push({ center, centerId: cId });
+          result.created++;
+        } else {
+          result.errors.push(`${center.name}: ID introuvable après création`);
           result.skipped++;
-          continue;
         }
       }
-
-      result.linked++;
-
-      if (center.booths.length > 0) {
-        for (const booth of center.booths) {
-          const { data: existingBooth } = await supabase
-            .from('voting_bureaux')
-            .select('id')
-            .eq('center_id', centerId)
-            .eq('name', booth.name)
-            .eq('election_id', electionId)
-            .maybeSingle();
-
-          const updatePayload: Record<string, any> = {
-            seats_to_fill: (booth as any).seats_to_fill || 0,
-            registered_voters: booth.registered_voters || 0,
-            election_id: electionId,
-            lieu_vote: (booth as any).lieu_vote || null,
-            college: (booth as any).college || null,
-            ...(booth.college_type != null ? { college_type: booth.college_type } : {}),
-          };
-
-          if (existingBooth) {
-            await supabase
-              .from('voting_bureaux')
-              .update(updatePayload)
-              .eq('id', existingBooth.id);
-          } else {
-            await supabase
-              .from('voting_bureaux')
-              .insert({
-                center_id: centerId,
-                name: booth.name,
-                president_name: 'N/A',
-                president_phone: '000000000',
-                urns_count: 0,
-                ...updatePayload
-              });
-          }
-        }
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      result.errors.push(`${center.name}: ${msg}`);
-      result.skipped++;
     }
+  }
+
+  // Mettre à jour les centres existants (en parallèle)
+  await Promise.all(
+    centerRows
+      .filter(({ centerId }) => centerByName.has)
+      .map(({ center, centerId }) => {
+        const totalSeats = center.booths.reduce((s, b: any) => s + (b.is_college ? (b.seats_to_fill || 0) : 0), 0);
+        const payload: Record<string, unknown> = {
+          address: center.address, contact_name: center.contact_name, contact_phone: center.contact_phone,
+          total_voters: center.voters,
+          total_bureaux: Math.max(center.bureaux, center.booths.filter((b: any) => !b.is_college).length),
+          total_seats: totalSeats,
+        };
+        if (enterpriseId) payload.enterprise_id = enterpriseId;
+        return supabase.from('voting_centers').update(payload).eq('id', centerId);
+      })
+  );
+
+  // 5. Batch insert election_centers en une seule requête
+  const linkRows = centerRows.map(({ centerId }) => ({ election_id: electionId, center_id: centerId }));
+  if (linkRows.length > 0) {
+    const { error: linkErr } = await supabase.from('election_centers').insert(linkRows);
+    if (linkErr) {
+      result.errors.push(`Liaison centres: ${linkErr.message}`);
+    } else {
+      result.linked = linkRows.length;
+    }
+  }
+
+  // 6. Batch insert des bureaux par établissement avec progression
+  let done = 0;
+  const BOOTH_BATCH = 100;
+  for (const { center, centerId } of centerRows) {
+    if (center.booths.length > 0) {
+      const boothRows = center.booths.map((booth: any) => ({
+        center_id: centerId,
+        name: booth.name,
+        president_name: 'N/A',
+        president_phone: '000000000',
+        urns_count: 0,
+        seats_to_fill: booth.seats_to_fill || 0,
+        registered_voters: booth.registered_voters || 0,
+        election_id: electionId,
+        lieu_vote: booth.lieu_vote || null,
+        college: booth.college || null,
+        ...(booth.college_type != null ? { college_type: booth.college_type } : {}),
+      }));
+
+      for (let i = 0; i < boothRows.length; i += BOOTH_BATCH) {
+        await supabase.from('voting_bureaux').insert(boothRows.slice(i, i + BOOTH_BATCH));
+      }
+    }
+    done++;
+    onProgress?.(done, total);
   }
 
   return result;
@@ -479,7 +455,7 @@ export async function parseUnionListsSheet(workbook: WorkBook, isProfessional: b
     if (isProfessional) {
       unionAcronym = String(row['Acronyme_Representation'] || row['Sigle'] || '').trim();
       unionName = String(row['Representation'] || row['Nom'] || '').trim();
-      etablissement = String(row['Etablissement'] || '').trim();
+      etablissement = String(row['Établissement'] || row['Etablissement'] || row['etablissement'] || row['ETABLISSEMENT'] || '').trim();
       college = normalizeCollegeValue(row['College']);
       titulaireMatricule = String(row['Matricule_Titulaire'] || '').trim();
       titulaireName = String(row['Titulaire'] || '').trim();
@@ -636,35 +612,72 @@ async function resolveUnionId(
 export async function importUnionListsToElection(
   supabase: SupabaseClient,
   electionId: string,
-  lists: ParsedUnionList[]
+  lists: ParsedUnionList[],
+  onProgress?: (done: number, total: number) => void
 ): Promise<ImportUnionListsResult> {
   const result: ImportUnionListsResult = { imported: 0, skipped: 0, errors: [] };
+  const total = lists.length;
 
-  // =======================================================================
-  // NETTOYAGE PREALABLE : Écraser les listes précédentes pour cette élection
-  // =======================================================================
+  // 1. Nettoyage préalable (2 requêtes)
   try {
-    // Supprimer l'association de tous les candidats de cette élection
     await supabase.from('election_candidates').delete().eq('election_id', electionId);
-    // Supprimer les listes de cette élection
     await supabase.from('union_lists').delete().eq('election_id', electionId);
   } catch (cleanError) {
-    console.warn("Erreur lors du nettoyage préalable à l'import des listes:", cleanError);
+    console.warn("Nettoyage préalable:", cleanError);
   }
-  // =======================================================================
 
-  // Créer une liste distincte par titulaire (candidat)
+  // 2. Charger tous les syndicats existants en une seule requête
+  const { data: existingUnions } = await supabase.from('unions').select('id, acronym, name');
+  const byAcronym = new Map<string, string>();
+  const byName = new Map<string, string>();
+  (existingUnions || []).forEach((u: any) => {
+    if (u.acronym) byAcronym.set(u.acronym.toLowerCase(), u.id);
+    if (u.name) byName.set(u.name.toLowerCase(), u.id);
+  });
+
+  // 3. Identifier les syndicats manquants et les créer en bulk (1 requête)
+  const uniqueSyndicats = new Map<string, { acronym: string; name: string }>();
   for (const list of lists) {
-    try {
-      const unionId = await resolveUnionId(supabase, list.unionAcronym, list.unionName);
-      if (!unionId) {
-        result.errors.push(`${list.unionName || list.unionAcronym}: syndicat introuvable`);
-        result.skipped++;
-        continue;
-      }
+    const key = (list.unionAcronym || list.unionName).toLowerCase();
+    if (!key) continue;
+    const exists = (list.unionAcronym && byAcronym.has(list.unionAcronym.toLowerCase())) ||
+                   (list.unionName && byName.has(list.unionName.toLowerCase()));
+    if (!exists && !uniqueSyndicats.has(key)) {
+      uniqueSyndicats.set(key, { acronym: list.unionAcronym, name: list.unionName });
+    }
+  }
 
-      // Créer une liste par titulaire
-      const titulaires = list.titulaireName ? [{
+  if (uniqueSyndicats.size > 0) {
+    const toCreate = Array.from(uniqueSyndicats.values()).map(s => ({
+      name: s.name || s.acronym,
+      acronym: s.acronym || null,
+    }));
+    const { data: created } = await supabase.from('unions').insert(toCreate).select('id, acronym, name');
+    (created || []).forEach((u: any) => {
+      if (u.acronym) byAcronym.set(u.acronym.toLowerCase(), u.id);
+      if (u.name) byName.set(u.name.toLowerCase(), u.id);
+    });
+  }
+
+  // 4. Construire toutes les lignes à insérer (sans requête réseau)
+  const rows: any[] = [];
+  for (const list of lists) {
+    const unionId =
+      (list.unionAcronym && byAcronym.get(list.unionAcronym.toLowerCase())) ||
+      (list.unionName && byName.get(list.unionName.toLowerCase())) ||
+      null;
+
+    if (!unionId) {
+      result.errors.push(`${list.unionName || list.unionAcronym}: syndicat introuvable`);
+      result.skipped++;
+      continue;
+    }
+
+    rows.push({
+      election_id: electionId,
+      union_id: unionId,
+      college: list.college,
+      titulaires: list.titulaireName ? [{
         name: list.titulaireName,
         role: 'Tête de liste',
         genre: list.titulaireGenre || undefined,
@@ -672,37 +685,44 @@ export async function importUnionListsToElection(
         anciennete: list.titulaireAnciennete || undefined,
         matricule: list.titulaireMatricule || undefined,
         etablissement: list.etablissement || undefined,
-      }] : [];
-
-      const suppleants = list.suppleantName ? [{
+      }] : [],
+      suppleants: list.suppleantName ? [{
         name: list.suppleantName,
         role: 'Suppléant',
         genre: list.suppleantGenre || undefined,
         age: list.suppleantAge || undefined,
         anciennete: list.suppleantAnciennete || undefined,
         matricule: list.suppleantMatricule || undefined,
-      }] : [];
+      }] : [],
+    });
+  }
 
-      const { error: listErr } = await supabase.from('union_lists').insert({
-        election_id: electionId,
-        union_id: unionId,
-        college: list.college,
-        titulaires: titulaires,
-        suppleants: suppleants,
-      });
-
-      if (listErr) {
-        result.errors.push(`${list.unionName}: ${listErr.message}`);
-        result.skipped++;
-      } else {
-        result.imported++;
+  // 5. Insertion par batches de 50 avec progression
+  const BATCH = 50;
+  let done = 0;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const batch = rows.slice(i, i + BATCH);
+    const { error: batchErr } = await supabase.from('union_lists').insert(batch);
+    if (batchErr) {
+      // Fallback : insertion individuelle pour ce batch
+      for (const row of batch) {
+        const { error: singleErr } = await supabase.from('union_lists').insert(row);
+        if (singleErr) {
+          result.errors.push(singleErr.message);
+          result.skipped++;
+        } else {
+          result.imported++;
+        }
+        done++;
+        onProgress?.(done, total);
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      result.errors.push(`${list.unionName}: ${msg}`);
-      result.skipped++;
+    } else {
+      result.imported += batch.length;
+      done += batch.length;
+      onProgress?.(done, total);
     }
   }
 
   return result;
 }
+
