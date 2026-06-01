@@ -305,7 +305,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <div className="text-right min-w-0 hidden sm:block">
                 <p className="font-medium text-gov-gray text-sm truncate">{user?.name}</p>
                 <p className="text-xs text-gray-500 capitalize truncate">
-                  {user?.role?.replace('-', ' ')}
+                  {user?.role === 'super-admin'            ? 'Super Administrateur'
+                 : user?.role === 'admin'                  ? 'Administrateur'
+                 : user?.role === 'validateur'             ? 'Validateur'
+                 : user?.role === 'agent-saisie'           ? 'Agent de Saisie'
+                 : user?.role === 'observateur'            ? 'Observateur'
+                 : user?.role === 'president-bureau'       ? 'Président de Bureau'
+                 : user?.role === 'president-etablissement'? 'Président de Bureau'
+                 : user?.role}
                 </p>
               </div>
               <div className="w-8 h-8 bg-gov-blue rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
