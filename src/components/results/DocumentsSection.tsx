@@ -11,9 +11,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   Upload, Download, FileText, FileImage, Building2, BookOpen,
-  CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp
+  CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp,
+  X as XIcon, ZoomIn, ZoomOut, RotateCw, ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -100,6 +102,17 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const [uploading, setUploading] = useState<string | null>(null); // "centerId|college|docType"
   const [review, setReview]       = useState<ReviewState | null>(null);
   const [expanded, setExpanded]   = useState<Set<string>>(new Set());
+
+  // ── Prévisualisation document ─────────────────────────────────────────────
+  const [previewDoc, setPreviewDoc] = useState<EstablishmentDocument | null>(null);
+  const [imgZoom, setImgZoom]       = useState(1);
+  const [imgRotation, setImgRotation] = useState(0);
+  const openPreview = (doc: EstablishmentDocument) => {
+    setPreviewDoc(doc);
+    setImgZoom(1);
+    setImgRotation(0);
+  };
+  const closePreview = () => setPreviewDoc(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadContext = useRef<{ centerId: string; collegeType: string | null; docType: 'pv' | 'participation_list' } | null>(null);
@@ -380,6 +393,120 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     }
   };
 
+  // ── Modal de prévisualisation ────────────────────────────────────────────────
+  const COLLEGE_LABELS: Record<string, string> = {
+    cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+  };
+  const isPDF = (url: string) => url.toLowerCase().includes('.pdf') || url.toLowerCase().includes('application/pdf');
+
+  const previewModal = previewDoc && (
+    <Dialog open={!!previewDoc} onOpenChange={(open) => { if (!open) closePreview(); }}>
+      <DialogContent className="max-w-5xl w-full max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
+        {/* En-tête */}
+        <DialogHeader className="px-5 py-3.5 border-b bg-white flex-shrink-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <DialogTitle className="text-base font-semibold text-gray-900 truncate">
+                {previewDoc.document_type === 'pv' ? '📄 Procès-verbal' : '📋 Liste de participation'}
+                {previewDoc.center_name && <span className="text-gray-500 font-normal"> — {previewDoc.center_name}</span>}
+              </DialogTitle>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
+                {previewDoc.college_type && (
+                  <span className="inline-flex items-center gap-1">
+                    <BookOpen className="w-3 h-3" />
+                    {COLLEGE_LABELS[previewDoc.college_type] ?? previewDoc.college_type}
+                  </span>
+                )}
+                {previewDoc.file_name && <span className="italic truncate max-w-xs">{previewDoc.file_name}</span>}
+                {previewDoc.file_size && (
+                  <span>{(previewDoc.file_size / 1024).toFixed(0)} Ko</span>
+                )}
+                <span>Déposé par <strong>{previewDoc.uploader_name ?? '—'}</strong></span>
+                <span>{new Date(previewDoc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                  previewDoc.status === 'validated' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  previewDoc.status === 'reserved'  ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                  previewDoc.status === 'rejected'  ? 'bg-red-50 text-red-700 border-red-200' :
+                  'bg-yellow-50 text-yellow-700 border-yellow-200'
+                }`}>
+                  {previewDoc.status === 'validated' ? '✅ Validé' :
+                   previewDoc.status === 'reserved'  ? '⚠️ Réserve' :
+                   previewDoc.status === 'rejected'  ? '❌ Rejeté' : '⏳ En attente'}
+                </span>
+              </div>
+            </div>
+            {/* Actions barre haute */}
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {!isPDF(previewDoc.file_url) && (
+                <>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
+                    title="Zoom +" onClick={() => setImgZoom(z => Math.min(z + 0.25, 3))}>
+                    <ZoomIn className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
+                    title="Zoom −" onClick={() => setImgZoom(z => Math.max(z - 0.25, 0.25))}>
+                    <ZoomOut className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
+                    title="Rotation" onClick={() => setImgRotation(r => (r + 90) % 360)}>
+                    <RotateCw className="w-4 h-4" />
+                  </Button>
+                </>
+              )}
+              {canDownload && (
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
+                  title="Télécharger" onClick={() => handleDownload(previewDoc)}>
+                  <Download className="w-4 h-4" />
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
+                title="Ouvrir dans un nouvel onglet" onClick={() => window.open(previewDoc.file_url, '_blank')}>
+                <ExternalLink className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-700"
+                title="Fermer" onClick={closePreview}>
+                <XIcon className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          {previewDoc.review_comment && (
+            <p className="mt-1.5 text-xs text-gray-600 italic border-t pt-1.5">
+              💬 Commentaire admin : "{previewDoc.review_comment}"
+            </p>
+          )}
+        </DialogHeader>
+
+        {/* Corps : document */}
+        <div className="flex-1 overflow-hidden bg-gray-100 relative" style={{ minHeight: '60vh' }}>
+          {isPDF(previewDoc.file_url) ? (
+            <iframe
+              src={previewDoc.file_url}
+              className="w-full h-full border-0"
+              style={{ minHeight: '65vh' }}
+              title="Prévisualisation document"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center overflow-auto p-4"
+              style={{ minHeight: '65vh' }}>
+              <img
+                src={previewDoc.file_url}
+                alt="Document"
+                style={{
+                  transform: `scale(${imgZoom}) rotate(${imgRotation}deg)`,
+                  transition: 'transform 0.2s ease',
+                  maxWidth: imgZoom <= 1 ? '100%' : 'none',
+                  maxHeight: imgZoom <= 1 ? '65vh' : 'none',
+                  objectFit: 'contain',
+                  display: 'block',
+                }}
+              />
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
   // ── Rendu ────────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -418,10 +545,6 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         )}
 
         {centers.map(center => {
-          const COLLEGE_LABELS: Record<string, string> = {
-            cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-          };
-
           return (
             <Card key={center.id} className="border border-teal-200">
               <CardHeader className="pb-2 pt-4 px-4">
@@ -470,9 +593,10 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                   variant="ghost"
                                   size="sm"
                                   className="text-blue-600 hover:text-blue-700 h-7 px-2"
-                                  onClick={() => window.open(existing.file_url, '_blank')}
+                                  title="Prévisualiser"
+                                  onClick={() => openPreview(existing)}
                                 >
-                                  <Eye className="w-3.5 h-3.5 mr-1" />
+                                  <Eye className="w-3.5 h-3.5 mr-1" /> Voir
                                 </Button>
                               )}
                               <Button
@@ -496,6 +620,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
             </Card>
           );
         })}
+      {previewModal}
       </div>
     );
   }
@@ -589,9 +714,10 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                             variant="ghost"
                             size="sm"
                             className="text-blue-600 hover:text-blue-700 h-7 px-2"
-                            onClick={() => window.open(doc.file_url, '_blank')}
+                            title="Prévisualiser"
+                            onClick={() => openPreview(doc)}
                           >
-                            <Eye className="w-3.5 h-3.5 mr-1" /> 
+                            <Eye className="w-3.5 h-3.5 mr-1" /> Voir
                           </Button>
                           {canDownload && (
                             <Button
@@ -678,6 +804,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
           </Card>
         );
       })}
+      {previewModal}
     </div>
   );
 };
