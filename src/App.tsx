@@ -46,7 +46,7 @@ const App = () => {
                   {/* Page d'accueil désactivée temporairement */}
                   {/* <Route path="/home" element={<PublicHomePage />} /> */}
                   <Route path="/" element={<Login />} />
-                  <Route path="/election/:electionId/results" element={<ElectionResults />} />
+                  <Route path="/election/:slug/results" element={<ElectionResults />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/dashboard" element={<ProtectedRoute><DashboardModernSimple /></ProtectedRoute>} />
                   {/* Tous les rôles authentifiés voient leurs élections — RBAC géré dans ElectionManagementUnified */}

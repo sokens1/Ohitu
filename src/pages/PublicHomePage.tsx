@@ -348,7 +348,7 @@ const PublicHomePage = () => {
                           <button
                             key={e.id}
                             className="block w-full text-left px-3 py-2 hover:bg-slate-100 text-sm text-gray-800"
-                            onClick={() => navigate(`/election/${e.id}/results`)}
+                            onClick={() => navigate(`/election/${(e as any).slug ?? e.id}/results`)}
                           >
                             {e.title}
                           </button>
@@ -509,7 +509,7 @@ const PublicHomePage = () => {
                 {/* <Button
                   className="bg-white text-gov-blue hover:bg-blue-50"
                   aria-label="Voir les résultats"
-                  onClick={() => nextElection && navigate(`/election/${nextElection.id}/results`)}
+                  onClick={() => nextElection && navigate(`/election/${(nextElection as any).slug ?? nextElection.id}/results`)}
                 >
               Voir les résultats
                 </Button> */}
@@ -557,7 +557,7 @@ const PublicHomePage = () => {
                     }}
 
 
-                    onClick={() => navigate(`/election/${e.id}/results`)}
+                    onClick={() => navigate(`/election/${(e as any).slug ?? e.id}/results`)}
                   >
                     <div className="absolute inset-0 bg-black/35 hover:bg-black/25 transition-colors" />
                     <div className="relative p-4 text-white">
@@ -607,7 +607,7 @@ const PublicHomePage = () => {
                       {footerResultsOpen && finishedElections.length > 0 && (
                         <div className="absolute left-0 right-auto mt-2 bg-white text-gov-dark rounded shadow-lg border min-w-[260px] z-50 py-2 max-h-[96px] overflow-y-auto text-left">
                           {finishedElections.map(e => (
-                            <button key={e.id} className="block w-full text-left px-3 py-2 hover:bg-slate-100 text-sm" onClick={() => navigate(`/election/${e.id}/results`)}>
+                            <button key={e.id} className="block w-full text-left px-3 py-2 hover:bg-slate-100 text-sm" onClick={() => navigate(`/election/${(e as any).slug ?? e.id}/results`)}>
                               {e.title}
                             </button>
                           ))}

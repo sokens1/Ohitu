@@ -223,7 +223,7 @@ const Login = () => {
                      return (
                        <button
                          key={election.id}
-                         onClick={() => navigate(`/election/${election.id}/results`)}
+                         onClick={() => navigate(`/election/${election.slug ?? election.id}/results`)}
                          className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                        >
                          <div className="flex items-center justify-between">
@@ -337,7 +337,7 @@ const Login = () => {
                     return (
                       <button
                         key={election.id}
-                        onClick={() => navigate(`/election/${election.id}/results`)}
+                        onClick={() => navigate(`/election/${election.slug ?? election.id}/results`)}
                         className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                       >
                         <div className="flex items-center justify-between gap-3">
