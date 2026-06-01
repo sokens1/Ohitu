@@ -32,6 +32,8 @@ import {
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
+import { useAuth } from '@/contexts/AuthContext';
+import { notifyPVSubmitted } from '@/lib/notificationService';
 import { getRegisteredVotersLabel, isProfessionalElection } from '@/utils/electionCalculations';
 
 import { useNetworkQuality } from '@/hooks/useNetworkQuality';
@@ -69,6 +71,7 @@ interface PVEntrySectionProps {
 }
 
 const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElection, readOnly = false, prefill = null }) => {
+  const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [electionInfo, setElectionInfo] = useState<any>(null);
   const [candidatesData, setCandidatesData] = useState<any[]>([]);
@@ -740,6 +743,26 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
       localStorage.removeItem(`ohitu_pv_draft_${selectedElection}`);
 
       toast.success(existingPv?.id ? 'PV mis à jour avec succès.' : 'PV enregistré avec succès.');
+      // Notifier les validateurs + admins du centre concerné
+      if (!existingPv?.id && user) {
+        // Récupérer le nom du bureau et du centre pour le message
+        const { data: bInfo } = await supabase
+          .from('voting_bureaux')
+          .select('name, center_id, college_type, voting_centers(name)')
+          .eq('id', bureauId)
+          .single();
+        if (bInfo) {
+          notifyPVSubmitted({
+            pvId:        pv.id,
+            electionId:  selectedElection,
+            centerId:    bInfo.center_id,
+            centerName:  (bInfo as any).voting_centers?.name ?? 'établissement',
+            bureauName:  bInfo.name,
+            collegeType: bInfo.college_type ?? null,
+            actorName:   user.name,
+          }).catch(() => {});
+        }
+      }
       onClose();
     } catch (err) {
       console.error('Erreur soumission PV:', err);

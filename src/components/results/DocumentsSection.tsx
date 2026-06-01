@@ -4,6 +4,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
+import {
+  notifyDocumentUploaded,
+  notifyDocumentReviewed,
+} from '@/lib/notificationService';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -285,6 +289,18 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
       }
 
       toast.success('Document joint avec succès');
+      // Notifier les agents + admins concernés
+      const centerObj = centers.find(c => c.id === centerId);
+      if (centerObj) {
+        notifyDocumentUploaded({
+          electionId:   selectedElection,
+          centerId,
+          centerName:   centerObj.name,
+          collegeType,
+          documentType: docType,
+          actorName:    user.name,
+        }).catch(() => {/* silencieux */});
+      }
       await load();
     } finally {
       setUploading(null);
@@ -343,6 +359,20 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
       if (error) { toast.error('Erreur lors de la mise à jour'); return; }
       toast.success('Avis enregistré');
+      // Notifier le président qui a uploadé
+      const doc = docs.find(d => d.id === docId);
+      if (doc && user) {
+        const center = centers.find(c => c.id === doc.center_id);
+        notifyDocumentReviewed({
+          recipientId:  doc.uploaded_by,
+          centerName:   center?.name ?? doc.center_id,
+          documentType: doc.document_type,
+          status:       status as 'validated' | 'reserved' | 'rejected',
+          comment:      comment || null,
+          actorName:    user.name,
+          electionId:   doc.election_id,
+        }).catch(() => {/* silencieux */});
+      }
       setReview(null);
       await load();
     } finally {

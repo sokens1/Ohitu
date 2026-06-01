@@ -36,8 +36,8 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
-const getNotificationIcon = (type: 'info' | 'success' | 'warning' | 'error') => {
-  switch (type) {
+const getNotificationIcon = (severity: string) => {
+  switch (severity) {
     case 'error':
       return <AlertCircle className="h-4 w-4 text-red-500" />;
     case 'success':
@@ -227,18 +227,28 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                         className={`flex items-start gap-3 px-3 py-2 rounded-md focus:bg-gray-50 outline-none cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}
                         onClick={() => {
                           markAsRead(notification.id);
-                          const t = notification.title?.toLowerCase() || '';
-                          if (t.includes('pv')) {
+                          // Navigation contextuelle basée sur le type métier
+                          const type = notification.type ?? '';
+                          if (
+                            type.startsWith('pv_') ||
+                            type.startsWith('observer_') ||
+                            type.startsWith('opinion_') ||
+                            type.startsWith('document_') ||
+                            type.startsWith('results_')
+                          ) {
                             navigate('/results');
-                          } else if (t.includes('élection') || t.includes('election')) {
+                          } else if (type.startsWith('election_')) {
                             navigate('/elections');
-                          } else if (t.includes('électeur') || t.includes('electeur') || t.includes('votant')) {
-                            navigate('/voters');
+                          } else {
+                            // Fallback sur le titre
+                            const t = notification.title?.toLowerCase() || '';
+                            if (t.includes('pv') || t.includes('document') || t.includes('résultat')) navigate('/results');
+                            else if (t.includes('élection') || t.includes('election')) navigate('/elections');
                           }
                         }}
                       >
                         <div className="mt-0.5">
-                          {getNotificationIcon(notification.type)}
+                          {getNotificationIcon(notification.severity)}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start">
@@ -261,10 +271,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                             {notification.message}
                           </p>
                           <p className="text-xs text-gray-400 mt-1">
-                            {formatDistanceToNow(new Date(notification.date), {
-                              addSuffix: true,
-                              locale: fr,
-                            })}
+                            {(() => {
+                              try {
+                                return formatDistanceToNow(new Date(notification.created_at), { addSuffix: true, locale: fr });
+                              } catch {
+                                return '';
+                              }
+                            })()}
                           </p>
                         </div>
                       </DropdownMenuItem>
