@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Bell, CheckCircle, AlertCircle, AlertTriangle, Info,
-  Trash2, CheckCheck, Search, Filter,
+  Trash2, CheckCheck, Search, Filter, Check,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';

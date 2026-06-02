@@ -40,61 +40,7 @@ const getNormalizedCollegeLabel = (val: string | null | undefined): string => {
   return val.charAt(0).toUpperCase() + val.slice(1);
 };
 
-function allocateSeatsProportional(
-  entries: { id: string; votes: number }[],
-  totalSeats: number
-): Map<string, number> {
-  const result = new Map<string, number>();
-  if (totalSeats <= 0 || entries.length === 0) return result;
-  const totalVotes = entries.reduce((s, e) => s + e.votes, 0);
-  if (totalVotes <= 0) return result;
 
-  let allocated = 0;
-  const remainders: { id: string; remainder: number }[] = [];
-  entries.forEach(({ id, votes }) => {
-    const exact = (totalSeats * votes) / totalVotes;
-    const floor = Math.floor(exact);
-    result.set(id, floor);
-    allocated += floor;
-    remainders.push({ id, remainder: exact - floor });
-  });
-  remainders.sort((a, b) => b.remainder - a.remainder);
-  let i = 0;
-  while (allocated < totalSeats && i < remainders.length) {
-    const id = remainders[i].id;
-    result.set(id, (result.get(id) || 0) + 1);
-    allocated++;
-    i++;
-  }
-  return result;
-}
-
-function getCandidateCollegeRows(
-  candidateBureaux: Array<{ college_votes?: Record<string, number> }>,
-  totalSeats: number | undefined,
-  totalVotes: number
-): { college: string; votes: number; seats: number }[] {
-  const collegeAgg: Record<string, number> = {};
-  candidateBureaux.forEach((b) => {
-    if (b.college_votes) {
-      Object.entries(b.college_votes).forEach(([cName, votes]) => {
-        collegeAgg[cName] = (collegeAgg[cName] || 0) + (Number(votes) || 0);
-      });
-    }
-  });
-  const entries = Object.entries(collegeAgg).map(([college, votes]) => ({ id: college, votes }));
-  const seatMap = allocateSeatsProportional(
-    entries,
-    totalSeats && totalVotes > 0 ? totalSeats : 0
-  );
-  return Object.entries(collegeAgg)
-    .map(([college, votes]) => ({
-      college,
-      votes,
-      seats: seatMap.get(college) || 0,
-    }))
-    .sort((a, b) => b.votes - a.votes);
-}
 
 // Icone WhatsApp (SVG minimal)
 const WhatsAppIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -116,6 +62,7 @@ interface ElectionData {
   is_public_visible?: boolean;
   nb_electeurs?: number;
   cover_image_url?: string;
+  slug?: string;
 }
 
 interface CandidateResult {
@@ -329,10 +276,15 @@ const CandidateCard: React.FC<{
   );
 };
 
-const ElectionResults: React.FC = () => {
+interface ElectionResultsProps {
+  isAdminPreview?: boolean;
+  electionIdOverride?: string;
+}
+
+const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = false, electionIdOverride }) => {
   const { slug } = useParams<{ slug: string }>();
-  // electionId est résolu à partir du slug via fetchElectionBySlug
-  const [electionId, setElectionId] = useState<string | undefined>(undefined);
+  // electionId est résolu à partir du slug, ou directement depuis electionIdOverride (mode admin preview)
+  const [electionId, setElectionId] = useState<string | undefined>(electionIdOverride);
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [results, setResults] = useState<ElectionResults | null>(null);
@@ -352,6 +304,8 @@ const ElectionResults: React.FC = () => {
   const [sortBy, setSortBy] = useState<'center' | 'participation' | 'score' | 'votes'>('center');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedEstablishmentId, setSelectedEstablishmentId] = useState<string>('');
+  const [titulairesMap, setTitulairesMap] = useState<Map<string, string[]>>(new Map());
+  const [modalEtabId, setModalEtabId] = useState<string>('');
 
   // États de tri pour les modales des candidats
   const [candidateModalSortBy, setCandidateModalSortBy] = useState<'center' | 'participation' | 'score' | 'votes'>('center');
@@ -584,8 +538,9 @@ const ElectionResults: React.FC = () => {
     setCenterNameById(m);
   }, [centerRows]);
 
-  // Résolution slug → UUID de l'élection
+  // Résolution slug → UUID de l'élection (ignoré en mode admin preview avec electionIdOverride)
   useEffect(() => {
+    if (electionIdOverride) { setElectionId(electionIdOverride); return; }
     if (!slug) return;
     fetchElectionBySlug(slug).then(election => {
       if (election?.id) {
@@ -705,8 +660,8 @@ const ElectionResults: React.FC = () => {
       const isProElection = isProfessionalElection(election.type);
       const totalElectorsElection = await getElectionElectorsTotal(id, election.type);
 
-      // Vérifier visibilité publique (publiée + non masquée / non annulée)
-      if (!isElectionPublishedForPublic(election)) {
+      // Vérifier visibilité publique (bypassed en mode admin preview)
+      if (!isAdminPreview && !isElectionPublishedForPublic(election)) {
         console.log('⚠️ Élection non accessible au public - Aucun résultat affiché');
         setPublishedBureauIds(new Set());
         setResults({
@@ -1296,6 +1251,28 @@ const ElectionResults: React.FC = () => {
       setBureauRows(filteredBureaux);
       setCollegeDetailRows(collegeRowsBuilt);
 
+      // Map syndicatKey_collegeKey → [titulaire tête de liste] pour la vue détaillée
+      const tMap = new Map<string, string[]>();
+      (unionLists || []).forEach((ul: any) => {
+        const acronym = ul.unions?.acronym?.trim() || '';
+        const uName = ul.unions?.name?.trim() || '';
+        const collegeLabel = getNormalizedCollegeLabel(ul.college).toLowerCase();
+        const tits = Array.isArray(ul.titulaires) ? ul.titulaires
+          : (typeof ul.titulaires === 'string' ? JSON.parse(ul.titulaires || '[]') : []);
+        // On prend uniquement le premier titulaire (tête de liste) de chaque ligne
+        const firstName: string | undefined = tits[0]?.name;
+        if (firstName) {
+          [acronym, uName].filter(Boolean).forEach(key => {
+            const mk = `${key.toLowerCase()}_${collegeLabel}`;
+            const prev = tMap.get(mk) || [];
+            if (!prev.includes(firstName)) {
+              tMap.set(mk, [...prev, firstName]);
+            }
+          });
+        }
+      });
+      setTitulairesMap(tMap);
+
       setResults({
         election,
         total_voters: totalRegistered,
@@ -1437,6 +1414,24 @@ const ElectionResults: React.FC = () => {
   type BureauData = any;
 
   // Agrège les données par collège pour la vue Pro (table fixe par établissement)
+  const abbreviateName = (fullName: string): string => {
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length <= 1) return fullName;
+    // Format stocké : NOM Prénom (nom de famille en majuscules en premier)
+    // Les mots entièrement en majuscules = nom de famille → affichés en entier
+    // Les mots en casse mixte = prénom → réduits à l'initiale
+    const isAllUpper = (s: string) => s.length > 1 && s === s.toUpperCase() && /[A-ZÀÂÄÉÈÊËÎÏÔÙÛÜÇ]/.test(s);
+    let i = 0;
+    while (i < parts.length - 1 && isAllUpper(parts[i])) i++;
+    if (i === 0) {
+      // Aucun mot en majuscules : premier mot = nom, reste = prénom
+      return `${parts[0]} ${parts.slice(1).map(p => p.charAt(0).toUpperCase() + '.').join(' ')}`;
+    }
+    const lastName = parts.slice(0, i).join(' ');
+    const firstInitials = parts.slice(i).map(p => p.charAt(0).toUpperCase() + '.').join(' ');
+    return `${lastName} ${firstInitials}`;
+  };
+
   const getProCollegeTableRows = (bureaux: any[]) => {
     const collegeMap = new Map<string, {
       collegeName: string;
@@ -1880,7 +1875,7 @@ const ElectionResults: React.FC = () => {
   const electorsLabel = getRegisteredVotersLabel(results?.election?.type);
   const isProResults = isProfessionalElection(results?.election?.type);
   const showPublicResults =
-    !!results?.election && isElectionPublishedForPublic(results.election);
+    !!results?.election && (isAdminPreview || isElectionPublishedForPublic(results.election));
 
   const getSortedCollegeRows = (): CollegeDetailRow[] => {
     return [...collegeDetailRows].sort((a, b) => {
@@ -2788,152 +2783,174 @@ const ElectionResults: React.FC = () => {
                     <p className="text-gov-gray text-sm sm:text-base">{c.party_name}</p>
                     {/* <div className="mt-2 text-sm text-gov-gray">Voix: {c.total_votes.toLocaleString()} • Part: {c.percentage.toFixed(1)}%</div> */}
                   </div>
-                  <Tabs defaultValue="center">
-                    <TabsList className={`grid w-full ${results.election?.type === 'Élection Professionnelle' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                      <TabsTrigger value="center" className="text-xs sm:text-sm">
-                        {results.election?.type === 'Élection Professionnelle' ? 'Par établissement' : 'Par centre'}
-                      </TabsTrigger>
-                      {results.election?.type === 'Élection Professionnelle' && (
-                        <TabsTrigger value="college" className="text-xs sm:text-sm">Par collège</TabsTrigger>
-                      )}
-                    </TabsList>
-
-                    {/* Contrôles de tri pour les modales des candidats - affichés seulement s'il y a des données */}
-                    {hasAnyCandidateData() && (
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 lg:gap-4 mt-3 sm:mt-4 p-2 sm:p-3 lg:p-4 bg-gray-50 rounded-lg border">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 lg:gap-3">
-                          <span className="text-xs sm:text-sm font-medium text-gray-700">Trier par :</span>
-                          <select
-                            value={candidateModalSortBy}
-                            onChange={(e) => setCandidateModalSortBy(e.target.value as any)}
-                            className="px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-auto"
-                          >
-                            <option value="center">Centre</option>
-                            <option value="participation">Abstention</option>
-                            <option value="score">Score</option>
-                            <option value="votes">Voix</option>
-                          </select>
-                        </div>
-                        <button
-                          onClick={() => setCandidateModalSortOrder(candidateModalSortOrder === 'asc' ? 'desc' : 'asc')}
-                          className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 text-white rounded-md text-xs sm:text-sm hover:bg-blue-700 transition-colors w-full sm:w-auto"
+                  {isProResults ? (
+                    /* Vue pro : tableau par établissement → collèges → même format que Vue détaillée */
+                    (() => {
+                      const allGroups = getSortedAndGroupedData() as CenterGroup[];
+                      const activeEtabId = modalEtabId || allGroups[0]?.center.center_id || '';
+                      const visibleGroups = activeEtabId
+                        ? allGroups.filter(g => g.center.center_id === activeEtabId)
+                        : allGroups;
+                      return (
+                    <div className="mt-4 space-y-4">
+                      {/* Select établissement */}
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">Établissement :</label>
+                        <select
+                          value={activeEtabId}
+                          onChange={e => setModalEtabId(e.target.value)}
+                          className="flex-1 px-2 sm:px-3 py-1.5 border border-gray-300 rounded-md text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
-                          {candidateModalSortOrder === 'asc' ? (
-                            <>
-                              <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                              <span className="hidden sm:inline">Croissant</span>
-                              <span className="sm:hidden">↑</span>
-                            </>
-                          ) : (
-                            <>
-                              <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" />
-                              <span className="hidden sm:inline">Décroissant</span>
-                              <span className="sm:hidden">↓</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    )}
-
-                    <TabsContent value="center">
-                      {hasCandidateCenterData() ? (
-                        <div className="space-y-3 mt-3">
-                          {getSortedCandidateCenters().map((row, idx) => (
-                            <details key={idx} className="bg-white rounded border">
-                              <summary className="cursor-pointer px-3 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-100">
-                                <span className="font-semibold text-sm sm:text-base">{row.center_name}</span>
-                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 text-xs sm:text-sm">
-                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">{electorsLabel}</div><div className="font-semibold text-xs sm:text-sm">{row.total_registered?.toLocaleString() || '-'}</div></div>
-                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Votants</div><div className="font-semibold text-xs sm:text-sm">{row.total_voters?.toLocaleString() || '-'}</div></div>
-                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Voix</div><div className="font-semibold text-xs sm:text-sm">{row.candidate_votes}</div></div>
-                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Score</div><div className="font-semibold text-xs sm:text-sm">{typeof row.candidate_percentage === 'number' ? `${Math.min(Math.max(row.candidate_percentage, 0), 100).toFixed(2)}%` : '-'}</div></div>
-                                  <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Abstention</div><div className="font-semibold text-xs sm:text-sm">{typeof row.candidate_participation_pct === 'number' ? `${(100 - Math.min(Math.max(row.candidate_participation_pct, 0), 100)).toFixed(2)}%` : '-'}</div></div>
-                                </div>
-                              </summary>
-                              <div className="px-0 sm:px-2 py-3">
-                                <div className="overflow-x-auto -mx-4 sm:-mx-6 lg:-mx-8">
-                                  <table className="min-w-full bg-white">
-                                    <thead className="bg-slate-100">
-                                      <tr>
-                                        <th className="text-left px-2 sm:px-3 py-2 border text-xs sm:text-sm">Bureau</th>
-                                        <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Voix</th>
-                                        <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Score</th>
-                                        <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Abstention</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="text-xs sm:text-sm">
-                                      {getSortedCandidateBureaux().filter(b => b.center_id === row.center_id).map((b, i2) => (
-                                        <tr key={i2} className="odd:bg-white even:bg-slate-50">
-                                          <td className="px-2 sm:px-3 py-2 border">{b.bureau_name}</td>
-                                          <td className="px-2 sm:px-3 py-2 border text-right">{b.candidate_votes ?? '-'}</td>
-                                          <td className="px-2 sm:px-3 py-2 border text-right">{typeof b.candidate_percentage === 'number' ? `${Math.min(Math.max(b.candidate_percentage, 0), 100).toFixed(2)}%` : '-'}</td>
-                                          <td className="px-2 sm:px-3 py-2 border text-right">{typeof b.candidate_participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.candidate_participation_pct, 0), 100)).toFixed(2)}%` : '-'}</td>
-                                        </tr>
-                                      ))}
-                                      {getSortedCandidateBureaux().filter(b => b.center_id === row.center_id).length === 0 && (
-                                        <tr>
-                                          <td className="px-3 py-4 text-center text-gov-gray text-xs sm:text-sm" colSpan={4}>Aucun bureau</td>
-                                        </tr>
-                                      )}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </div>
-                            </details>
+                          {allGroups.map(g => (
+                            <option key={g.center.center_id} value={g.center.center_id}>
+                              {g.center.center_name}
+                            </option>
                           ))}
-                        </div>
-                      ) : (
-                        <div className="mt-6 p-8 text-center">
-                          <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                            <Building className="w-8 h-8 text-gray-400" />
+                        </select>
+                      </div>
+                      {visibleGroups.map((group, gIdx) => {
+                        const collegeRows = getProCollegeTableRows(group.bureaux);
+                        const filteredRows = collegeRows
+                          .map(row => {
+                            const syndicatEntry = row.syndicats.find(s => s.syndicat === c.candidate_id);
+                            if (!syndicatEntry) return null;
+                            return { collegeName: row.collegeName, syndicat: syndicatEntry, total_expressed_votes: row.total_expressed_votes };
+                          })
+                          .filter((r): r is NonNullable<typeof r> => r !== null);
+                        if (filteredRows.length === 0) return null;
+                        return (
+                          <div key={gIdx} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                            <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200">
+                              <h4 className="font-semibold text-gray-800 text-sm">{group.center.center_name}</h4>
+                            </div>
+                            <div className="px-4 py-3">
+                              <table className="w-full text-xs sm:text-sm">
+                                <thead>
+                                  <tr className="border-b border-gray-200">
+                                    <th className="text-left py-1.5 font-semibold text-gray-600">Collège</th>
+                                    <th className="text-center py-1.5 font-semibold text-gray-600 whitespace-nowrap">Sièges obtenus</th>
+                                    <th className="text-right py-1.5 font-semibold text-gray-600">Voix</th>
+                                    <th className="text-right py-1.5 font-semibold text-gray-600 pr-1">Score</th>
+                                    <th className="text-left py-1.5 font-semibold text-gray-600 pl-4">Délégué</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {filteredRows.map((r, i) => {
+                                    const mapKey = `${c.candidate_id.toLowerCase()}_${r.collegeName.toLowerCase()}`;
+                                    const titulaires = titulairesMap.get(mapKey) || [];
+                                    const count = r.syndicat.seats > 0 ? r.syndicat.seats : 1;
+                                    const delegueDisplay = titulaires.length > 0
+                                      ? titulaires.slice(0, count).map(abbreviateName).join(', ')
+                                      : '—';
+                                    const score = r.total_expressed_votes > 0
+                                      ? `${(r.syndicat.votes / r.total_expressed_votes * 100).toFixed(1)} %`
+                                      : '—';
+                                    return (
+                                      <tr key={i} className="hover:bg-gray-50 transition-colors">
+                                        <td className="py-2 font-medium text-gray-800">{r.collegeName}</td>
+                                        <td className="py-2 text-center font-bold text-blue-600">{r.syndicat.seats}</td>
+                                        <td className="py-2 text-right text-gray-600">{r.syndicat.votes?.toLocaleString() || '0'}</td>
+                                        <td className="py-2 text-right text-gray-500 pr-1">{score}</td>
+                                        <td className="py-2 text-gray-600 pl-4">{delegueDisplay}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
-                          <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                            Aucune donnée par centre
-                          </h3>
-                          <p className="text-gray-600 text-sm">
-                            Les résultats détaillés par centre de vote ne sont pas encore disponibles pour ce candidat.
-                          </p>
+                        );
+                      })}
+                    </div>
+                      );
+                    })()
+                  ) : (
+                    /* Vue non-pro : tabs par centre */
+                    <Tabs defaultValue="center">
+                      <TabsList className="grid w-full grid-cols-1">
+                        <TabsTrigger value="center" className="text-xs sm:text-sm">Par centre</TabsTrigger>
+                      </TabsList>
+                      {hasAnyCandidateData() && (
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mt-3 sm:mt-4 p-2 sm:p-3 bg-gray-50 rounded-lg border">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs sm:text-sm font-medium text-gray-700">Trier par :</span>
+                            <select
+                              value={candidateModalSortBy}
+                              onChange={(e) => setCandidateModalSortBy(e.target.value as any)}
+                              className="px-2 sm:px-3 py-1.5 border border-gray-300 rounded-md text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="center">Centre</option>
+                              <option value="participation">Abstention</option>
+                              <option value="score">Score</option>
+                              <option value="votes">Voix</option>
+                            </select>
+                          </div>
+                          <button
+                            onClick={() => setCandidateModalSortOrder(candidateModalSortOrder === 'asc' ? 'desc' : 'asc')}
+                            className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs sm:text-sm hover:bg-blue-700 transition-colors"
+                          >
+                            {candidateModalSortOrder === 'asc' ? <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" /> : <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4" />}
+                            {candidateModalSortOrder === 'asc' ? 'Croissant' : 'Décroissant'}
+                          </button>
                         </div>
                       )}
-                    </TabsContent>
-
-                    {results.election?.type === 'Élection Professionnelle' && (
-                    <TabsContent value="college">
-                      {hasCandidateBureauData() ? (
-                        <div className="mt-3 max-h-44 sm:max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-                          <table className="w-full table-fixed text-[10px] sm:text-xs">
-                            <thead className="bg-slate-100 text-gov-dark sticky top-0 z-10">
-                              <tr>
-                                <th className="text-left px-2 py-1.5 border-b w-[45%]">Collège</th>
-                                <th className="text-right px-2 py-1.5 border-b w-[22%]">Sièges</th>
-                                <th className="text-right px-2 py-1.5 border-b w-[33%]">Voix</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {getCandidateCollegeRows(
-                                candidateBureaux,
-                                c.seats,
-                                c.total_votes
-                              ).map((row, idx) => (
-                                <tr key={idx} className="odd:bg-white even:bg-slate-50">
-                                  <td className="px-2 py-1.5 border-b font-medium truncate" title={row.college}>
-                                    {row.college}
-                                  </td>
-                                  <td className="px-2 py-1.5 border-b text-right font-semibold tabular-nums">{row.seats}</td>
-                                  <td className="px-2 py-1.5 border-b text-right font-bold tabular-nums">{row.votes.toLocaleString()}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className="mt-6 p-8 text-center">
-                          <h3 className="text-lg font-semibold text-gray-800 mb-2">Aucune donnée par collège</h3>
-                        </div>
-                      )}
-                    </TabsContent>
-                    )}
-                  </Tabs>
+                      <TabsContent value="center">
+                        {hasCandidateCenterData() ? (
+                          <div className="space-y-3 mt-3">
+                            {getSortedCandidateCenters().map((row, idx) => (
+                              <details key={idx} className="bg-white rounded border">
+                                <summary className="cursor-pointer px-3 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-100">
+                                  <span className="font-semibold text-sm sm:text-base">{row.center_name}</span>
+                                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 text-xs sm:text-sm">
+                                    <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">{electorsLabel}</div><div className="font-semibold text-xs sm:text-sm">{row.total_registered?.toLocaleString() || '-'}</div></div>
+                                    <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Votants</div><div className="font-semibold text-xs sm:text-sm">{row.total_voters?.toLocaleString() || '-'}</div></div>
+                                    <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Voix</div><div className="font-semibold text-xs sm:text-sm">{row.candidate_votes}</div></div>
+                                    <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Score</div><div className="font-semibold text-xs sm:text-sm">{typeof row.candidate_percentage === 'number' ? `${Math.min(Math.max(row.candidate_percentage, 0), 100).toFixed(2)}%` : '-'}</div></div>
+                                    <div className="bg-white rounded px-2 sm:px-3 py-2 border text-center"><div className="text-[10px] sm:text-[11px] uppercase text-gov-gray">Abstention</div><div className="font-semibold text-xs sm:text-sm">{typeof row.candidate_participation_pct === 'number' ? `${(100 - Math.min(Math.max(row.candidate_participation_pct, 0), 100)).toFixed(2)}%` : '-'}</div></div>
+                                  </div>
+                                </summary>
+                                <div className="px-0 sm:px-2 py-3">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full bg-white">
+                                      <thead className="bg-slate-100">
+                                        <tr>
+                                          <th className="text-left px-2 sm:px-3 py-2 border text-xs sm:text-sm">Bureau</th>
+                                          <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Voix</th>
+                                          <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Score</th>
+                                          <th className="text-right px-2 sm:px-3 py-2 border text-xs sm:text-sm">Abstention</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="text-xs sm:text-sm">
+                                        {getSortedCandidateBureaux().filter(b => b.center_id === row.center_id).map((b, i2) => (
+                                          <tr key={i2} className="odd:bg-white even:bg-slate-50">
+                                            <td className="px-2 sm:px-3 py-2 border">{b.bureau_name}</td>
+                                            <td className="px-2 sm:px-3 py-2 border text-right">{b.candidate_votes ?? '-'}</td>
+                                            <td className="px-2 sm:px-3 py-2 border text-right">{typeof b.candidate_percentage === 'number' ? `${Math.min(Math.max(b.candidate_percentage, 0), 100).toFixed(2)}%` : '-'}</td>
+                                            <td className="px-2 sm:px-3 py-2 border text-right">{typeof b.candidate_participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.candidate_participation_pct, 0), 100)).toFixed(2)}%` : '-'}</td>
+                                          </tr>
+                                        ))}
+                                        {getSortedCandidateBureaux().filter(b => b.center_id === row.center_id).length === 0 && (
+                                          <tr><td className="px-3 py-4 text-center text-gov-gray text-xs sm:text-sm" colSpan={4}>Aucun bureau</td></tr>
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </details>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-6 p-8 text-center">
+                            <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                              <Building className="w-8 h-8 text-gray-400" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-800 mb-2">Aucune donnée par centre</h3>
+                            <p className="text-gray-600 text-sm">Les résultats détaillés par centre ne sont pas encore disponibles.</p>
+                          </div>
+                        )}
+                      </TabsContent>
+                    </Tabs>
+                  )}
                 </div>
               );
             })()}
@@ -3177,20 +3194,35 @@ const ElectionResults: React.FC = () => {
                                 <thead>
                                   <tr className="border-b border-gray-200">
                                     <th className="text-left py-1.5 font-semibold text-gray-600">Syndicat</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600">Sièges obtenus</th>
+                                    <th className="text-center py-1.5 font-semibold text-gray-600 whitespace-nowrap">Sièges obtenus</th>
                                     <th className="text-right py-1.5 font-semibold text-gray-600">Voix</th>
+                                    <th className="text-right py-1.5 font-semibold text-gray-600 pr-1">Score</th>
+                                    <th className="text-left py-1.5 font-semibold text-gray-600 pl-4">Délégué</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                  {row.syndicats.length > 0 ? row.syndicats.map((s, si) => (
-                                    <tr key={si} className="hover:bg-white transition-colors">
-                                      <td className="py-2 font-medium text-gray-800">{s.syndicat}</td>
-                                      <td className="py-2 text-right font-bold text-blue-700">{s.seats}</td>
-                                      <td className="py-2 text-right text-gray-600">{s.votes?.toLocaleString() || '0'}</td>
-                                    </tr>
-                                  )) : (
+                                  {row.syndicats.length > 0 ? row.syndicats.map((s, si) => {
+                                    const mapKey = `${s.syndicat.toLowerCase()}_${row.collegeName.toLowerCase()}`;
+                                    const titulaires = titulairesMap.get(mapKey) || [];
+                                    const count = s.seats > 0 ? s.seats : 1;
+                                    const delegueDisplay = titulaires.length > 0
+                                      ? titulaires.slice(0, count).map(abbreviateName).join(', ')
+                                      : '—';
+                                    const score = row.total_expressed_votes > 0
+                                      ? `${(s.votes / row.total_expressed_votes * 100).toFixed(1)} %`
+                                      : '—';
+                                    return (
+                                      <tr key={si} className="hover:bg-white transition-colors">
+                                        <td className="py-2 font-medium text-gray-800">{s.syndicat}</td>
+                                        <td className="py-2 text-center font-bold text-blue-600">{s.seats}</td>
+                                        <td className="py-2 text-right text-gray-600">{s.votes?.toLocaleString() || '0'}</td>
+                                        <td className="py-2 text-right text-gray-500 pr-1">{score}</td>
+                                        <td className="py-2 text-gray-600 pl-4">{delegueDisplay}</td>
+                                      </tr>
+                                    );
+                                  }) : (
                                     <tr>
-                                      <td colSpan={3} className="py-3 text-center text-gray-400 text-xs">
+                                      <td colSpan={5} className="py-3 text-center text-gray-400 text-xs">
                                         Aucune donnée syndicale disponible
                                       </td>
                                     </tr>

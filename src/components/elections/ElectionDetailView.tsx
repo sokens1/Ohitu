@@ -16,7 +16,8 @@ import {
   Users,
   Building,
   Plus,
-  Star,
+  ClipboardList,
+  TrendingUp,
   Eye,
   Edit,
   Trash2,
@@ -337,25 +338,91 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     enabled: !!entId,
   });
 
+  const { data: participationRate } = useQuery<number | null>({
+    queryKey: ['election-participation', election.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('procès_verbaux')
+        .select('total_voters, total_registered')
+        .eq('election_id', election.id)
+        .in('status', ['published', 'validated', 'validé']);
+      if (!data || data.length === 0) return null;
+      const voted = data.reduce((s, pv) => s + (Number(pv.total_voters) || 0), 0);
+      const registered = data.reduce((s, pv) => s + (Number(pv.total_registered) || 0), 0);
+      return registered > 0 ? (voted / registered * 100) : null;
+    },
+    staleTime: 2 * 60 * 1000,
+  });
+
   // Derive state-like constants from query data
   const centers: Center[] = centersData ?? [];
   const candidates: Candidate[] = candidatesData ?? [];
   const enterprise = enterpriseData ?? null;
   const loading = centersLoading;
 
-  // Valeurs dérivées pour les filtres établissement et syndicat
-  const allEtablissements = useMemo(() => {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    candidates.forEach((c: any) => {
-      c.titulaires?.forEach((t: any) => {
+  // Helpers de matching (réutilisés pour les filtres cascadants)
+  const matchesSearch = (c: any, q: string) =>
+    !q || [c.name, c.party, ...(c.titulaires?.map((t: any) => t.name) ?? []), ...(c.titulaires?.map((t: any) => t.etablissement) ?? [])]
+      .some(v => String(v || '').toLowerCase().includes(q));
+  const matchesCollege = (c: any, f: string) => f === 'all' || c.college === f;
+  const matchesEtab = (c: any, f: string) =>
+    f === 'all' || (c.titulaires ?? []).some((t: any) => t.etablissement?.toString().trim().toLowerCase() === f.toLowerCase());
+  const matchesSyndicat = (c: any, f: string) => f === 'all' || c.name === f;
+
+  // Options disponibles pour chaque filtre = candidates filtrés par les AUTRES filtres actifs
+  const availableEtablissements = useMemo(() => {
+    const q = candidatesSearch.toLowerCase();
+    const seen = new Set<string>(); const result: string[] = [];
+    candidates.filter(c => matchesSearch(c, q) && matchesCollege(c, candidatesCollegeFilter) && matchesSyndicat(c, candidatesSyndicatFilter))
+      .forEach((c: any) => c.titulaires?.forEach((t: any) => {
         const etab = t.etablissement?.toString().trim();
-        if (etab) {
-          const key = etab.toLowerCase();
-          if (!seen.has(key)) { seen.add(key); result.push(etab); }
-        }
-      });
-    });
+        if (etab && !seen.has(etab.toLowerCase())) { seen.add(etab.toLowerCase()); result.push(etab); }
+      }));
+    return result.sort();
+  }, [candidates, candidatesSearch, candidatesCollegeFilter, candidatesSyndicatFilter]);
+
+  const availableSyndicats = useMemo(() => {
+    const q = candidatesSearch.toLowerCase();
+    const set = new Set<string>();
+    candidates.filter(c => matchesSearch(c, q) && matchesCollege(c, candidatesCollegeFilter) && matchesEtab(c, candidatesEtablissementFilter))
+      .forEach((c: any) => { if (c.name) set.add(c.name); });
+    return Array.from(set).sort();
+  }, [candidates, candidatesSearch, candidatesCollegeFilter, candidatesEtablissementFilter]);
+
+  const availableColleges = useMemo(() => {
+    const q = candidatesSearch.toLowerCase();
+    const set = new Set<string>();
+    candidates.filter(c => matchesSearch(c, q) && matchesEtab(c, candidatesEtablissementFilter) && matchesSyndicat(c, candidatesSyndicatFilter))
+      .forEach((c: any) => { if (c.college) set.add(c.college); });
+    return Array.from(set);
+  }, [candidates, candidatesSearch, candidatesEtablissementFilter, candidatesSyndicatFilter]);
+
+  // Réinitialiser un filtre si sa valeur courante n'est plus disponible
+  useEffect(() => {
+    if (candidatesEtablissementFilter !== 'all' && availableEtablissements.length > 0 &&
+        !availableEtablissements.some(e => e.toLowerCase() === candidatesEtablissementFilter.toLowerCase()))
+      setCandidatesEtablissementFilter('all');
+  }, [availableEtablissements, candidatesEtablissementFilter]);
+
+  useEffect(() => {
+    if (candidatesSyndicatFilter !== 'all' && availableSyndicats.length > 0 &&
+        !availableSyndicats.includes(candidatesSyndicatFilter))
+      setCandidatesSyndicatFilter('all');
+  }, [availableSyndicats, candidatesSyndicatFilter]);
+
+  useEffect(() => {
+    if (candidatesCollegeFilter !== 'all' && availableColleges.length > 0 &&
+        !availableColleges.includes(candidatesCollegeFilter))
+      setCandidatesCollegeFilter('all');
+  }, [availableColleges, candidatesCollegeFilter]);
+
+  // allEtablissements / allSyndicats conservés pour rétro-compatibilité (usages hors filtres)
+  const allEtablissements = useMemo(() => {
+    const seen = new Set<string>(); const result: string[] = [];
+    candidates.forEach((c: any) => c.titulaires?.forEach((t: any) => {
+      const etab = t.etablissement?.toString().trim();
+      if (etab && !seen.has(etab.toLowerCase())) { seen.add(etab.toLowerCase()); result.push(etab); }
+    }));
     return result.sort();
   }, [candidates]);
 
@@ -984,20 +1051,18 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
               </div>
               
               {/* Statistiques compactes - Mobile First */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
-                
-              <div className="bg-white/60 backdrop-blur-sm rounded-lg sm:rounded-xl p-2 sm:p-4 border border-white/20">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4">
+
+                <div className="bg-white/60 backdrop-blur-sm rounded-lg sm:rounded-xl p-2 sm:p-4 border border-white/20">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <div className="p-1 sm:p-1.5 bg-green-500 rounded-md sm:rounded-lg">
                       <Building className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
                     </div>
                     <span className="text-xs font-medium text-green-700 uppercase tracking-wide">Centres</span>
                   </div>
-                  <div className="text-sm sm:text-xl font-bold text-green-900">
-                    {statistics.totalCenters}
-                  </div>
+                  <div className="text-sm sm:text-xl font-bold text-green-900">{statistics.totalCenters}</div>
                 </div>
-                                
+
                 <div className="bg-white/60 backdrop-blur-sm rounded-lg sm:rounded-xl p-2 sm:p-4 border border-white/20">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <div className="p-1 sm:p-1.5 bg-[#1e40af] rounded-md sm:rounded-lg">
@@ -1005,25 +1070,31 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     </div>
                     <span className="text-xs font-medium text-[#1e40af] uppercase tracking-wide">Bureaux</span>
                   </div>
-                  <div className="text-sm sm:text-xl font-bold text-[#1e40af]">
-                    {statistics.totalBureaux}
-                  </div>
+                  <div className="text-sm sm:text-xl font-bold text-[#1e40af]">{statistics.totalBureaux}</div>
                 </div>
-                
+
+                <div className="bg-white/60 backdrop-blur-sm rounded-lg sm:rounded-xl p-2 sm:p-4 border border-white/20">
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                    <div className="p-1 sm:p-1.5 bg-amber-500 rounded-md sm:rounded-lg">
+                      <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                    </div>
+                    <span className="text-xs font-medium text-amber-700 uppercase tracking-wide">Sièges à pourvoir</span>
+                  </div>
+                  <div className="text-sm sm:text-xl font-bold text-amber-800">{statistics.totalSeats || 0}</div>
+                </div>
+
                 <div className="bg-white/60 backdrop-blur-sm rounded-lg sm:rounded-xl p-2 sm:p-4 border border-white/20">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <div className="p-1 sm:p-1.5 bg-purple-500 rounded-md sm:rounded-lg">
-                      <Star className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                      <ClipboardList className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
                     </div>
                     <span className="text-xs font-medium text-purple-700 uppercase tracking-wide">
                       {election.type === 'Élection Professionnelle' ? 'Listes' : 'Candidats'}
                     </span>
                   </div>
-                  <div className="text-sm sm:text-xl font-bold text-purple-900">
-                    {statistics.totalCandidates}
-                  </div>
+                  <div className="text-sm sm:text-xl font-bold text-purple-900">{statistics.totalCandidates}</div>
                 </div>
-                
+
                 <div className="bg-white/60 backdrop-blur-sm rounded-lg sm:rounded-xl p-2 sm:p-4 border border-white/20">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <div className="p-1 sm:p-1.5 bg-[#1e40af] rounded-md sm:rounded-lg">
@@ -1033,9 +1104,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       {election.type === 'Élection Professionnelle' ? 'Salariés Électeurs' : 'Électeurs'}
                     </span>
                   </div>
-                  <div className="text-sm sm:text-xl font-bold text-[#1e40af]">
-                    {statistics.totalVoters.toLocaleString('fr-FR')}
-                  </div>
+                  <div className="text-sm sm:text-xl font-bold text-[#1e40af]">{statistics.totalVoters.toLocaleString('fr-FR')}</div>
                 </div>
               </div>
             </div>
@@ -1105,7 +1174,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
           {/* Section Informations modernisée */}
           <TabsContent value="info" className="p-6 space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
               {/* Informations générales */}
               <Card className="election-card group hover:shadow-lg transition-all duration-300">
                 <CardHeader className="pb-3">
@@ -1178,10 +1247,6 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     </div>
                   )}
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sièges à pourvoir</label>
-                    <p className="text-xl font-bold text-gov-blue">{statistics.totalSeats || 0}</p>
-                  </div>
                 </CardContent>
               </Card>
 
@@ -1235,9 +1300,11 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                             </p>
                           </div>
                           <div className="p-3 bg-gray-50 rounded-lg">
-                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Effectif Total</label>
+                            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Salariés Électeurs</label>
                             <p className="text-sm font-bold text-gray-900 mt-1">
-                              {loadingEnterprise ? 'Chargement...' : (enterprise?.total_employees && enterprise.total_employees > 0 ? <span>{enterprise.total_employees} employés</span> : <span className="text-gray-400 italic">Non renseigné</span>)}
+                              {statistics.totalVoters > 0
+                                ? statistics.totalVoters.toLocaleString('fr-FR')
+                                : <span className="text-gray-400 italic">Non renseigné</span>}
                             </p>
                           </div>
                         </div>
@@ -1432,11 +1499,6 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-2 sm:space-y-3 p-3 sm:p-6 pt-0">
-                    <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                      <span className="text-xs font-medium text-gray-600">Responsable:</span>
-                      <span className="text-xs sm:text-sm font-semibold text-gray-900 truncate ml-2">{center.responsable}</span>
-                    </div>
-                    
                     <div className="grid grid-cols-2 gap-2 sm:gap-3">
                       <div className="text-center p-2 sm:p-3 bg-orange-50 rounded-lg border border-orange-200">
                         <div className="text-sm sm:text-lg font-bold text-orange-600">
@@ -1677,7 +1739,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
 
                 {election.type === 'Élection Professionnelle' && (
                   <>
-                    {/* Filtre établissement */}
+                    {/* Filtre établissement — options filtrées par syndicat + collège actifs */}
                     <Select
                       value={candidatesEtablissementFilter}
                       onValueChange={(v) => { setCandidatesEtablissementFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1687,13 +1749,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Tous les établissements</SelectItem>
-                        {allEtablissements.map((etab) => (
+                        {availableEtablissements.map((etab) => (
                           <SelectItem key={etab} value={etab}>{etab}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
 
-                    {/* Filtre syndicat */}
+                    {/* Filtre syndicat — options filtrées par établissement + collège actifs */}
                     <Select
                       value={candidatesSyndicatFilter}
                       onValueChange={(v) => { setCandidatesSyndicatFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1703,13 +1765,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Tous les syndicats</SelectItem>
-                        {allSyndicats.map((synd) => (
+                        {availableSyndicats.map((synd) => (
                           <SelectItem key={synd} value={synd}>{synd}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
 
-                    {/* Filtre collège */}
+                    {/* Filtre collège — options filtrées par établissement + syndicat actifs */}
                     <Select
                       value={candidatesCollegeFilter}
                       onValueChange={(v) => { setCandidatesCollegeFilter(v); setCandidatesPage(1); setCandidatesGridPage(1); }}
@@ -1719,10 +1781,14 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Tous les collèges</SelectItem>
-                        <SelectItem value="general">Encadrement</SelectItem>
-                        <SelectItem value="cadres">Cadre</SelectItem>
-                        <SelectItem value="employes">Maîtrise</SelectItem>
-                        <SelectItem value="ouvriers">Exécution</SelectItem>
+                        {[
+                          { value: 'general', label: 'Encadrement' },
+                          { value: 'cadres', label: 'Cadre' },
+                          { value: 'employes', label: 'Maîtrise' },
+                          { value: 'ouvriers', label: 'Exécution' },
+                        ].filter(opt => availableColleges.includes(opt.value)).map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </>

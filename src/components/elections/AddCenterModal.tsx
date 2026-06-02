@@ -140,7 +140,17 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
           }
 
           if (bureaux && bureaux.length > 0) {
-            // Extraire les collèges et les bureaux manuels
+            // Normalise les valeurs de collège quelle que soit la source (wizard ou import Excel)
+            const normalizeCollege = (val: string | null): 'general' | 'cadres' | 'employes' | 'ouvriers' | null => {
+              if (!val) return null;
+              const v = val.toLowerCase().trim();
+              if (v === 'general' || v === 'encadrement') return 'general';
+              if (v === 'cadres' || v === 'cadre') return 'cadres';
+              if (v === 'employes' || v === 'maitrise' || v === 'maîtrise') return 'employes';
+              if (v === 'ouvriers' || v === 'execution' || v === 'exécution') return 'ouvriers';
+              return null;
+            };
+
             let encadrementData: CollegeData = { siege: 0, electeurs: 0 };
             let cadreData: CollegeData = { siege: 0, electeurs: 0 };
             let maitiseData: CollegeData = { siege: 0, electeurs: 0 };
@@ -148,25 +158,25 @@ const AddCenterModal: React.FC<AddCenterModalProps> = ({ onClose, onSubmit, onEd
             const manualBureaux: Bureau[] = [];
 
             bureaux.forEach((bureau: any) => {
-              // Identifier si c'est un bureau de collège ou manuel par le field 'college'
-              if (bureau.college === 'general' && !bureau.name.includes('College -')) {
-                // C'est un bureau manuel
+              // Un bureau de collège : son nom commence par 'College -' OU is_college = true
+              const isCollegeBooth = bureau.name?.startsWith?.('College -') || bureau.is_college === true;
+              // Valeur de collège normalisée (supporte wizard: 'general'/'cadres'/... ET Excel: 'Encadrement'/'Cadre'/...)
+              const col = normalizeCollege(bureau.college || bureau.college_type);
+
+              if (!isCollegeBooth) {
+                // Bureau physique / manuel
                 manualBureaux.push({
                   id: bureau.id,
                   name: bureau.name,
-                  college: 'general'
+                  college: col || 'general'
                 });
               } else {
-                // C'est un bureau de collège
-                if (bureau.college === 'general') {
-                  encadrementData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
-                } else if (bureau.college === 'cadres') {
-                  cadreData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
-                } else if (bureau.college === 'employes') {
-                  maitiseData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
-                } else if (bureau.college === 'ouvriers') {
-                  executionData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
-                }
+                // Bureau de collège → remplir la colonne correspondante
+                const data: CollegeData = { siege: bureau.seats_to_fill || 0, electeurs: bureau.registered_voters || 0 };
+                if (col === 'general')   encadrementData = data;
+                else if (col === 'cadres')   cadreData = data;
+                else if (col === 'employes') maitiseData = data;
+                else if (col === 'ouvriers') executionData = data;
               }
             });
 
