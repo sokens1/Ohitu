@@ -540,31 +540,6 @@ const CenterDetailModal: React.FC<CenterDetailModalProps> = ({ center, onClose, 
               )}
             </div>
 
-            {/* Résumé - Design moderne */}
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-4 sm:px-6 py-4 border-t border-blue-200">
-              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-500 rounded-lg">
-                    <Users className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">
-                      {isProfessional ? 'Résumé de l\'Établissement' : 'Résumé des Bureaux'}
-                    </h4>
-                    <p className="text-sm text-gray-600">Total des électeurs inscrits</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-2xl sm:text-3xl font-bold text-[#1e40af]">
-                    {(isProfessional 
-                      ? colleges.reduce((sum, c) => sum + (c.registered_voters || 0), 0)
-                      : physicalBureaux.reduce((sum, b) => sum + (b.registered_voters || 0), 0)
-                    ).toLocaleString('fr-FR')}
-                  </div>
-                  <p className="text-sm text-gray-600">électeurs inscrits</p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>

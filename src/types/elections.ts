@@ -121,6 +121,7 @@ export interface ElectionStats {
   completedSteps: number;
   totalSteps: number;
   progressPercentage: number;
+  participationRate?: number | null;
 }
 
 // Timeline d'élection

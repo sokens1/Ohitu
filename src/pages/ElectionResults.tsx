@@ -275,8 +275,14 @@ const CandidateCard: React.FC<{
   );
 };
 
-const ElectionResults: React.FC = () => {
-  const { electionId } = useParams<{ electionId: string }>();
+interface ElectionResultsProps {
+  isAdminPreview?: boolean;
+  electionIdOverride?: string;
+}
+
+const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = false, electionIdOverride }) => {
+  const params = useParams<{ electionId: string }>();
+  const electionId = electionIdOverride || params.electionId;
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [results, setResults] = useState<ElectionResults | null>(null);
@@ -635,8 +641,8 @@ const ElectionResults: React.FC = () => {
       const isProElection = isProfessionalElection(election.type);
       const totalElectorsElection = await getElectionElectorsTotal(id, election.type);
 
-      // Vérifier visibilité publique (publiée + non masquée / non annulée)
-      if (!isElectionPublishedForPublic(election)) {
+      // Vérifier visibilité publique (bypassed en mode admin preview)
+      if (!isAdminPreview && !isElectionPublishedForPublic(election)) {
         console.log('⚠️ Élection non accessible au public - Aucun résultat affiché');
         setPublishedBureauIds(new Set());
         setResults({
@@ -1849,7 +1855,7 @@ const ElectionResults: React.FC = () => {
   const electorsLabel = getRegisteredVotersLabel(results?.election?.type);
   const isProResults = isProfessionalElection(results?.election?.type);
   const showPublicResults =
-    !!results?.election && isElectionPublishedForPublic(results.election);
+    !!results?.election && (isAdminPreview || isElectionPublishedForPublic(results.election));
 
   const getSortedCollegeRows = (): CollegeDetailRow[] => {
     return [...collegeDetailRows].sort((a, b) => {

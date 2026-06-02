@@ -419,21 +419,25 @@ const ElectionManagementUnified = () => {
           });
         }
 
-        if (election.type === 'Élection Professionnelle') {
-          const { data: collegesData } = await supabase
-            .from('electoral_colleges').select('total_voters').eq('election_id', election.id);
-          if (collegesData && collegesData.length > 0) {
-            const collegesTotal = collegesData.reduce((sum, c) => sum + (Number(c.total_voters) || 0), 0);
-            if (collegesTotal > 0) totalElecteurs = collegesTotal;
-          }
-        }
-
         // Sync nb_electeurs silently (fire-and-forget)
         if (totalElecteurs !== election.nb_electeurs) {
           supabase.from('elections').update({ nb_electeurs: totalElecteurs, updated_at: new Date().toISOString() }).eq('id', election.id).then(() => {});
         }
 
-        return { ...election, candidates_count: candidatesData?.length || 0, centers_count: centersData?.length || 0, voting_bureaux_count: totalBureaux, nb_electeurs: totalElecteurs };
+        // Participation depuis les PV publiés
+        let participationRate: number | null = null;
+        const { data: pvStats } = await supabase
+          .from('procès_verbaux')
+          .select('total_voters, total_registered')
+          .eq('election_id', election.id)
+          .in('status', ['published', 'validated', 'validé']);
+        if (pvStats && pvStats.length > 0) {
+          const voted = pvStats.reduce((s, pv) => s + (Number(pv.total_voters) || 0), 0);
+          const reg = pvStats.reduce((s, pv) => s + (Number(pv.total_registered) || 0), 0);
+          if (reg > 0) participationRate = (voted / reg) * 100;
+        }
+
+        return { ...election, candidates_count: candidatesData?.length || 0, centers_count: centersData?.length || 0, voting_bureaux_count: totalBureaux, nb_electeurs: totalElecteurs, participation_rate: participationRate };
       })
     );
 
@@ -473,6 +477,7 @@ const ElectionManagementUnified = () => {
           completedSteps: 0,
           totalSteps: 5,
           progressPercentage: 0,
+          participationRate: (election as any).participation_rate ?? null,
         },
         timeline: {
           created: new Date(election.created_at),
@@ -2043,7 +2048,7 @@ const ElectionManagementUnified = () => {
                             <span className="text-[11px] font-semibold">Particip.</span>
                           </div>
                           <p className="text-xs font-bold text-amber-700">
-                            {(election.statistics as any).participationRate ? `${(election.statistics as any).participationRate.toFixed(1)}%` : '-'}
+                            {election.statistics.participationRate != null ? `${election.statistics.participationRate.toFixed(1)}%` : '—'}
                           </p>
                         </div>
                       </div>

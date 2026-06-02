@@ -2,11 +2,11 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { 
-  Home, 
-  Users, 
-  BarChart3, 
-  MessageSquare, 
+import {
+  Home,
+  Users,
+  BarChart3,
+  MessageSquare,
   Calendar,
   LogOut,
   Menu,
@@ -19,7 +19,8 @@ import {
   Check,
   Trash2,
   IdCard,
-  FileText
+  FileText,
+  Eye
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
@@ -50,11 +51,12 @@ const getNotificationIcon = (type: 'info' | 'success' | 'warning' | 'error') => 
 };
 
 const ALL_MENU_ITEMS = [
-  { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard', permission: 'view:dashboard'  as const },
-  { icon: Calendar, label: 'Élections',             path: '/elections', permission: 'view:elections'  as const },
-  { icon: BarChart3,label: 'Résultats',             path: '/results',   permission: 'view:results'    as const },
-  { icon: Users,    label: 'Gestion Utilisateurs',  path: '/users',     permission: 'view:users'      as const },
-  { icon: FileText, label: 'Piste d\'Audit',        path: '/audit',     permission: 'view:audit'      as const },
+  { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard',       permission: 'view:dashboard'  as const },
+  { icon: Calendar, label: 'Élections',             path: '/elections',       permission: 'view:elections'  as const },
+  { icon: BarChart3,label: 'Résultats',             path: '/results',         permission: 'view:results'    as const },
+  { icon: Eye,      label: 'Vue publique',          path: '/public-preview',  permission: 'view:results'    as const },
+  { icon: Users,    label: 'Gestion Utilisateurs',  path: '/users',           permission: 'view:users'      as const },
+  { icon: FileText, label: 'Piste d\'Audit',        path: '/audit',           permission: 'view:audit'      as const },
 ];
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
