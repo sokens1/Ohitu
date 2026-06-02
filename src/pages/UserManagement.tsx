@@ -175,8 +175,9 @@ const UserManagement = () => {
   const [allElections, setAllElections] = useState<Election[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [roleFilter, setRoleFilter]       = useState<string>('all');
+  const [statusFilter, setStatusFilter]   = useState<string>('all');
+  const [electionFilter, setElectionFilter] = useState<string>('all');
 
   // Modales
   const [showAddModal, setShowAddModal] = useState(false);
@@ -282,11 +283,14 @@ const UserManagement = () => {
   const filteredUsers = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                         u.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchRole   = roleFilter === 'all' || u.role === roleFilter;
-    const matchStatus = statusFilter === 'all' ||
-                        (statusFilter === 'active' && u.isActive) ||
-                        (statusFilter === 'inactive' && !u.isActive);
-    return matchSearch && matchRole && matchStatus;
+    const matchRole     = roleFilter === 'all' || u.role === roleFilter;
+    const matchStatus   = statusFilter === 'all' ||
+                          (statusFilter === 'active' && u.isActive) ||
+                          (statusFilter === 'inactive' && !u.isActive);
+    const matchElection = electionFilter === 'all' ||
+                          u.assigned_election_id === electionFilter ||
+                          u.assigned_election_ids?.includes(electionFilter);
+    return matchSearch && matchRole && matchStatus && matchElection;
   });
 
   // ── Helpers formulaire ──────────────────────────────────────────────────────
@@ -886,6 +890,17 @@ const UserManagement = () => {
                   <SelectItem value="inactive">Inactifs</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={electionFilter} onValueChange={setElectionFilter}>
+                <SelectTrigger className="sm:w-52">
+                  <SelectValue placeholder="Élection" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes les élections</SelectItem>
+                  {allElections.map(e => (
+                    <SelectItem key={e.id} value={e.id}>{e.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
@@ -959,9 +974,11 @@ const UserManagement = () => {
                         <Button variant="ghost" size="sm" onClick={() => openEdit(u)} title="Modifier">
                           <Edit className="h-4 w-4" />
                         </Button>
+                        {/* Renvoi email de confirmation — désactivé temporairement
                         <Button variant="ghost" size="sm" onClick={() => handleResend(u.email)} title="Renvoyer l'email">
                           <Mail className="h-4 w-4" />
                         </Button>
+                        */}
                         <Button
                           variant="ghost" size="sm"
                           className="text-red-500 hover:text-red-700 hover:bg-red-50"

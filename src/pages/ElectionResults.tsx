@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchElectionById, fetchPublicElections } from '../api/elections';
+import { fetchElectionById, fetchElectionBySlug, fetchPublicElections } from '../api/elections';
 import { fetchElectionSummary, fetchCenterSummary, fetchBureauSummary, fetchCenterSummaryByCandidate, fetchBureauSummaryByCandidate } from '../api/results';
 import { toast } from 'sonner';
 import SEOHead from '@/components/SEOHead';
@@ -62,6 +62,7 @@ interface ElectionData {
   is_public_visible?: boolean;
   nb_electeurs?: number;
   cover_image_url?: string;
+  slug?: string;
 }
 
 interface CandidateResult {
@@ -281,8 +282,9 @@ interface ElectionResultsProps {
 }
 
 const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = false, electionIdOverride }) => {
-  const params = useParams<{ electionId: string }>();
-  const electionId = electionIdOverride || params.electionId;
+  const { slug } = useParams<{ slug: string }>();
+  // electionId est résolu à partir du slug, ou directement depuis electionIdOverride (mode admin preview)
+  const [electionId, setElectionId] = useState<string | undefined>(electionIdOverride);
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [results, setResults] = useState<ElectionResults | null>(null);
@@ -535,6 +537,23 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     centerRows.forEach((c: any) => { if (c.center_id && c.center_name) m[c.center_id] = c.center_name; });
     setCenterNameById(m);
   }, [centerRows]);
+
+  // Résolution slug → UUID de l'élection (ignoré en mode admin preview avec electionIdOverride)
+  useEffect(() => {
+    if (electionIdOverride) { setElectionId(electionIdOverride); return; }
+    if (!slug) return;
+    fetchElectionBySlug(slug).then(election => {
+      if (election?.id) {
+        setElectionId(election.id);
+      } else {
+        setError('Élection introuvable');
+        setLoading(false);
+      }
+    }).catch(() => {
+      setError('Élection introuvable');
+      setLoading(false);
+    });
+  }, [slug]);
 
   useEffect(() => {
     if (electionId) {
@@ -1273,7 +1292,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
   const handleShare = (platform: string) => {
     // Toujours partager uniquement l'URL courte du site
-    const url = `https://www.ohitu.com/election/${electionId}/results`;
+    const url = `https://www.ohitu.com/election/${slug}/results`;
     switch (platform) {
       case 'whatsapp':
         window.open(`https://wa.me/?text=${encodeURIComponent(url)}`, '_blank');
@@ -1291,12 +1310,13 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   // Fonction pour switcher vers une autre élection
   const handleElectionSwitch = (targetElectionId: string) => {
     if (targetElectionId !== electionId) {
-      console.log('🔍 Switch élection - de:', electionId, 'vers:', targetElectionId);
-      // Reset des valeurs avant le changement
+      const targetElection = availableElections.find(e => e.id === targetElectionId);
+      const targetSlug = targetElection?.slug;
+      if (!targetSlug) return;
       setTotalBureaux(0);
       setBureauxAvecResultats(0);
       setMobileRetryCount(0);
-      navigate(`/election/${targetElectionId}/results`);
+      navigate(`/election/${targetSlug}/results`);
     }
   };
 
@@ -1847,7 +1867,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       title,
       description,
       image: election.cover_image_url || 'https://www.ohitu.com/images/resultat_election.jpg?v=3',
-      url: `https://www.ohitu.com/election/${electionId}/results`
+      url: `https://www.ohitu.com/election/${slug}/results`
     };
   };
 
@@ -1958,7 +1978,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                           {results?.election && (
                             <button
                               className="w-full text-left px-3 py-2 hover:bg-slate-100 text-sm text-gray-800 flex items-center gap-2"
-                              onClick={() => navigate(`/election/${results.election.id}/results`)}
+                              onClick={() => navigate(`/election/${results.election.slug ?? slug}/results`)}
                             >
                               <BarChart3 className="w-3 h-3" />
                               Résultats courants

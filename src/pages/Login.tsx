@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import type { UserRole } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, Eye, EyeOff, Vote, ArrowRight, Shield, CheckCircle, Users } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Vote, ArrowRight, Shield, CheckCircle, Users, AlertCircle, Clock, Lock } from 'lucide-react';
 import { fetchPublicElections } from '../api/elections';
 import NetworkIndicator from '@/components/NetworkIndicator';
 import { isProfessionalElection } from '@/utils/electionCalculations';
@@ -86,6 +86,7 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [loginError, setLoginError] = useState<{ type: 'credentials' | 'disabled' | 'pending' | 'generic'; message: string } | null>(null);
   const [elections, setElections] = useState<Election[]>([]);
   const [electionsLoading, setElectionsLoading] = useState(true);
   const [privacyOpen, setPrivacyOpen] = useState(false);
@@ -122,36 +123,28 @@ const Login = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError(null);
     setIsLoading(true);
 
     try {
       const success = await login(email, password);
-      if (success) {
-        toast({
-          title: "Connexion réussie",
-          description: "Bienvenue dans o'Hitu",
-        });
-        // La redirection est gérée par le useEffect qui surveille `user`
-      } else {
-        toast({
-          title: "Erreur de connexion",
-          description: "Email ou mot de passe incorrect",
-          variant: "destructive",
-        });
+      if (!success) {
+        setLoginError({ type: 'credentials', message: 'Email ou mot de passe incorrect.' });
       }
+      // Si success : la redirection est gérée par le useEffect qui surveille `user`
     } catch (error: any) {
       if (error?.message === 'EMAIL_NOT_CONFIRMED') {
-        toast({
-          title: "Email non confirmé",
-          description: "Ce compte n'a pas encore été confirmé. Contactez votre administrateur pour qu'il confirme votre compte depuis le tableau de bord Supabase.",
-          variant: "destructive",
+        setLoginError({
+          type: 'pending',
+          message: 'Votre compte est en attente de confirmation. Veuillez patienter l\'activation par votre administrateur.',
+        });
+      } else if (error?.message === 'ACCOUNT_DISABLED') {
+        setLoginError({
+          type: 'disabled',
+          message: 'Votre compte a été désactivé. Veuillez contacter votre administrateur pour le réactiver.',
         });
       } else {
-        toast({
-          title: "Erreur",
-          description: "Une erreur s'est produite lors de la connexion",
-          variant: "destructive",
-        });
+        setLoginError({ type: 'generic', message: 'Une erreur s\'est produite. Vérifiez votre connexion et réessayez.' });
       }
     } finally {
       setIsLoading(false);
@@ -230,7 +223,7 @@ const Login = () => {
                      return (
                        <button
                          key={election.id}
-                         onClick={() => navigate(`/election/${election.id}/results`)}
+                         onClick={() => navigate(`/election/${election.slug ?? election.id}/results`)}
                          className={`w-full p-4 lg:p-6 rounded-xl border-2 transition-all duration-300 transform hover:scale-105 hover:shadow-xl text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                        >
                          <div className="flex items-center justify-between">
@@ -344,7 +337,7 @@ const Login = () => {
                     return (
                       <button
                         key={election.id}
-                        onClick={() => navigate(`/election/${election.id}/results`)}
+                        onClick={() => navigate(`/election/${election.slug ?? election.id}/results`)}
                         className={`w-full p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 text-white ${style.bg} ${style.border} ${style.hoverBg} ${style.hoverBorder}`}
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -439,7 +432,7 @@ const Login = () => {
                   type="email"
                   placeholder="votre.email@gabon.ga"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); setLoginError(null); }}
                   required
                     className="h-10 sm:h-12 border-gray-200 focus:ring-gov-blue focus:border-gov-blue transition-colors text-sm sm:text-base"
                 />
@@ -453,7 +446,7 @@ const Login = () => {
                     type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => { setPassword(e.target.value); setLoginError(null); }}
                     required
                       className="h-10 sm:h-12 border-gray-200 focus:ring-gov-blue focus:border-gov-blue pr-10 sm:pr-12 transition-colors text-sm sm:text-base"
                   />
@@ -472,6 +465,42 @@ const Login = () => {
                   </Button>
                 </div>
               </div>
+
+              {/* ── Message d'erreur inline ── */}
+              {loginError && (() => {
+                const cfg = {
+                  credentials: {
+                    icon:    <AlertCircle className="w-4 h-4 flex-shrink-0" />,
+                    bg:      'bg-red-50 border-red-200',
+                    text:    'text-red-800',
+                    iconCls: 'text-red-500',
+                  },
+                  pending: {
+                    icon:    <Clock className="w-4 h-4 flex-shrink-0" />,
+                    bg:      'bg-amber-50 border-amber-200',
+                    text:    'text-amber-800',
+                    iconCls: 'text-amber-500',
+                  },
+                  disabled: {
+                    icon:    <Lock className="w-4 h-4 flex-shrink-0" />,
+                    bg:      'bg-orange-50 border-orange-200',
+                    text:    'text-orange-800',
+                    iconCls: 'text-orange-500',
+                  },
+                  generic: {
+                    icon:    <AlertCircle className="w-4 h-4 flex-shrink-0" />,
+                    bg:      'bg-red-50 border-red-200',
+                    text:    'text-red-800',
+                    iconCls: 'text-red-500',
+                  },
+                }[loginError.type];
+                return (
+                  <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 animate-in fade-in slide-in-from-top-1 duration-200 ${cfg.bg}`}>
+                    <span className={`mt-0.5 ${cfg.iconCls}`}>{cfg.icon}</span>
+                    <p className={`text-sm leading-snug ${cfg.text}`}>{loginError.message}</p>
+                  </div>
+                );
+              })()}
 
               <Button
                 type="submit"
