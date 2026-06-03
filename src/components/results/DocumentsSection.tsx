@@ -916,7 +916,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
           deleteAllConfirm ? (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-50 border-2 border-red-200">
               <span className="text-xs text-red-700 font-medium whitespace-nowrap">
-                Supprimer tous les {deleteAllConfirm === 'pv' ? 'PV' : 'listes'} ?
+                {deleteAllConfirm === 'pv' ? 'Supprimer tous les PV ?' : 'Supprimer toutes les listes ?'}
               </span>
               <Button size="sm" disabled={deletingAll}
                 className="bg-red-600 hover:bg-red-700 text-white h-7 px-3 text-xs rounded-lg"
@@ -1054,15 +1054,15 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                           <MdDownload size={16} />
                         </button>
                       )}
-                      {/* Valider : masqué si statut final (validé, réservé, rejeté) */}
-                      {canReview && doc.status === 'pending' && (
+                      {/* Valider : masqué si déjà validé */}
+                      {canReview && doc.status !== 'validated' && (
                         <button onClick={() => setReview({ docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors ml-auto">
                           <MdCheckCircle size={13} /> Valider
                         </button>
                       )}
-                      {/* Rétracter : admin/super-admin si décision prise (validé, réservé, rejeté) */}
-                      {(user?.role === 'super-admin' || user?.role === 'admin') && ['validated', 'reserved', 'rejected'].includes(doc.status) && (
+                      {/* Rétracter : uniquement admin/super-admin si document validé */}
+                      {(user?.role === 'super-admin' || user?.role === 'admin') && doc.status === 'validated' && (
                         <button onClick={() => setConfirmAction({ docId: doc.id, type: 'retract' })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors ml-auto">
                           <MdAutorenew size={13} /> Rétracter
