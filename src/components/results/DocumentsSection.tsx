@@ -815,30 +815,26 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   };
 
   const STAT_ITEMS = [
-    { label: 'Tous',      count: docs.length,   icon: MdDescription,    bg: adminStatusFilter === 'all'       ? 'bg-[#1B2E5A] text-white border-[#1B2E5A]'        : 'bg-white text-gray-700 border-gray-200',       key: 'all'       },
-    { label: 'En attente',count: statPending,   icon: MdPending,        bg: adminStatusFilter === 'pending'   ? 'bg-amber-500 text-white border-amber-500'         : 'bg-white text-amber-600 border-amber-200',     key: 'pending'   },
-    { label: 'Validés',   count: statValidated, icon: MdVerified,       bg: adminStatusFilter === 'validated' ? 'bg-emerald-600 text-white border-emerald-600'     : 'bg-white text-emerald-600 border-emerald-200', key: 'validated' },
-    { label: 'Réserve',   count: statReserved,  icon: MdWarning,        bg: adminStatusFilter === 'reserved'  ? 'bg-orange-500 text-white border-orange-500'       : 'bg-white text-orange-500 border-orange-200',  key: 'reserved'  },
-    { label: 'Rejetés',   count: statRejected,  icon: MdUnpublished,    bg: adminStatusFilter === 'rejected'  ? 'bg-red-600 text-white border-red-600'             : 'bg-white text-red-500 border-red-200',         key: 'rejected'  },
+    { label: 'Tous',       count: docs.length,   bg: adminStatusFilter === 'all'       ? 'bg-[#1B2E5A] text-white border-[#1B2E5A]'        : 'bg-white text-gray-600 border-gray-200',       key: 'all'       },
+    { label: 'En attente', count: statPending,   bg: adminStatusFilter === 'pending'   ? 'bg-amber-500 text-white border-amber-500'         : 'bg-white text-amber-600 border-amber-200',     key: 'pending'   },
+    { label: 'Validés',    count: statValidated, bg: adminStatusFilter === 'validated' ? 'bg-emerald-600 text-white border-emerald-600'     : 'bg-white text-emerald-600 border-emerald-200', key: 'validated' },
+    { label: 'Réserve',    count: statReserved,  bg: adminStatusFilter === 'reserved'  ? 'bg-orange-500 text-white border-orange-500'       : 'bg-white text-orange-500 border-orange-200',  key: 'reserved'  },
+    { label: 'Rejetés',    count: statRejected,  bg: adminStatusFilter === 'rejected'  ? 'bg-red-600 text-white border-red-600'             : 'bg-white text-red-500 border-red-200',         key: 'rejected'  },
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
 
       {/* ── Stats bar ── */}
       {docs.length > 0 && (
-        <div className="grid grid-cols-5 gap-2">
-          {STAT_ITEMS.map(s => {
-            const Icon = s.icon;
-            return (
-              <button key={s.key} onClick={() => setAdminStatusFilter(s.key)}
-                className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border-2 transition-all font-medium text-center shadow-sm hover:shadow ${s.bg}`}>
-                <Icon size={20} />
-                <span className="text-xl font-black leading-none">{s.count}</span>
-                <span className="text-[10px] font-semibold whitespace-nowrap opacity-80">{s.label}</span>
-              </button>
-            );
-          })}
+        <div className="flex gap-2 flex-wrap">
+          {STAT_ITEMS.map(s => (
+            <button key={s.key} onClick={() => setAdminStatusFilter(s.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 transition-all text-xs font-semibold whitespace-nowrap ${s.bg}`}>
+              <span className="font-black text-sm leading-none">{s.count}</span>
+              <span className="opacity-80">{s.label}</span>
+            </button>
+          ))}
         </div>
       )}
 
