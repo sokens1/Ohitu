@@ -113,6 +113,12 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const [deleting, setDeleting]   = useState<string | null>(null);
   const [deleteAllConfirm, setDeleteAllConfirm] = useState<'pv' | 'participation_list' | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
+  // Confirmation inline avant exécution d'une action critique
+  const [confirmAction, setConfirmAction] = useState<{
+    docId: string;
+    type: 'delete' | 'validate' | 'reserve' | 'reject';
+    comment?: string;
+  } | null>(null);
   // Filtres vue admin
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
   const [adminCenterFilter, setAdminCenterFilter] = useState<string>('all');
@@ -558,6 +564,30 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     }
   };
 
+  // ── Exécution d'une action après confirmation ─────────────────────────────
+  const executeConfirmedAction = async () => {
+    if (!confirmAction) return;
+    const { docId, type, comment } = confirmAction;
+    setConfirmAction(null);
+    if (type === 'delete') {
+      await handleDeleteDoc(docId);
+    } else {
+      const statusMap = { validate: 'validated', reserve: 'reserved', reject: 'rejected' } as const;
+      // Injecter le commentaire dans l'état review avant de soumettre
+      setReview({ docId, comment: comment ?? '', submitting: false });
+      await submitReview(docId, statusMap[type as 'validate' | 'reserve' | 'reject']);
+      setReview(null);
+    }
+  };
+
+  // Config affichage de la confirmation par type
+  const CONFIRM_CFG = {
+    delete:   { label: 'Supprimer ce document ?',        color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',          icon: MdDeleteOutline },
+    validate: { label: 'Valider ce document ?',          color: 'text-emerald-700', confirmCls: 'bg-emerald-600 hover:bg-emerald-700 text-white',   icon: MdCheckCircle   },
+    reserve:  { label: 'Valider avec réserve ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: MdWarning       },
+    reject:   { label: 'Rejeter ce document ?',          color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',           icon: MdCancel        },
+  };
+
   // ── Rendu ────────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -943,8 +973,29 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                   {/* Séparateur */}
                   <div className="border-t border-gray-100" />
 
-                  {/* Actions */}
-                  {!isReviewing ? (
+                  {/* Confirmation inline — remplace les boutons d'action */}
+                  {confirmAction?.docId === doc.id ? (() => {
+                    const cfg  = CONFIRM_CFG[confirmAction.type];
+                    const ConfIcon = cfg.icon;
+                    return (
+                      <div className="rounded-xl border-2 border-gray-200 bg-gray-50 px-3 py-2.5 space-y-2">
+                        <p className={`text-xs font-semibold flex items-center gap-1.5 ${cfg.color}`}>
+                          <ConfIcon size={14} /> {cfg.label}
+                        </p>
+                        <div className="flex gap-2">
+                          <button onClick={executeConfirmedAction}
+                            className={`flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${cfg.confirmCls}`}>
+                            <MdCheckCircle size={13} /> Confirmer
+                          </button>
+                          <button onClick={() => setConfirmAction(null)}
+                            className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 transition-colors">
+                            <MdAutorenew size={13} /> Annuler
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })() : !isReviewing ? (
+                    /* ── Actions normales ── */
                     <div className="flex items-center gap-1">
                       <button onClick={() => openPreview(doc)} title="Voir"
                         className="p-1.5 rounded-lg text-[#1B2E5A] hover:bg-blue-50 transition-colors">
@@ -958,18 +1009,21 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                       )}
                       {canReview && (
                         <button onClick={() => setReview({ docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-[#1B2E5A] hover:bg-[#142347] transition-colors ml-auto">
-                          <MdGavel size={13} /> Valider
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors ml-auto">
+                          <MdCheckCircle size={13} /> Valider
                         </button>
                       )}
                       {(canDelete || (canDeleteWhenUpcoming && (user?.role === 'admin' || doc.uploaded_by === user?.id))) && (
-                        <button disabled={deleting === doc.id} onClick={() => handleDeleteDoc(doc.id)} title="Supprimer"
+                        <button disabled={deleting === doc.id}
+                          onClick={() => setConfirmAction({ docId: doc.id, type: 'delete' })}
+                          title="Supprimer"
                           className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40">
                           <MdDeleteOutline size={16} />
                         </button>
                       )}
                     </div>
                   ) : (
+                    /* ── Formulaire de validation ── */
                     <div className="space-y-1.5">
                       <Textarea rows={2} placeholder="Commentaire (requis pour Réserve/Rejet)…"
                         value={review?.comment ?? ''}
@@ -977,17 +1031,17 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                         className="text-xs resize-none rounded-lg border-gray-200 focus:border-[#1B2E5A]" />
                       <div className="flex items-center gap-1 flex-wrap">
                         <button disabled={review?.submitting}
-                          onClick={() => submitReview(doc.id, 'validated')}
+                          onClick={() => setConfirmAction({ docId: doc.id, type: 'validate', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50">
                           <MdCheckCircle size={12} /> Valider
                         </button>
                         <button disabled={review?.submitting || commentReq}
-                          onClick={() => submitReview(doc.id, 'reserved')}
+                          onClick={() => setConfirmAction({ docId: doc.id, type: 'reserve', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 hover:bg-orange-100 disabled:opacity-40">
                           <MdWarning size={12} /> Réserve
                         </button>
                         <button disabled={review?.submitting || commentReq}
-                          onClick={() => submitReview(doc.id, 'rejected')}
+                          onClick={() => setConfirmAction({ docId: doc.id, type: 'reject', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 disabled:opacity-40">
                           <MdCancel size={12} /> Rejeter
                         </button>
