@@ -22,6 +22,7 @@ import {
   UserCog,
   Eye,
   EyeOff,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,6 +30,7 @@ import { useRBAC } from '@/hooks/useRBAC';
 import type { UserRole } from '@/contexts/AuthContext';
 import FloatingInput from '@/components/ui/floating-input';
 import FloatingSelect from '@/components/ui/floating-select';
+import ImportUsersModal from '@/components/users/ImportUsersModal';
 
 interface AppUser {
   id: string;
@@ -207,6 +209,7 @@ const UserManagement = () => {
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const availableRoles = isGlobalAdmin ? ALL_ROLES : ADMIN_ASSIGNABLE_ROLES;
 
@@ -850,10 +853,22 @@ const UserManagement = () => {
                 : 'Utilisateurs que vous avez créés et rattachés à vos élections'}
             </p>
           </div>
-          <Button onClick={() => { resetForm(); setShowAddModal(true); }} className="w-full sm:w-auto bg-[#1B2E5A] hover:bg-[#142347] text-white">
-            <Plus className="h-4 w-4 mr-2" />
-            Ajouter un utilisateur
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            {isGlobalAdmin && (
+              <Button
+                variant="outline"
+                onClick={() => setShowImportModal(true)}
+                className="w-full sm:w-auto border-[#1B2E5A] text-[#1B2E5A] hover:bg-blue-50"
+              >
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Importer Excel
+              </Button>
+            )}
+            <Button onClick={() => { resetForm(); setShowAddModal(true); }} className="w-full sm:w-auto bg-[#1B2E5A] hover:bg-[#142347] text-white">
+              <Plus className="h-4 w-4 mr-2" />
+              Ajouter un utilisateur
+            </Button>
+          </div>
         </div>
 
         {/* Filtres */}
@@ -1135,6 +1150,39 @@ const UserManagement = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Modal Import Excel */}
+      <ImportUsersModal
+        open={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        elections={allElections}
+        currentUserId={currentUser?.id ?? null}
+        onImported={(count) => {
+          toast.success(`${count} utilisateur${count > 1 ? 's' : ''} importé${count > 1 ? 's' : ''} avec succès`);
+          // Recharger la liste
+          setUsers([]);
+          setLoading(true);
+          supabase.from('users').select('*, elections:assigned_election_id(title)')
+            .order('created_at', { ascending: false })
+            .then(({ data }) => {
+              if (data) {
+                setUsers((data as any[]).map(u => ({
+                  id: u.id, name: u.name, email: u.email, role: u.role as UserRole,
+                  isActive: u.is_active,
+                  createdAt: new Date(u.created_at).toISOString().split('T')[0],
+                  assigned_election_id: u.assigned_election_id,
+                  assigned_election_ids: u.assigned_election_ids ?? null,
+                  created_by: u.created_by,
+                  electionTitle: u.elections?.title ?? undefined,
+                  assigned_center_ids: u.assigned_center_ids ?? null,
+                  assigned_center_bureaux: u.assigned_center_bureaux ?? null,
+                  assigned_center_colleges: u.assigned_center_colleges ?? null,
+                })));
+              }
+              setLoading(false);
+            });
+        }}
+      />
     </Layout>
   );
 };
