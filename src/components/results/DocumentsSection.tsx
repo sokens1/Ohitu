@@ -15,7 +15,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   Upload, Download, FileText, FileImage, Building2, BookOpen,
   CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp,
-  ZoomIn, ZoomOut, RotateCw, ExternalLink, Trash2,
+  ZoomIn, ZoomOut, RotateCw, ExternalLink, Trash2, Search, Filter,
+  FileCheck, FileClock, LayoutGrid,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -104,9 +105,12 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const [review, setReview]       = useState<ReviewState | null>(null);
   const [expanded, setExpanded]   = useState<Set<string>>(new Set());
   const [electionStatus, setElectionStatus] = useState<string | null>(null);
-  const [deleting, setDeleting]   = useState<string | null>(null); // docId en cours de suppression
-  const [deleteAllConfirm, setDeleteAllConfirm] = useState<'pv' | 'participation_list' | null>(null); // type à supprimer en masse
+  const [deleting, setDeleting]   = useState<string | null>(null);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState<'pv' | 'participation_list' | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
+  // Filtres vue admin
+  const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
+  const [adminSearch, setAdminSearch]             = useState('');
 
   // Peut supprimer un document quand l'élection est "À venir"
   const electionUpcoming = electionStatus === 'À venir';
@@ -550,357 +554,477 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   };
 
   // ── Rendu ────────────────────────────────────────────────────────────────────
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-40">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-teal-600" />
+      <div className="flex flex-col items-center justify-center h-48 gap-3">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-600 border-t-transparent" />
+        <p className="text-sm text-gray-400">Chargement des documents…</p>
       </div>
     );
   }
 
   if (!selectedElection) {
     return (
-      <div className="text-center text-gray-500 py-12">Sélectionnez une élection.</div>
-    );
-  }
-
-  // ── Vue président d'établissement ───────────────────────────────────────────
-  if (canUpload) {
-    return (
-      <div className="space-y-4">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*,.pdf"
-          className="hidden"
-          onChange={handleFileSelected}
-        />
-
-        <p className="text-sm text-gray-500">
-          Joignez les documents pour vos établissements. Formats acceptés : image (JPG, PNG…) ou PDF.
-        </p>
-
-        {centers.length === 0 && (
-          <div className="text-center text-gray-400 py-10">
-            Aucun établissement assigné.
-          </div>
-        )}
-
-        {centers.map(center => {
-          return (
-            <Card key={center.id} className="border border-teal-200">
-              <CardHeader className="pb-2 pt-4 px-4">
-                <CardTitle className="flex items-center gap-2 text-sm font-semibold text-teal-800">
-                  <Building2 className="w-4 h-4" />
-                  {center.name}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 space-y-3">
-                {center.assignedColleges.map(college => (
-                  <div key={college} className="border border-teal-100 rounded-xl overflow-hidden">
-                    {/* En-tête collège */}
-                    <div className="flex items-center gap-1.5 px-3 py-2 bg-teal-50 border-b border-teal-100">
-                      <BookOpen className="w-3.5 h-3.5 text-teal-600" />
-                      <span className="text-xs font-semibold text-teal-700">
-                        {COLLEGE_LABELS[college] ?? college}
-                      </span>
-                    </div>
-
-                    {/* Documents PV + Liste */}
-                    <div className="divide-y divide-gray-100">
-                      {(['pv', 'participation_list'] as const).map(docType => {
-                        const existing = docs.find(
-                          d => d.center_id === center.id
-                            && d.college_type === college
-                            && d.document_type === docType
-                        );
-                        const uploadKey = `${center.id}|${college}|${docType}`;
-                        const isUp = uploading === uploadKey;
-
-                        return (
-                          <div key={docType} className="flex items-center justify-between gap-3 px-3 py-2.5 flex-wrap bg-white">
-                            <div className="flex items-center gap-2 text-sm">
-                              {existing ? <FileIcon name={existing.file_name} /> : <FileText className="w-4 h-4 text-gray-300" />}
-                              <span className="font-medium text-gray-700">{DOC_TYPE_LABEL[docType]}</span>
-                              {existing && <StatusBadge status={existing.status} />}
-                              {existing?.review_comment && (
-                                <span className="text-xs text-gray-500 italic truncate max-w-xs" title={existing.review_comment}>
-                                  "{existing.review_comment}"
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {existing && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-blue-600 hover:text-blue-700 h-7 px-2"
-                                  title="Prévisualiser"
-                                  onClick={() => openPreview(existing)}
-                                >
-                                  <Eye className="w-3.5 h-3.5 mr-1" /> Voir
-                                </Button>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={isUp}
-                                className="border-teal-400 text-teal-700 hover:bg-teal-50 h-7 px-3 text-xs"
-                                onClick={() => triggerUpload(center.id, college, docType)}
-                              >
-                                <Upload className="w-3.5 h-3.5 mr-1" />
-                                {isUp ? 'Envoi…' : existing ? 'Remplacer' : 'Joindre'}
-                              </Button>
-                              {/* Supprimer son propre document si l'élection est "À venir" */}
-                              {existing && (canDelete || canDeleteWhenUpcoming) && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  disabled={deleting === existing.id}
-                                  className="text-red-400 hover:text-red-600 hover:bg-red-50 h-7 w-7 p-0"
-                                  title="Supprimer ce document"
-                                  onClick={() => handleDeleteDoc(existing.id)}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          );
-        })}
-      {previewModal}
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
+        <LayoutGrid className="w-10 h-10" />
+        <p className="text-sm">Sélectionnez une élection pour voir les documents.</p>
       </div>
     );
   }
 
-  // ── Vue admin / agent-saisie : liste tous les documents ─────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VUE PRÉSIDENT D'ÉTABLISSEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (canUpload) {
+    const totalSlots  = centers.reduce((s, c) => s + c.assignedColleges.length * 2, 0);
+    const filledSlots = docs.length;
+    const pct = totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
+
+    return (
+      <div className="space-y-5">
+        <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={handleFileSelected} />
+
+        {/* Bandeau progression global */}
+        {totalSlots > 0 && (
+          <div className="flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-100">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-semibold text-teal-800">Progression des dépôts</span>
+                <span className="text-sm font-bold text-teal-700">{filledSlots}/{totalSlots} documents</span>
+              </div>
+              <div className="h-2 bg-teal-100 rounded-full overflow-hidden">
+                <div
+                  className="h-2 rounded-full transition-all duration-500"
+                  style={{
+                    width: `${pct}%`,
+                    background: pct === 100
+                      ? 'linear-gradient(90deg,#059669,#10b981)'
+                      : 'linear-gradient(90deg,#0d9488,#14b8a6)',
+                  }}
+                />
+              </div>
+            </div>
+            <div className={`text-2xl font-black flex-shrink-0 ${pct === 100 ? 'text-emerald-600' : 'text-teal-600'}`}>
+              {pct}%
+            </div>
+          </div>
+        )}
+
+        {centers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
+            <Building2 className="w-10 h-10" />
+            <p className="text-sm font-medium">Aucun établissement assigné</p>
+            <p className="text-xs">Contactez votre administrateur.</p>
+          </div>
+        ) : centers.map(center => {
+          const centerDocs    = docs.filter(d => d.center_id === center.id);
+          const centerFilled  = centerDocs.length;
+          const centerTotal   = center.assignedColleges.length * 2;
+          const allDone       = centerFilled === centerTotal && centerTotal > 0;
+
+          return (
+            <div key={center.id} className="rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+              {/* En-tête établissement */}
+              <div className={`flex items-center gap-3 px-4 py-3 ${allDone ? 'bg-emerald-50 border-b border-emerald-100' : 'bg-gray-50 border-b border-gray-200'}`}>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${allDone ? 'bg-emerald-100' : 'bg-teal-100'}`}>
+                  <Building2 className={`w-4 h-4 ${allDone ? 'text-emerald-600' : 'text-teal-600'}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 text-sm truncate">{center.name}</p>
+                  <p className={`text-[11px] ${allDone ? 'text-emerald-600' : 'text-gray-400'}`}>
+                    {allDone ? '✓ Tous les documents déposés' : `${centerFilled}/${centerTotal} document${centerTotal > 1 ? 's' : ''}`}
+                  </p>
+                </div>
+                {allDone && <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0" />}
+              </div>
+
+              {/* Collèges */}
+              <div className="divide-y divide-gray-100 bg-white">
+                {center.assignedColleges.map(college => {
+                  const colLabel = COLLEGE_LABELS[college] ?? college;
+                  return (
+                    <div key={college} className="p-3 space-y-2">
+                      {/* Tag collège */}
+                      <div className="flex items-center gap-1.5">
+                        <BookOpen className="w-3 h-3 text-teal-500" />
+                        <span className="text-[11px] font-semibold text-teal-700 uppercase tracking-wide">{colLabel}</span>
+                      </div>
+
+                      {/* Slots documents */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {(['pv', 'participation_list'] as const).map(docType => {
+                          const existing  = docs.find(d => d.center_id === center.id && d.college_type === college && d.document_type === docType);
+                          const uploadKey = `${center.id}|${college}|${docType}`;
+                          const isUp      = uploading === uploadKey;
+                          const statusCfg = existing ? STATUS_CONFIG[existing.status] : null;
+
+                          return (
+                            <div key={docType}
+                              className={`relative rounded-xl border-2 transition-all ${
+                                existing
+                                  ? existing.status === 'validated' ? 'border-emerald-200 bg-emerald-50/50'
+                                  : existing.status === 'rejected'  ? 'border-red-200 bg-red-50/50'
+                                  : existing.status === 'reserved'  ? 'border-orange-200 bg-orange-50/50'
+                                  : 'border-gray-200 bg-white'
+                                  : 'border-dashed border-gray-300 bg-gray-50/50 hover:border-teal-300 hover:bg-teal-50/30'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 p-2.5">
+                                {/* Icône état */}
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                  existing ? 'bg-white shadow-sm' : 'bg-gray-100'
+                                }`}>
+                                  {existing
+                                    ? <FileIcon name={existing.file_name} />
+                                    : <FileText className="w-4 h-4 text-gray-300" />}
+                                </div>
+
+                                {/* Infos */}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-semibold text-gray-700 leading-none mb-1">
+                                    {DOC_TYPE_LABEL[docType]}
+                                  </p>
+                                  {existing ? (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      {statusCfg && (
+                                        <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${statusCfg.color}`}>
+                                          <statusCfg.icon className="w-2.5 h-2.5" /> {statusCfg.label}
+                                        </span>
+                                      )}
+                                      {existing.review_comment && (
+                                        <span className="text-[10px] text-gray-500 italic truncate max-w-[100px]" title={existing.review_comment}>
+                                          "{existing.review_comment}"
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="text-[10px] text-gray-400">Non déposé</p>
+                                  )}
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {existing && (
+                                    <button onClick={() => openPreview(existing)}
+                                      className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors" title="Voir">
+                                      <Eye className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  <button
+                                    disabled={isUp}
+                                    onClick={() => triggerUpload(center.id, college, docType)}
+                                    className={`p-1.5 rounded-lg transition-colors ${
+                                      isUp ? 'opacity-50 cursor-not-allowed' : 'text-teal-600 hover:bg-teal-50'
+                                    }`}
+                                    title={existing ? 'Remplacer' : 'Joindre'}
+                                  >
+                                    <Upload className="w-3.5 h-3.5" />
+                                  </button>
+                                  {existing && (canDelete || canDeleteWhenUpcoming) && (
+                                    <button
+                                      disabled={deleting === existing.id}
+                                      onClick={() => handleDeleteDoc(existing.id)}
+                                      className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50"
+                                      title="Supprimer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+        {previewModal}
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VUE ADMIN / VALIDATEUR / AGENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Statistiques globales
+  const statValidated = docs.filter(d => d.status === 'validated').length;
+  const statPending   = docs.filter(d => d.status === 'pending').length;
+  const statReserved  = docs.filter(d => d.status === 'reserved').length;
+  const statRejected  = docs.filter(d => d.status === 'rejected').length;
+
+  // Documents filtrés
+  const filteredDocs = docs.filter(d => {
+    if (adminStatusFilter !== 'all' && d.status !== adminStatusFilter) return false;
+    if (adminSearch.trim()) {
+      const q = adminSearch.toLowerCase();
+      return (
+        (d.center_name  ?? '').toLowerCase().includes(q) ||
+        (d.uploader_name ?? '').toLowerCase().includes(q) ||
+        DOC_TYPE_LABEL[d.document_type].toLowerCase().includes(q) ||
+        (d.college_type ?? '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   const docsByCenter = centers
     .map(center => ({
       center,
-      docs: docs.filter(d => d.center_id === center.id),
-    }));
+      docs: filteredDocs.filter(d => d.center_id === center.id),
+    }))
+    .filter(({ docs: cd }) => cd.length > 0 || (canReview && adminStatusFilter === 'all' && !adminSearch));
+
+  const STAT_ITEMS = [
+    { label: 'Total',    count: docs.length,    color: 'bg-gray-100 text-gray-700',       border: 'border-gray-200',    key: 'all'       },
+    { label: 'En attente', count: statPending,  color: 'bg-amber-50 text-amber-700',      border: 'border-amber-200',   key: 'pending'   },
+    { label: 'Validés',  count: statValidated,  color: 'bg-emerald-50 text-emerald-700',  border: 'border-emerald-200', key: 'validated' },
+    { label: 'Réserve',  count: statReserved,   color: 'bg-orange-50 text-orange-700',    border: 'border-orange-200',  key: 'reserved'  },
+    { label: 'Rejetés',  count: statRejected,   color: 'bg-red-50 text-red-700',          border: 'border-red-200',     key: 'rejected'  },
+  ];
+
+  const STATUS_LEFT_BORDER: Record<string, string> = {
+    pending:   'border-l-amber-400',
+    validated: 'border-l-emerald-400',
+    reserved:  'border-l-orange-400',
+    rejected:  'border-l-red-400',
+  };
 
   return (
     <div className="space-y-4">
-      {canReview && (
-        <p className="text-sm text-gray-500">
-          Donnez votre avis sur les documents joints par les présidents de bureau.
-          Un commentaire est obligatoire pour les statuts <strong>Réserve</strong> et <strong>Rejet</strong>.
-        </p>
-      )}
-      {canDownload && !canReview && (
-        <p className="text-sm text-gray-500">
-          Consultez et téléchargez les documents joints par les présidents de bureau.
-        </p>
+
+      {/* ── Stats bar ── */}
+      {docs.length > 0 && (
+        <div className="grid grid-cols-5 gap-2">
+          {STAT_ITEMS.map(s => (
+            <button
+              key={s.key}
+              onClick={() => setAdminStatusFilter(s.key)}
+              className={`flex flex-col items-center gap-0.5 py-2.5 px-2 rounded-xl border-2 transition-all text-center ${
+                adminStatusFilter === s.key
+                  ? `${s.color} ${s.border} shadow-sm scale-[1.03]`
+                  : 'bg-white border-gray-100 hover:border-gray-200 text-gray-600'
+              }`}
+            >
+              <span className="text-lg font-black leading-none">{s.count}</span>
+              <span className="text-[10px] font-medium whitespace-nowrap">{s.label}</span>
+            </button>
+          ))}
+        </div>
       )}
 
-      {/* Barre suppression en masse — super-admin uniquement */}
-      {canDelete && docs.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200">
-          <Trash2 className="w-4 h-4 text-red-500 flex-shrink-0" />
-          <span className="text-xs font-semibold text-red-700 flex-1">Suppression en masse</span>
-          {deleteAllConfirm ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-red-700 font-medium">
-                Confirmer la suppression de tous les {deleteAllConfirm === 'pv' ? 'PV' : 'listes'} ?
+      {/* ── Barre de recherche + suppression masse ── */}
+      <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Rechercher par établissement, uploader, type…"
+            value={adminSearch}
+            onChange={e => setAdminSearch(e.target.value)}
+            className="w-full pl-9 pr-3 h-9 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all"
+          />
+        </div>
+
+        {canDelete && docs.length > 0 && (
+          deleteAllConfirm ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-50 border border-red-200">
+              <span className="text-xs text-red-700 font-medium whitespace-nowrap">
+                Supprimer tous les {deleteAllConfirm === 'pv' ? 'PV' : 'listes'} ?
               </span>
               <Button size="sm" disabled={deletingAll}
                 className="bg-red-600 hover:bg-red-700 text-white h-7 px-3 text-xs"
                 onClick={() => handleDeleteAllByType(deleteAllConfirm)}>
-                {deletingAll ? 'Suppression…' : 'Oui, supprimer'}
+                {deletingAll ? '…' : 'Confirmer'}
               </Button>
-              <Button size="sm" variant="outline" disabled={deletingAll}
-                className="h-7 px-3 text-xs border-red-300 text-red-600 hover:bg-red-50"
+              <Button size="sm" variant="ghost" disabled={deletingAll}
+                className="h-7 px-2 text-xs text-gray-500"
                 onClick={() => setDeleteAllConfirm(null)}>
                 Annuler
               </Button>
             </div>
           ) : (
-            <>
+            <div className="flex gap-1">
               <Button size="sm" variant="outline"
-                className="border-red-300 text-red-600 hover:bg-red-100 h-7 px-3 text-xs"
+                className="border-red-200 text-red-500 hover:bg-red-50 h-9 px-3 text-xs"
                 onClick={() => setDeleteAllConfirm('pv')}
                 disabled={!docs.some(d => d.document_type === 'pv')}>
-                <Trash2 className="w-3 h-3 mr-1" /> Tous les PV
+                <Trash2 className="w-3 h-3 mr-1" /> PV
               </Button>
               <Button size="sm" variant="outline"
-                className="border-red-300 text-red-600 hover:bg-red-100 h-7 px-3 text-xs"
+                className="border-red-200 text-red-500 hover:bg-red-50 h-9 px-3 text-xs"
                 onClick={() => setDeleteAllConfirm('participation_list')}
                 disabled={!docs.some(d => d.document_type === 'participation_list')}>
-                <Trash2 className="w-3 h-3 mr-1" /> Toutes les listes
+                <Trash2 className="w-3 h-3 mr-1" /> Listes
               </Button>
-            </>
+            </div>
+          )
+        )}
+      </div>
+
+      {/* ── Empty state ── */}
+      {docsByCenter.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center">
+            <FileText className="w-7 h-7 text-gray-300" />
+          </div>
+          <p className="text-sm font-medium text-gray-500">
+            {adminSearch || adminStatusFilter !== 'all' ? 'Aucun document ne correspond à la recherche.' : 'Aucun document déposé pour le moment.'}
+          </p>
+          {(adminSearch || adminStatusFilter !== 'all') && (
+            <button onClick={() => { setAdminSearch(''); setAdminStatusFilter('all'); }}
+              className="text-xs text-teal-600 hover:underline">
+              Réinitialiser les filtres
+            </button>
           )}
         </div>
       )}
 
-      {docsByCenter.every(c => c.docs.length === 0) && (
-        <div className="text-center text-gray-400 py-12">
-          <FileText className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-          Aucun document joint pour le moment.
-        </div>
-      )}
-
+      {/* ── Cartes par établissement ── */}
       {docsByCenter.map(({ center, docs: centerDocs }) => {
-        if (centerDocs.length === 0 && !canReview) return null;
         const isExpanded = expanded.has(center.id);
         const toggle = () => setExpanded(prev => {
           const next = new Set(prev);
           next.has(center.id) ? next.delete(center.id) : next.add(center.id);
           return next;
         });
+        const vCount = centerDocs.filter(d => d.status === 'validated').length;
+        const pCount = centerDocs.filter(d => d.status === 'pending').length;
 
         return (
-          <Card key={center.id} className="border border-gray-200">
-            <button
-              type="button"
-              onClick={toggle}
-              className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 rounded-t-lg"
-            >
-              <div className="flex items-center gap-2">
+          <div key={center.id} className="rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+            {/* En-tête cliquable */}
+            <button type="button" onClick={toggle}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-white hover:bg-gray-50 transition-colors">
+              <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center flex-shrink-0">
                 <Building2 className="w-4 h-4 text-teal-600" />
-                <span className="font-medium text-sm text-gray-800">{center.name}</span>
-                <span className="text-xs text-gray-400">({centerDocs.length} document{centerDocs.length > 1 ? 's' : ''})</span>
               </div>
-              {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+              <div className="flex-1 text-left min-w-0">
+                <p className="font-semibold text-sm text-gray-900 truncate">{center.name}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[11px] text-gray-400">{centerDocs.length} doc{centerDocs.length > 1 ? 's' : ''}</span>
+                  {vCount > 0 && <span className="text-[11px] text-emerald-600 font-medium">{vCount} validé{vCount > 1 ? 's' : ''}</span>}
+                  {pCount > 0 && <span className="text-[11px] text-amber-600 font-medium">{pCount} en attente</span>}
+                </div>
+              </div>
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </div>
             </button>
 
+            {/* Liste des documents */}
             {isExpanded && (
-              <CardContent className="px-4 pb-4 pt-1 space-y-3 border-t">
-                {centerDocs.length === 0 && (
-                  <p className="text-sm text-gray-400 italic py-2">Aucun document pour cet établissement.</p>
-                )}
-
-                {centerDocs.map(doc => {
-                  const isReviewing = review?.docId === doc.id;
-                  const commentRequired = isReviewing &&
-                    (review?.comment ?? '').trim().length === 0;
+              <div className="border-t border-gray-100 divide-y divide-gray-50">
+                {centerDocs.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic px-4 py-3">Aucun document pour cet établissement.</p>
+                ) : centerDocs.map(doc => {
+                  const isReviewing    = review?.docId === doc.id;
+                  const commentRequired= isReviewing && (review?.comment ?? '').trim().length === 0;
+                  const leftBorder     = STATUS_LEFT_BORDER[doc.status] ?? 'border-l-gray-200';
 
                   return (
-                    <div key={doc.id} className="border rounded-xl p-3 bg-white space-y-2">
-                      {/* Ligne principale */}
-                      <div className="flex flex-wrap items-center gap-2 justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileIcon name={doc.file_name} />
-                          <div>
-                            <p className="text-sm font-medium text-gray-800">
-                              {DOC_TYPE_LABEL[doc.document_type]}
+                    <div key={doc.id} className={`border-l-4 ${leftBorder} bg-white hover:bg-gray-50/50 transition-colors`}>
+                      <div className="flex flex-wrap items-center gap-2 px-4 py-3 justify-between">
+                        {/* Infos document */}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0">
+                            <FileIcon name={doc.file_name} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-gray-800">
+                                {DOC_TYPE_LABEL[doc.document_type]}
+                              </span>
                               {doc.college_type && (
-                                <span className="ml-1 text-xs text-gray-500">— {doc.college_type}</span>
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-100">
+                                  {doc.college_type}
+                                </span>
                               )}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              Déposé par <span className="font-medium">{doc.uploader_name}</span>
-                              {' '}· {new Date(doc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              <StatusBadge status={doc.status} />
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">
+                              {doc.uploader_name} ·{' '}
+                              {new Date(doc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
                               {doc.file_name && <> · <span className="italic">{doc.file_name}</span></>}
                             </p>
+                            {!isReviewing && doc.review_comment && (
+                              <p className="text-[11px] text-gray-500 italic mt-0.5">
+                                💬 "{doc.review_comment}"
+                              </p>
+                            )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <StatusBadge status={doc.status} />
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-blue-600 hover:text-blue-700 h-7 px-2"
-                            title="Prévisualiser"
-                            onClick={() => openPreview(doc)}
-                          >
-                            <Eye className="w-3.5 h-3.5 mr-1" /> Voir
-                          </Button>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button onClick={() => openPreview(doc)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
+                            <Eye className="w-3.5 h-3.5" /> Voir
+                          </button>
                           {canDownload && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-gray-600 hover:text-gray-800 h-7 px-2"
-                              onClick={() => handleDownload(doc)}
-                            >
-                              <Download className="w-3.5 h-3.5 mr-1" /> Télécharger
-                            </Button>
+                            <button onClick={() => handleDownload(doc)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors">
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
                           )}
                           {canReview && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
+                            <button
                               onClick={() => setReview(isReviewing ? null : { docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
-                            >
-                              {isReviewing ? 'Annuler' : 'Validation'}
-                            </Button>
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                isReviewing
+                                  ? 'bg-gray-100 text-gray-600'
+                                  : 'bg-[#1B2E5A] text-white hover:bg-[#142347]'
+                              }`}>
+                              <FileCheck className="w-3.5 h-3.5" />
+                              {isReviewing ? 'Annuler' : 'Valider'}
+                            </button>
                           )}
-                          {(canDelete ||
-                            (canDeleteWhenUpcoming &&
-                              (user?.role === 'admin' || doc.uploaded_by === user?.id))
-                          ) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
+                          {(canDelete || (canDeleteWhenUpcoming && (user?.role === 'admin' || doc.uploaded_by === user?.id))) && (
+                            <button
                               disabled={deleting === doc.id}
-                              className="text-red-400 hover:text-red-600 hover:bg-red-50 h-7 w-7 p-0"
-                              title="Supprimer ce document"
                               onClick={() => handleDeleteDoc(doc.id)}
-                            >
+                              className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50">
                               <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
+                            </button>
                           )}
                         </div>
                       </div>
 
-                      {/* Commentaire existant */}
-                      {!isReviewing && doc.review_comment && (
-                        <p className="text-xs text-gray-500 italic bg-gray-50 rounded px-2 py-1">
-                          Commentaire : "{doc.review_comment}"
-                        </p>
-                      )}
-
-                      {/* Formulaire d'avis */}
+                      {/* Formulaire validation inline */}
                       {isReviewing && canReview && (
-                        <div className="border-t pt-3 space-y-2">
+                        <div className="px-4 pb-3 pt-0 space-y-2 bg-gray-50 border-t border-gray-100">
                           <Textarea
                             rows={2}
-                            placeholder="Commentaire (obligatoire pour Réserve et Rejet)"
+                            placeholder="Commentaire (obligatoire pour Réserve et Rejet)…"
                             value={review?.comment ?? ''}
                             onChange={e => setReview(prev => prev ? { ...prev, comment: e.target.value } : null)}
-                            className="text-sm resize-none"
+                            className="text-sm resize-none bg-white border-gray-200 focus:border-teal-400 rounded-xl"
                           />
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              disabled={review?.submitting}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white h-7 px-3 text-xs"
-                              onClick={() => submitReview(doc.id, 'validated')}
-                            >
-                              <CheckCircle className="w-3.5 h-3.5 mr-1" /> Valider
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Button size="sm" disabled={review?.submitting}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-4 text-xs rounded-lg"
+                              onClick={() => submitReview(doc.id, 'validated')}>
+                              <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Valider
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={review?.submitting || commentRequired}
-                              className="border-orange-400 text-orange-700 hover:bg-orange-50 h-7 px-3 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                              onClick={() => submitReview(doc.id, 'reserved')}
-                            >
-                              <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Réserve
-                              {commentRequired && <span className="ml-1 text-orange-400">*</span>}
+                            <Button size="sm" variant="outline" disabled={review?.submitting || commentRequired}
+                              className="border-orange-300 text-orange-600 hover:bg-orange-50 h-8 px-4 text-xs rounded-lg disabled:opacity-50"
+                              onClick={() => submitReview(doc.id, 'reserved')}>
+                              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" /> Réserve
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={review?.submitting || commentRequired}
-                              className="border-red-400 text-red-700 hover:bg-red-50 h-7 px-3 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                              onClick={() => submitReview(doc.id, 'rejected')}
-                            >
-                              <XCircle className="w-3.5 h-3.5 mr-1" /> Rejeter
-                              {commentRequired && <span className="ml-1 text-red-400">*</span>}
+                            <Button size="sm" variant="outline" disabled={review?.submitting || commentRequired}
+                              className="border-red-300 text-red-600 hover:bg-red-50 h-8 px-4 text-xs rounded-lg disabled:opacity-50"
+                              onClick={() => submitReview(doc.id, 'rejected')}>
+                              <XCircle className="w-3.5 h-3.5 mr-1.5" /> Rejeter
                             </Button>
                             {commentRequired && (
-                              <p className="text-xs text-red-500 self-center">
-                                * Commentaire requis pour Réserve et Rejet
+                              <p className="text-[11px] text-red-400 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" /> Commentaire requis
                               </p>
                             )}
                           </div>
@@ -909,11 +1033,12 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                     </div>
                   );
                 })}
-              </CardContent>
+              </div>
             )}
-          </Card>
+          </div>
         );
       })}
+
       {previewModal}
     </div>
   );
