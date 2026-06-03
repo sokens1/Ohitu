@@ -547,12 +547,44 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     </Dialog>
   );
 
-  // ── Suppression (super-admin uniquement) ────────────────────────────────────
+  // ── Suppression ──────────────────────────────────────────────────────────────
   const handleDeleteDoc = async (docId: string) => {
     setDeleting(docId);
     try {
-      const { error } = await supabase.from('establishment_documents').delete().eq('id', docId);
-      if (error) { toast.error('Erreur lors de la suppression'); return; }
+      // Récupérer l'URL du fichier avant suppression (pour nettoyer le storage)
+      const docToDelete = docs.find(d => d.id === docId);
+
+      // Supprimer la ligne en base — .select('id') permet de détecter un blocage RLS silencieux
+      const { data: deleted, error } = await supabase
+        .from('establishment_documents')
+        .delete()
+        .eq('id', docId)
+        .select('id');
+
+      if (error) {
+        toast.error(`Erreur lors de la suppression : ${error.message}`);
+        return;
+      }
+
+      // Si 0 lignes retournées → blocage RLS silencieux (appliquer migration 20260529_docs_delete_policy.sql)
+      if (!deleted?.length) {
+        toast.error('Suppression bloquée — vérifiez vos droits ou appliquez la migration 20260529_docs_delete_policy.sql dans Supabase.');
+        return;
+      }
+
+      // Supprimer le fichier du storage si possible
+      if (docToDelete?.file_url) {
+        try {
+          const url = new URL(docToDelete.file_url);
+          const parts = url.pathname.split('/pv-uploads/');
+          if (parts[1]) {
+            await supabase.storage.from('pv-uploads').remove([parts[1]]);
+          }
+        } catch {
+          // Échec storage non bloquant — la ligne est déjà supprimée
+        }
+      }
+
       setDocs(prev => prev.filter(d => d.id !== docId));
       toast.success('Document supprimé');
     } finally {
