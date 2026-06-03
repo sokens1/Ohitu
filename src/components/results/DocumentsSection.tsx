@@ -1054,15 +1054,15 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                           <MdDownload size={16} />
                         </button>
                       )}
-                      {/* Valider : masqué si déjà validé */}
-                      {canReview && doc.status !== 'validated' && (
+                      {/* Valider : masqué si statut final (validé, réservé, rejeté) */}
+                      {canReview && doc.status === 'pending' && (
                         <button onClick={() => setReview({ docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors ml-auto">
                           <MdCheckCircle size={13} /> Valider
                         </button>
                       )}
-                      {/* Rétracter : uniquement admin/super-admin si document validé */}
-                      {(user?.role === 'super-admin' || user?.role === 'admin') && doc.status === 'validated' && (
+                      {/* Rétracter : admin/super-admin si décision prise (validé, réservé, rejeté) */}
+                      {(user?.role === 'super-admin' || user?.role === 'admin') && ['validated', 'reserved', 'rejected'].includes(doc.status) && (
                         <button onClick={() => setConfirmAction({ docId: doc.id, type: 'retract' })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors ml-auto">
                           <MdAutorenew size={13} /> Rétracter
