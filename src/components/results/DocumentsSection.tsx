@@ -116,7 +116,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   // Confirmation inline avant exécution d'une action critique
   const [confirmAction, setConfirmAction] = useState<{
     docId: string;
-    type: 'delete' | 'validate' | 'reserve' | 'reject';
+    type: 'delete' | 'validate' | 'reserve' | 'reject' | 'retract';
     comment?: string;
   } | null>(null);
   // Filtres vue admin
@@ -378,6 +378,19 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     }
   };
 
+  // ── Rétractation d'une validation (admin/super-admin) ────────────────────────
+  const submitRetract = async (docId: string) => {
+    try {
+      const { error } = await supabase
+        .from('establishment_documents')
+        .update({ status: 'pending', review_comment: null, reviewed_by: null, reviewed_at: null })
+        .eq('id', docId);
+      if (error) { toast.error('Erreur lors de la rétractation'); return; }
+      setDocs(prev => prev.map(d => d.id === docId ? { ...d, status: 'pending', review_comment: null } : d));
+      toast.success('Validation rétractée — document repassé en attente');
+    } catch { toast.error('Erreur réseau'); }
+  };
+
   // ── Avis admin ──────────────────────────────────────────────────────────────
   const submitReview = async (docId: string, status: 'validated' | 'reserved' | 'rejected') => {
     const commentRequired = status === 'reserved' || status === 'rejected';
@@ -571,9 +584,10 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     setConfirmAction(null);
     if (type === 'delete') {
       await handleDeleteDoc(docId);
+    } else if (type === 'retract') {
+      await submitRetract(docId);
     } else {
       const statusMap = { validate: 'validated', reserve: 'reserved', reject: 'rejected' } as const;
-      // Injecter le commentaire dans l'état review avant de soumettre
       setReview({ docId, comment: comment ?? '', submitting: false });
       await submitReview(docId, statusMap[type as 'validate' | 'reserve' | 'reject']);
       setReview(null);
@@ -586,6 +600,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     validate: { label: 'Valider ce document ?',          color: 'text-emerald-700', confirmCls: 'bg-emerald-600 hover:bg-emerald-700 text-white',   icon: MdCheckCircle   },
     reserve:  { label: 'Valider avec réserve ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: MdWarning       },
     reject:   { label: 'Rejeter ce document ?',          color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',           icon: MdCancel        },
+    retract:  { label: 'Rétracter la validation ?',      color: 'text-amber-700',   confirmCls: 'bg-amber-500 hover:bg-amber-600 text-white',       icon: MdAutorenew     },
   };
 
   // ── Rendu ────────────────────────────────────────────────────────────────────
@@ -746,17 +761,21 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                       <Eye className="w-3.5 h-3.5" />
                                     </button>
                                   )}
-                                  <button
-                                    disabled={isUp}
-                                    onClick={() => triggerUpload(center.id, college, docType)}
-                                    className={`p-1.5 rounded-lg transition-colors ${
-                                      isUp ? 'opacity-50 cursor-not-allowed' : 'text-teal-600 hover:bg-teal-50'
-                                    }`}
-                                    title={existing ? 'Remplacer' : 'Joindre'}
-                                  >
-                                    <Upload className="w-3.5 h-3.5" />
-                                  </button>
-                                  {existing && (canDelete || canDeleteWhenUpcoming) && (
+                                  {/* Upload : bloqué si document validé */}
+                                  {(!existing || existing.status !== 'validated') && (
+                                    <button
+                                      disabled={isUp}
+                                      onClick={() => triggerUpload(center.id, college, docType)}
+                                      className={`p-1.5 rounded-lg transition-colors ${
+                                        isUp ? 'opacity-50 cursor-not-allowed' : 'text-teal-600 hover:bg-teal-50'
+                                      }`}
+                                      title={existing ? 'Remplacer' : 'Joindre'}
+                                    >
+                                      <Upload className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  {/* Supprimer : bloqué si validé */}
+                                  {existing && existing.status !== 'validated' && (canDelete || canDeleteWhenUpcoming) && (
                                     <button
                                       disabled={deleting === existing.id}
                                       onClick={() => handleDeleteDoc(existing.id)}
@@ -1003,13 +1022,22 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                           <MdDownload size={16} />
                         </button>
                       )}
-                      {canReview && (
+                      {/* Valider : masqué si déjà validé */}
+                      {canReview && doc.status !== 'validated' && (
                         <button onClick={() => setReview({ docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors ml-auto">
                           <MdCheckCircle size={13} /> Valider
                         </button>
                       )}
-                      {(canDelete || (canDeleteWhenUpcoming && (user?.role === 'admin' || doc.uploaded_by === user?.id))) && (
+                      {/* Rétracter : uniquement admin/super-admin si document validé */}
+                      {(user?.role === 'super-admin' || user?.role === 'admin') && doc.status === 'validated' && (
+                        <button onClick={() => setConfirmAction({ docId: doc.id, type: 'retract' })}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors ml-auto">
+                          <MdAutorenew size={13} /> Rétracter
+                        </button>
+                      )}
+                      {/* Supprimer : bloqué si document validé */}
+                      {doc.status !== 'validated' && (canDelete || (canDeleteWhenUpcoming && (user?.role === 'admin' || doc.uploaded_by === user?.id))) && (
                         <button disabled={deleting === doc.id}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'delete' })}
                           title="Supprimer"
