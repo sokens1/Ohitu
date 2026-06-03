@@ -15,9 +15,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   Upload, Download, FileText, FileImage, Building2, BookOpen,
   CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp,
-  ZoomIn, ZoomOut, RotateCw, ExternalLink, Trash2, Search, Filter,
-  FileCheck, FileClock, LayoutGrid,
+  ZoomIn, ZoomOut, RotateCw, ExternalLink, Trash2, LayoutGrid,
 } from 'lucide-react';
+import {
+  MdDescription, MdFormatListBulleted, MdVisibility, MdDownload,
+  MdDeleteOutline, MdCheckCircle, MdCancel, MdWarning, MdPending,
+  MdBusiness, MdClass, MdCloudUpload, MdGavel, MdAutorenew,
+  MdFilterList, MdVerified, MdUnpublished,
+} from 'react-icons/md';
 import { toast } from 'sonner';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -110,7 +115,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const [deletingAll, setDeletingAll] = useState(false);
   // Filtres vue admin
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
-  const [adminSearch, setAdminSearch]             = useState('');
+  const [adminCenterFilter, setAdminCenterFilter] = useState<string>('all');
 
   // Peut supprimer un document quand l'élection est "À venir"
   const electionUpcoming = electionStatus === 'À venir';
@@ -753,93 +758,91 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   // VUE ADMIN / VALIDATEUR / AGENT
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // Statistiques globales
   const statValidated = docs.filter(d => d.status === 'validated').length;
   const statPending   = docs.filter(d => d.status === 'pending').length;
   const statReserved  = docs.filter(d => d.status === 'reserved').length;
   const statRejected  = docs.filter(d => d.status === 'rejected').length;
 
-  // Documents filtrés
+  // Documents filtrés par établissement + statut
   const filteredDocs = docs.filter(d => {
     if (adminStatusFilter !== 'all' && d.status !== adminStatusFilter) return false;
-    if (adminSearch.trim()) {
-      const q = adminSearch.toLowerCase();
-      return (
-        (d.center_name  ?? '').toLowerCase().includes(q) ||
-        (d.uploader_name ?? '').toLowerCase().includes(q) ||
-        DOC_TYPE_LABEL[d.document_type].toLowerCase().includes(q) ||
-        (d.college_type ?? '').toLowerCase().includes(q)
-      );
-    }
+    if (adminCenterFilter !== 'all' && d.center_id !== adminCenterFilter) return false;
     return true;
   });
 
-  const docsByCenter = centers
-    .map(center => ({
-      center,
-      docs: filteredDocs.filter(d => d.center_id === center.id),
-    }))
-    .filter(({ docs: cd }) => cd.length > 0 || (canReview && adminStatusFilter === 'all' && !adminSearch));
-
-  const STAT_ITEMS = [
-    { label: 'Total',    count: docs.length,    color: 'bg-gray-100 text-gray-700',       border: 'border-gray-200',    key: 'all'       },
-    { label: 'En attente', count: statPending,  color: 'bg-amber-50 text-amber-700',      border: 'border-amber-200',   key: 'pending'   },
-    { label: 'Validés',  count: statValidated,  color: 'bg-emerald-50 text-emerald-700',  border: 'border-emerald-200', key: 'validated' },
-    { label: 'Réserve',  count: statReserved,   color: 'bg-orange-50 text-orange-700',    border: 'border-orange-200',  key: 'reserved'  },
-    { label: 'Rejetés',  count: statRejected,   color: 'bg-red-50 text-red-700',          border: 'border-red-200',     key: 'rejected'  },
-  ];
-
-  const STATUS_LEFT_BORDER: Record<string, string> = {
-    pending:   'border-l-amber-400',
-    validated: 'border-l-emerald-400',
-    reserved:  'border-l-orange-400',
-    rejected:  'border-l-red-400',
+  // Couleurs de header par type de document (comme les cartes IEC)
+  const DOC_HEADER: Record<string, { bg: string; icon: React.ComponentType<any> }> = {
+    pv:                 { bg: 'bg-[#1B2E5A]',   icon: MdDescription        },
+    participation_list: { bg: 'bg-[#1565C0]',   icon: MdFormatListBulleted },
   };
 
+  // Statut → config icône + couleur
+  const STATUS_MD: Record<string, { icon: React.ComponentType<any>; color: string; label: string }> = {
+    pending:   { icon: MdPending,     color: 'text-amber-500',   label: 'En attente'  },
+    validated: { icon: MdVerified,    color: 'text-emerald-500', label: 'Validé'      },
+    reserved:  { icon: MdWarning,     color: 'text-orange-500',  label: 'Réserve'     },
+    rejected:  { icon: MdUnpublished, color: 'text-red-500',     label: 'Rejeté'      },
+  };
+
+  const STAT_ITEMS = [
+    { label: 'Tous',      count: docs.length,   icon: MdDescription,    bg: adminStatusFilter === 'all'       ? 'bg-[#1B2E5A] text-white border-[#1B2E5A]'        : 'bg-white text-gray-700 border-gray-200',       key: 'all'       },
+    { label: 'En attente',count: statPending,   icon: MdPending,        bg: adminStatusFilter === 'pending'   ? 'bg-amber-500 text-white border-amber-500'         : 'bg-white text-amber-600 border-amber-200',     key: 'pending'   },
+    { label: 'Validés',   count: statValidated, icon: MdVerified,       bg: adminStatusFilter === 'validated' ? 'bg-emerald-600 text-white border-emerald-600'     : 'bg-white text-emerald-600 border-emerald-200', key: 'validated' },
+    { label: 'Réserve',   count: statReserved,  icon: MdWarning,        bg: adminStatusFilter === 'reserved'  ? 'bg-orange-500 text-white border-orange-500'       : 'bg-white text-orange-500 border-orange-200',  key: 'reserved'  },
+    { label: 'Rejetés',   count: statRejected,  icon: MdUnpublished,    bg: adminStatusFilter === 'rejected'  ? 'bg-red-600 text-white border-red-600'             : 'bg-white text-red-500 border-red-200',         key: 'rejected'  },
+  ];
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
 
       {/* ── Stats bar ── */}
       {docs.length > 0 && (
         <div className="grid grid-cols-5 gap-2">
-          {STAT_ITEMS.map(s => (
-            <button
-              key={s.key}
-              onClick={() => setAdminStatusFilter(s.key)}
-              className={`flex flex-col items-center gap-0.5 py-2.5 px-2 rounded-xl border-2 transition-all text-center ${
-                adminStatusFilter === s.key
-                  ? `${s.color} ${s.border} shadow-sm scale-[1.03]`
-                  : 'bg-white border-gray-100 hover:border-gray-200 text-gray-600'
-              }`}
-            >
-              <span className="text-lg font-black leading-none">{s.count}</span>
-              <span className="text-[10px] font-medium whitespace-nowrap">{s.label}</span>
-            </button>
-          ))}
+          {STAT_ITEMS.map(s => {
+            const Icon = s.icon;
+            return (
+              <button key={s.key} onClick={() => setAdminStatusFilter(s.key)}
+                className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border-2 transition-all font-medium text-center shadow-sm hover:shadow ${s.bg}`}>
+                <Icon size={20} />
+                <span className="text-xl font-black leading-none">{s.count}</span>
+                <span className="text-[10px] font-semibold whitespace-nowrap opacity-80">{s.label}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {/* ── Barre de recherche + suppression masse ── */}
-      <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Rechercher par établissement, uploader, type…"
-            value={adminSearch}
-            onChange={e => setAdminSearch(e.target.value)}
-            className="w-full pl-9 pr-3 h-9 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all"
-          />
+      {/* ── Filtres : select établissement + suppression masse ── */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+
+        {/* Select filtre établissement */}
+        <div className="flex items-center gap-2 flex-1">
+          <MdBusiness size={20} className="text-[#1B2E5A] flex-shrink-0" />
+          <div className="relative flex-1">
+            <select
+              value={adminCenterFilter}
+              onChange={e => setAdminCenterFilter(e.target.value)}
+              className="w-full appearance-none h-9 pl-3 pr-8 rounded-xl border-2 border-gray-200 text-sm bg-white focus:outline-none focus:border-[#1B2E5A] transition-colors text-gray-700 cursor-pointer"
+            >
+              <option value="all">Tous les établissements ({docs.length})</option>
+              {centers.map(c => {
+                const cnt = docs.filter(d => d.center_id === c.id).length;
+                return <option key={c.id} value={c.id}>{c.name} ({cnt})</option>;
+              })}
+            </select>
+            <MdFilterList size={16} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
         </div>
 
+        {/* Suppression masse super-admin */}
         {canDelete && docs.length > 0 && (
           deleteAllConfirm ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-50 border border-red-200">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-50 border-2 border-red-200">
               <span className="text-xs text-red-700 font-medium whitespace-nowrap">
                 Supprimer tous les {deleteAllConfirm === 'pv' ? 'PV' : 'listes'} ?
               </span>
               <Button size="sm" disabled={deletingAll}
-                className="bg-red-600 hover:bg-red-700 text-white h-7 px-3 text-xs"
+                className="bg-red-600 hover:bg-red-700 text-white h-7 px-3 text-xs rounded-lg"
                 onClick={() => handleDeleteAllByType(deleteAllConfirm)}>
                 {deletingAll ? '…' : 'Confirmer'}
               </Button>
@@ -850,194 +853,160 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
               </Button>
             </div>
           ) : (
-            <div className="flex gap-1">
-              <Button size="sm" variant="outline"
-                className="border-red-200 text-red-500 hover:bg-red-50 h-9 px-3 text-xs"
-                onClick={() => setDeleteAllConfirm('pv')}
-                disabled={!docs.some(d => d.document_type === 'pv')}>
-                <Trash2 className="w-3 h-3 mr-1" /> PV
-              </Button>
-              <Button size="sm" variant="outline"
-                className="border-red-200 text-red-500 hover:bg-red-50 h-9 px-3 text-xs"
-                onClick={() => setDeleteAllConfirm('participation_list')}
-                disabled={!docs.some(d => d.document_type === 'participation_list')}>
-                <Trash2 className="w-3 h-3 mr-1" /> Listes
-              </Button>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteAllConfirm('pv')}
+                disabled={!docs.some(d => d.document_type === 'pv')}
+                className="inline-flex items-center gap-1.5 px-3 h-9 rounded-xl border-2 border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors disabled:opacity-40">
+                <MdDeleteOutline size={16} /> PV
+              </button>
+              <button onClick={() => setDeleteAllConfirm('participation_list')}
+                disabled={!docs.some(d => d.document_type === 'participation_list')}
+                className="inline-flex items-center gap-1.5 px-3 h-9 rounded-xl border-2 border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors disabled:opacity-40">
+                <MdDeleteOutline size={16} /> Listes
+              </button>
             </div>
           )
         )}
       </div>
 
       {/* ── Empty state ── */}
-      {docsByCenter.length === 0 && (
+      {filteredDocs.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center">
-            <FileText className="w-7 h-7 text-gray-300" />
+          <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center">
+            <MdDescription size={32} className="text-gray-300" />
           </div>
           <p className="text-sm font-medium text-gray-500">
-            {adminSearch || adminStatusFilter !== 'all' ? 'Aucun document ne correspond à la recherche.' : 'Aucun document déposé pour le moment.'}
+            {adminCenterFilter !== 'all' || adminStatusFilter !== 'all'
+              ? 'Aucun document ne correspond aux filtres sélectionnés.'
+              : 'Aucun document déposé pour le moment.'}
           </p>
-          {(adminSearch || adminStatusFilter !== 'all') && (
-            <button onClick={() => { setAdminSearch(''); setAdminStatusFilter('all'); }}
-              className="text-xs text-teal-600 hover:underline">
+          {(adminCenterFilter !== 'all' || adminStatusFilter !== 'all') && (
+            <button onClick={() => { setAdminCenterFilter('all'); setAdminStatusFilter('all'); }}
+              className="text-xs text-[#1B2E5A] hover:underline font-medium">
               Réinitialiser les filtres
             </button>
           )}
         </div>
       )}
 
-      {/* ── Cartes par établissement ── */}
-      {docsByCenter.map(({ center, docs: centerDocs }) => {
-        const isExpanded = expanded.has(center.id);
-        const toggle = () => setExpanded(prev => {
-          const next = new Set(prev);
-          next.has(center.id) ? next.delete(center.id) : next.add(center.id);
-          return next;
-        });
-        const vCount = centerDocs.filter(d => d.status === 'validated').length;
-        const pCount = centerDocs.filter(d => d.status === 'pending').length;
+      {/* ── Grille de cartes (style IEC) ── */}
+      {filteredDocs.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredDocs.map(doc => {
+            const hdr          = DOC_HEADER[doc.document_type] ?? DOC_HEADER.pv;
+            const HeaderIcon   = hdr.icon;
+            const statusCfg    = STATUS_MD[doc.status] ?? STATUS_MD.pending;
+            const StatusIcon   = statusCfg.icon;
+            const isReviewing  = review?.docId === doc.id;
+            const commentReq   = isReviewing && (review?.comment ?? '').trim().length === 0;
+            const collegeLabel = doc.college_type ? (COLLEGE_LABELS[doc.college_type] ?? doc.college_type) : null;
 
-        return (
-          <div key={center.id} className="rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            {/* En-tête cliquable */}
-            <button type="button" onClick={toggle}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-white hover:bg-gray-50 transition-colors">
-              <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center flex-shrink-0">
-                <Building2 className="w-4 h-4 text-teal-600" />
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <p className="font-semibold text-sm text-gray-900 truncate">{center.name}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[11px] text-gray-400">{centerDocs.length} doc{centerDocs.length > 1 ? 's' : ''}</span>
-                  {vCount > 0 && <span className="text-[11px] text-emerald-600 font-medium">{vCount} validé{vCount > 1 ? 's' : ''}</span>}
-                  {pCount > 0 && <span className="text-[11px] text-amber-600 font-medium">{pCount} en attente</span>}
+            return (
+              <div key={doc.id}
+                className="rounded-xl overflow-hidden border border-gray-200 shadow-sm hover:shadow-md transition-shadow flex flex-col">
+
+                {/* En-tête colorée — compacte */}
+                <div className={`${hdr.bg} px-3 py-2.5`}>
+                  <p className="font-bold text-white text-xs leading-tight tracking-wide uppercase">
+                    {DOC_TYPE_LABEL[doc.document_type]}
+                  </p>
+                  <p className="text-white/65 text-[11px] italic mt-0.5 leading-snug line-clamp-1">
+                    {doc.center_name ?? '—'}
+                  </p>
                 </div>
-              </div>
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
-                <ChevronDown className="w-4 h-4 text-gray-400" />
-              </div>
-            </button>
 
-            {/* Liste des documents */}
-            {isExpanded && (
-              <div className="border-t border-gray-100 divide-y divide-gray-50">
-                {centerDocs.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic px-4 py-3">Aucun document pour cet établissement.</p>
-                ) : centerDocs.map(doc => {
-                  const isReviewing    = review?.docId === doc.id;
-                  const commentRequired= isReviewing && (review?.comment ?? '').trim().length === 0;
-                  const leftBorder     = STATUS_LEFT_BORDER[doc.status] ?? 'border-l-gray-200';
+                {/* Corps compact */}
+                <div className="bg-white flex-1 flex flex-col px-3 py-2 gap-2">
 
-                  return (
-                    <div key={doc.id} className={`border-l-4 ${leftBorder} bg-white hover:bg-gray-50/50 transition-colors`}>
-                      <div className="flex flex-wrap items-center gap-2 px-4 py-3 justify-between">
-                        {/* Infos document */}
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0">
-                            <FileIcon name={doc.file_name} />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-semibold text-gray-800">
-                                {DOC_TYPE_LABEL[doc.document_type]}
-                              </span>
-                              {doc.college_type && (
-                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-100">
-                                  {doc.college_type}
-                                </span>
-                              )}
-                              <StatusBadge status={doc.status} />
-                            </div>
-                            <p className="text-xs text-gray-400 mt-0.5 truncate">
-                              {doc.uploader_name} ·{' '}
-                              {new Date(doc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                              {doc.file_name && <> · <span className="italic">{doc.file_name}</span></>}
-                            </p>
-                            {!isReviewing && doc.review_comment && (
-                              <p className="text-[11px] text-gray-500 italic mt-0.5">
-                                💬 "{doc.review_comment}"
-                              </p>
-                            )}
-                          </div>
-                        </div>
+                  {/* Collège + statut sur une ligne */}
+                  <div className="flex items-center justify-between gap-1">
+                    {collegeLabel
+                      ? <span className="text-[10px] font-semibold text-[#1B2E5A] bg-blue-50 px-1.5 py-0.5 rounded">{collegeLabel}</span>
+                      : <span />}
+                    <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${statusCfg.color}`}>
+                      <StatusIcon size={12} /> {statusCfg.label}
+                    </span>
+                  </div>
 
-                        {/* Actions */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <button onClick={() => openPreview(doc)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
-                            <Eye className="w-3.5 h-3.5" /> Voir
-                          </button>
-                          {canDownload && (
-                            <button onClick={() => handleDownload(doc)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors">
-                              <Download className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          {canReview && (
-                            <button
-                              onClick={() => setReview(isReviewing ? null : { docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
-                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                                isReviewing
-                                  ? 'bg-gray-100 text-gray-600'
-                                  : 'bg-[#1B2E5A] text-white hover:bg-[#142347]'
-                              }`}>
-                              <FileCheck className="w-3.5 h-3.5" />
-                              {isReviewing ? 'Annuler' : 'Valider'}
-                            </button>
-                          )}
-                          {(canDelete || (canDeleteWhenUpcoming && (user?.role === 'admin' || doc.uploaded_by === user?.id))) && (
-                            <button
-                              disabled={deleting === doc.id}
-                              onClick={() => handleDeleteDoc(doc.id)}
-                              className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                  {/* Une seule ligne de métadonnées */}
+                  <p className="text-[10px] text-gray-400 truncate">
+                    <span className="font-medium text-gray-600">{doc.uploader_name ?? '—'}</span>
+                    {' · '}{new Date(doc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                  </p>
 
-                      {/* Formulaire validation inline */}
-                      {isReviewing && canReview && (
-                        <div className="px-4 pb-3 pt-0 space-y-2 bg-gray-50 border-t border-gray-100">
-                          <Textarea
-                            rows={2}
-                            placeholder="Commentaire (obligatoire pour Réserve et Rejet)…"
-                            value={review?.comment ?? ''}
-                            onChange={e => setReview(prev => prev ? { ...prev, comment: e.target.value } : null)}
-                            className="text-sm resize-none bg-white border-gray-200 focus:border-teal-400 rounded-xl"
-                          />
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Button size="sm" disabled={review?.submitting}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-4 text-xs rounded-lg"
-                              onClick={() => submitReview(doc.id, 'validated')}>
-                              <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Valider
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={review?.submitting || commentRequired}
-                              className="border-orange-300 text-orange-600 hover:bg-orange-50 h-8 px-4 text-xs rounded-lg disabled:opacity-50"
-                              onClick={() => submitReview(doc.id, 'reserved')}>
-                              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" /> Réserve
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={review?.submitting || commentRequired}
-                              className="border-red-300 text-red-600 hover:bg-red-50 h-8 px-4 text-xs rounded-lg disabled:opacity-50"
-                              onClick={() => submitReview(doc.id, 'rejected')}>
-                              <XCircle className="w-3.5 h-3.5 mr-1.5" /> Rejeter
-                            </Button>
-                            {commentRequired && (
-                              <p className="text-[11px] text-red-400 flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3" /> Commentaire requis
-                              </p>
-                            )}
-                          </div>
-                        </div>
+                  {doc.review_comment && !isReviewing && (
+                    <p className="text-[10px] text-gray-500 italic bg-gray-50 rounded px-2 py-1 line-clamp-1" title={doc.review_comment}>
+                      "{doc.review_comment}"
+                    </p>
+                  )}
+
+                  {/* Séparateur */}
+                  <div className="border-t border-gray-100" />
+
+                  {/* Actions */}
+                  {!isReviewing ? (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openPreview(doc)} title="Voir"
+                        className="p-1.5 rounded-lg text-[#1B2E5A] hover:bg-blue-50 transition-colors">
+                        <MdVisibility size={16} />
+                      </button>
+                      {canDownload && (
+                        <button onClick={() => handleDownload(doc)} title="Télécharger"
+                          className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
+                          <MdDownload size={16} />
+                        </button>
+                      )}
+                      {canReview && (
+                        <button onClick={() => setReview({ docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-[#1B2E5A] hover:bg-[#142347] transition-colors ml-auto">
+                          <MdGavel size={13} /> Valider
+                        </button>
+                      )}
+                      {(canDelete || (canDeleteWhenUpcoming && (user?.role === 'admin' || doc.uploaded_by === user?.id))) && (
+                        <button disabled={deleting === doc.id} onClick={() => handleDeleteDoc(doc.id)} title="Supprimer"
+                          className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40">
+                          <MdDeleteOutline size={16} />
+                        </button>
                       )}
                     </div>
-                  );
-                })}
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Textarea rows={2} placeholder="Commentaire (requis pour Réserve/Rejet)…"
+                        value={review?.comment ?? ''}
+                        onChange={e => setReview(prev => prev ? { ...prev, comment: e.target.value } : null)}
+                        className="text-xs resize-none rounded-lg border-gray-200 focus:border-[#1B2E5A]" />
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <button disabled={review?.submitting}
+                          onClick={() => submitReview(doc.id, 'validated')}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50">
+                          <MdCheckCircle size={12} /> Valider
+                        </button>
+                        <button disabled={review?.submitting || commentReq}
+                          onClick={() => submitReview(doc.id, 'reserved')}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 hover:bg-orange-100 disabled:opacity-40">
+                          <MdWarning size={12} /> Réserve
+                        </button>
+                        <button disabled={review?.submitting || commentReq}
+                          onClick={() => submitReview(doc.id, 'rejected')}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 disabled:opacity-40">
+                          <MdCancel size={12} /> Rejeter
+                        </button>
+                        <button onClick={() => setReview(null)}
+                          className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 ml-auto">
+                          <MdAutorenew size={14} />
+                        </button>
+                      </div>
+                      {commentReq && (
+                        <p className="text-[10px] text-red-500">Commentaire obligatoire</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
 
       {previewModal}
     </div>
