@@ -156,6 +156,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const [nonValidatedByCenter, setNonValidatedByCenter] = useState<any[]>([]);
   const [nonValidatedByBureau, setNonValidatedByBureau] = useState<any[]>([]);
   const [nonValidatedCount, setNonValidatedCount] = useState<number>(0);
+  const [quorumFailedByCenter, setQuorumFailedByCenter] = useState<any[]>([]);
+  const [quorumFailedByBureau, setQuorumFailedByBureau] = useState<any[]>([]);
   const [electionType, setElectionType] = useState<string | undefined>();
   const [rawResultsData, setRawResultsData] = useState<{
     crRows: any[];
@@ -282,13 +284,23 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         const allowedBureauIds = new Set(allBureaux.map((b: any) => b.id));
         const filteredValidatedPvs = pvsValidated.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
         const filteredEnteredPvs = pvsEntered.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
-        const filteredPvsAll = [...filteredValidatedPvs, ...filteredEnteredPvs];
+
+        // PVs validés dont le quorum est atteint → seuls ceux-ci entrent dans les résultats
+        const pvQuorumFailed = new Set<string>(
+          filteredValidatedPvs
+            .filter((pv: any) => (pv.total_registered || 0) > 0 && (pv.votes_expressed || 0) < (pv.total_registered || 0) / 2)
+            .map((pv: any) => pv.id)
+        );
+        const filteredValidatedPvsForResults = filteredValidatedPvs.filter((pv: any) => !pvQuorumFailed.has(pv.id));
+
+        const filteredPvsAll = [...filteredValidatedPvs, ...filteredEnteredPvs]; // pour l'affichage
+        const filteredPvsForResults = [...filteredValidatedPvsForResults, ...filteredEnteredPvs]; // pour les calculs
         setNonValidatedCount(filteredEnteredPvs.length);
 
         
 
-        // 2) Récupérer résultats par candidat pour ces PV
-        const pvIds = Array.from(new Set((filteredPvsAll || []).map((p: any) => p.id).filter(Boolean)));
+        // 2) Récupérer résultats par candidat pour ces PV (hors quorum échoué)
+        const pvIds = Array.from(new Set((filteredPvsForResults || []).map((p: any) => p.id).filter(Boolean)));
         let crRows: any[] = [];
         if (pvIds.length > 0) {
           const { data: cr, error: crErr } = await supabase
@@ -302,7 +314,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         // On n'utilise pas la vue agrégée ici pour respecter le filtre election_centers
         const electionCandidatesList = electionCandidates || [];
 
-        // 4) Récupérer libellés bureaux/centres pour les PV valides/saisis
+        // 4) Récupérer libellés bureaux/centres pour les PV valides/saisis (affichage)
         const bureauIds = Array.from(new Set(filteredPvsAll.map((pv: any) => pv.bureau_id).filter(Boolean)));
         const bureaux = allBureaux.filter((b: any) => bureauIds.includes(b.id));
 
@@ -343,8 +355,10 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         const availableCenters = centers.map((c: any) => ({ id: String(c.id), name: c.name }));
         const availableColleges = [...new Set(filteredPvsAll.map((pv: any) => pv.college_type).filter(Boolean))] as string[];
 
+        // N'additionner les voix QUE pour les PV avec quorum atteint
         const enteredCandidateIds = new Set<string>();
         crRows.forEach((r: any) => {
+          if (pvQuorumFailed.has(r.pv_id)) return; // quorum non atteint → voix exclues
           const cid = r.candidates?.id || r.candidate_id;
           if (!votesByCandidate[cid]) return;
           votesByCandidate[cid].votes += r.votes || 0;
@@ -390,8 +404,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           setLogosByParty({});
         }
 
-        // Calculate total inscrits based on PVs: prefer pv.total_registered, then bureau.registered_voters, then center.total_voters
-        const totalInscritsDesBureauxAvecPV = (filteredPvsAll || []).reduce((sum: number, pv: any) => {
+        // Totaux calculés uniquement sur les PV avec quorum atteint
+        const totalInscritsDesBureauxAvecPV = (filteredPvsForResults || []).reduce((sum: number, pv: any) => {
           const bureau = bureauMap.get(pv.bureau_id);
           const centerTotal = bureau ? Number(centerMap.get(bureau.center_id)?.total_voters) || 0 : 0;
           const regFromPV = Number(pv.total_registered) || 0;
@@ -400,7 +414,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           return sum + chosen;
         }, 0);
 
-        (filteredPvsAll || []).forEach((pv: any) => {
+        (filteredPvsForResults || []).forEach((pv: any) => {
           totalVotants += Number(pv.total_voters) || 0;
           bulletinsNuls += Number(pv.null_votes) || 0;
           totalExprimesPV += Number(pv.votes_expressed) || 0;
@@ -483,8 +497,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         try {
           
           
-          // Construire les données par bureau (UNIQUEMENT validés + publiés - lignes vertes)
-          const bureauxBreakdownData = (filteredValidatedPvs || []).map((pv: any) => {
+          // Construire les données par bureau (validés avec quorum atteint uniquement - lignes normales)
+          const bureauxBreakdownData = (filteredValidatedPvsForResults || []).map((pv: any) => {
             const b = bureauMap.get(pv.bureau_id);
             const c = b ? centerMap.get(b.center_id) : undefined;
             return {
@@ -553,7 +567,41 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             };
           });
           setNonValidatedByBureau(enteredByBureau);
-          
+
+          // Construire les lignes pour les PV validés dont le quorum n'est pas atteint - affichés en rouge
+          const qfByBureau = filteredValidatedPvs
+            .filter((pv: any) => (pv.total_registered || 0) > 0 && (pv.votes_expressed || 0) < (pv.total_registered || 0) / 2)
+            .map((pv: any) => {
+              const b = bureauMap.get(pv.bureau_id);
+              const c = b ? centerMap.get(b.center_id) : undefined;
+              return {
+                center_id: b?.center_id,
+                center_name: c?.name || 'Centre',
+                bureau_id: pv.bureau_id,
+                bureau_name: b?.name || 'Bureau',
+                total_registered: Number(pv.total_registered) || 0,
+                total_voters: Number(pv.total_voters) || 0,
+                total_null_votes: Number(pv.null_votes) || 0,
+                total_expressed_votes: Number(pv.votes_expressed) || 0,
+              };
+            });
+          setQuorumFailedByBureau(qfByBureau);
+
+          // Agréger par centre pour les PV sans quorum
+          const centerAggMapQF = new Map();
+          qfByBureau.forEach((b: any) => {
+            const key = String(b.center_id || '');
+            const prev = centerAggMapQF.get(key) || {
+              center_id: b.center_id, center_name: b.center_name,
+              total_registered: 0, total_voters: 0, total_null_votes: 0, total_expressed_votes: 0
+            };
+            prev.total_voters += b.total_voters;
+            prev.total_null_votes += b.total_null_votes;
+            prev.total_expressed_votes += b.total_expressed_votes;
+            centerAggMapQF.set(key, prev);
+          });
+          setQuorumFailedByCenter(Array.from(centerAggMapQF.values()));
+
           // Agréger par centre pour les PV saisis
           const centerAggMapEntered = new Map();
           enteredByBureau.forEach((b: any) => {
@@ -605,6 +653,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           setCollegeBreakdown([]);
           setNonValidatedByCenter([]);
           setNonValidatedByBureau([]);
+          setQuorumFailedByCenter([]);
+          setQuorumFailedByBureau([]);
         }
       } catch (e) {
         console.error('Erreur chargement résultats finaux:', e);
@@ -796,14 +846,19 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
 
     return (
     <div className="mt-8 space-y-8">
-      {(filteredNVCenter.length > 0 || filteredCenterBreak.length > 0) && (
+      {(filteredNVCenter.length > 0 || quorumFailedByCenter.length > 0 || filteredCenterBreak.length > 0) && (
         <Card className="gov-card">
           <CardHeader>
-            <CardTitle className="text-gov-dark flex items-center justify-between">
+            <CardTitle className="text-gov-dark flex items-center justify-between flex-wrap gap-2">
               <span>Par Centre de Vote</span>
-              {filteredNVCenter.length > 0 && (
-                <Badge className="bg-yellow-100 text-yellow-800">{filteredNVCenter.length} centre(s) avec PV non validés</Badge>
-              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {quorumFailedByCenter.length > 0 && (
+                  <Badge className="bg-red-100 text-red-800">{quorumFailedByCenter.length} centre(s) avec quorum non atteint</Badge>
+                )}
+                {filteredNVCenter.length > 0 && (
+                  <Badge className="bg-yellow-100 text-yellow-800">{filteredNVCenter.length} centre(s) avec PV non validés</Badge>
+                )}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -818,6 +873,17 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {quorumFailedByCenter.map((row: any, idx: number) => (
+                    <TableRow key={`qf-center-${idx}`} className="bg-red-50">
+                      <TableCell className="font-medium text-red-800">
+                        {row.center_name}
+                        <span className="ml-2 text-[10px] font-normal text-red-500 italic">quorum non atteint</span>
+                      </TableCell>
+                      <TableCell className="text-right text-red-700">{Number(row.total_voters || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-red-700">{Number(row.total_null_votes || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-red-700">{Number(row.total_expressed_votes || 0).toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
                   {filteredNVCenter.map((row: any, idx: number) => (
                     <TableRow key={`nv-center-${idx}`} className="bg-yellow-50">
                       <TableCell className="font-medium text-yellow-900">{row.center_name}</TableCell>

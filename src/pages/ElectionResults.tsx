@@ -826,22 +826,36 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       console.log('📊 [ElectionResults] Résultats candidats chargés:', candidateResultsData);
 
       // Construire les données des bureaux
-      const filteredBureaux = (pvsData || []).map((pv: any) => ({
-        pv_id: pv.id,
-        college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
-        bureau_id: pv.bureau_id,
-        bureau_name: pv.voting_bureaux?.name || '',
-        center_id: pv.voting_bureaux?.center_id || '',
-        total_registered: Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0,
-        total_voters: Number(pv.total_voters) || 0,
-        total_expressed_votes: Number(pv.votes_expressed) || 0,
-        total_null_votes: Number(pv.null_votes) || 0,
-        participation_pct: Number(pv.total_registered) > 0 ? (Number(pv.total_voters) / Number(pv.total_registered)) * 100 : 0
-      }));
+      const filteredBureaux = (pvsData || []).map((pv: any) => {
+        const reg = Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0;
+        const exp = Number(pv.votes_expressed) || 0;
+        const quorum_failed = reg > 0 && exp < reg / 2;
+        return {
+          pv_id: pv.id,
+          college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
+          bureau_id: pv.bureau_id,
+          bureau_name: pv.voting_bureaux?.name || '',
+          center_id: pv.voting_bureaux?.center_id || '',
+          total_registered: reg,
+          total_voters: Number(pv.total_voters) || 0,
+          total_expressed_votes: exp,
+          total_null_votes: Number(pv.null_votes) || 0,
+          participation_pct: reg > 0 ? (Number(pv.total_voters) / reg) * 100 : 0,
+          quorum_failed,
+        };
+      });
+
+      // IDs des PV dont le quorum est atteint → seuls ceux-ci alimentent les résultats globaux
+      const quorumOkPvIds = new Set<string>(
+        filteredBureaux.filter((b: any) => !b.quorum_failed).map((b: any) => b.pv_id)
+      );
 
       // Construire les données des centres (agrégées par center_id)
+      // Bureaux avec quorum atteint → utilisés pour tous les calculs officiels
+      const filteredBureauxForResults = filteredBureaux.filter((b: any) => !b.quorum_failed);
+
       const centersMap = new Map();
-      filteredBureaux.forEach((b: any) => {
+      filteredBureauxForResults.forEach((b: any) => {
         if (!centersMap.has(b.center_id)) {
           centersMap.set(b.center_id, {
             center_id: b.center_id,
@@ -860,20 +874,16 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         center.total_null_votes += b.total_null_votes;
       });
 
-      // Calculer les pourcentages de participation APRÈS avoir cumulé tous les chiffres
       centersMap.forEach((center: any) => {
         center.participation_pct = center.total_registered > 0 ? (center.total_voters / center.total_registered) * 100 : 0;
       });
 
       const filteredCenters = Array.from(centersMap.values());
 
-      console.log('📊 [ElectionResults] Bureaux construits:', filteredBureaux.length);
-      console.log('📊 [ElectionResults] Centres construits:', filteredCenters.length);
-
-      // Calculer les totaux globaux (il faut les calculer avant les sièges)
-      const votersSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
-      const expressedSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
-      const registeredInBureauxWithResults = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
+      // Totaux globaux sur bureaux avec quorum atteint uniquement
+      const votersSum = filteredBureauxForResults.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
+      const expressedSum = filteredBureauxForResults.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
+      const registeredInBureauxWithResults = filteredBureauxForResults.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
       
       const totalVotesCast = expressedSum; // bulletins exprimés
       let totalRegistered = registeredInBureauxWithResults;
@@ -895,6 +905,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number; colleges: Set<string>; seats: number; remainder: number }>();
       
       (candidateResultsData || []).forEach((cr: any) => {
+        if (!quorumOkPvIds.has(cr.pv_id)) return; // PV sans quorum → exclu des totaux
         let groupKey = cr.candidate_id;
         let candidateName = cr.candidates?.name || '';
         let partyName = cr.candidates?.party || '';
@@ -1053,9 +1064,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           return { seats: empty };
         };
 
-        // 4) Regrouper les résultats des candidats par PV
+        // 4) Regrouper les résultats des candidats par PV (quorum OK uniquement)
         const pvCandidateResults = new Map<string, any[]>();
         (candidateResultsData || []).forEach((cr: any) => {
+          if (!quorumOkPvIds.has(cr.pv_id)) return; // PV sans quorum → exclu
           if (!pvCandidateResults.has(cr.pv_id)) pvCandidateResults.set(cr.pv_id, []);
           pvCandidateResults.get(cr.pv_id)!.push(cr);
         });
@@ -1202,6 +1214,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       if (isProfessional) {
         const votesByCollegeSyndicat: Record<string, Record<string, number>> = {};
         (candidateResultsData || []).forEach((cr: any) => {
+          if (!quorumOkPvIds.has(cr.pv_id)) return; // PV sans quorum → exclu
           const parts = String(cr.candidates?.party || '').split(' — ');
           const syndicat = parts[0]?.trim() || 'Autre';
           const college = parts[1]?.trim() || 'Général';
@@ -3330,13 +3343,19 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   const numB = parseInt(b.bureau_name?.match(/\d+/)?.[0] || '0');
                                   return numA - numB;
                                 }).map((b, i2) => (
-                                  <tr key={i2} className="hover:bg-blue-50 transition-colors duration-200">
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 font-medium text-gray-800 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">{b.bureau_name}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{typeof b.total_registered === 'number' ? b.total_registered.toLocaleString('fr-FR') : (b.total_registered ?? '-')}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{typeof b.total_voters === 'number' ? b.total_voters.toLocaleString('fr-FR') : (b.total_voters ?? '-')}</td>
-                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm">{typeof b.total_expressed_votes === 'number' ? b.total_expressed_votes.toLocaleString('fr-FR') : (b.total_expressed_votes ?? '-')}</td>
+                                  <tr key={i2} className={`transition-colors duration-200 ${(b as any).quorum_failed ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-blue-50'}`}>
+                                    <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                                      <span className={`font-medium ${(b as any).quorum_failed ? 'text-red-700' : 'text-gray-800'}`}>{b.bureau_name}</span>
+                                      {(b as any).quorum_failed && (
+                                        <span className="ml-1.5 text-[9px] text-red-500 font-normal italic">quorum non atteint</span>
+                                      )}
+                                    </td>
+                                    <td className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-[10px] sm:text-xs lg:text-sm ${(b as any).quorum_failed ? 'text-red-600' : 'text-gray-700'}`}>{typeof b.total_registered === 'number' ? b.total_registered.toLocaleString('fr-FR') : (b.total_registered ?? '-')}</td>
+                                    <td className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-[10px] sm:text-xs lg:text-sm ${(b as any).quorum_failed ? 'text-red-600' : 'text-gray-700'}`}>{typeof b.total_voters === 'number' ? b.total_voters.toLocaleString('fr-FR') : (b.total_voters ?? '-')}</td>
+                                    <td className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-[10px] sm:text-xs lg:text-sm ${(b as any).quorum_failed ? 'text-red-600' : 'text-gray-700'}`}>{typeof b.total_expressed_votes === 'number' ? b.total_expressed_votes.toLocaleString('fr-FR') : (b.total_expressed_votes ?? '-')}</td>
                                     <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
-                                      <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
+                                      <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${(b as any).quorum_failed ? 'bg-red-100 text-red-700' :
+                                        typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
                                         typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
                                           'bg-green-100 text-green-800'
                                         }`}>
