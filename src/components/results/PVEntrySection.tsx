@@ -89,6 +89,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   const [submittedVotersMap, setSubmittedVotersMap] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showQuorumWarning, setShowQuorumWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Sélection d'un PV existant
   const [showExistingPvPicker, setShowExistingPvPicker] = useState(false);
@@ -624,7 +625,24 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     }
   };
 
+  const handleSubmitPVConfirmed = async () => {
+    setShowQuorumWarning(false);
+    await doSubmitPV();
+  };
+
   const handleSubmitPV = async () => {
+    if (!canSubmit() || !selectedElection) return;
+    const inscrits = parseInt(formData.inscrits) || 0;
+    const exprimes = parseInt(formData.suffragesExprimes) || 0;
+    const quorum = inscrits / 2;
+    if (inscrits > 0 && exprimes < quorum) {
+      setShowQuorumWarning(true);
+      return;
+    }
+    await doSubmitPV();
+  };
+
+  const doSubmitPV = async () => {
     if (!canSubmit() || !selectedElection) return;
     try {
       setSubmitting(true);
@@ -1582,7 +1600,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   
                   <div>
                     <h4 className="font-medium text-gray-900 mb-2">Participation</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm mb-3">
                       <div>
                         <span className="text-gray-600">Votants:</span>
                         <span className="font-semibold ml-2">{formData.votants}</span>
@@ -1596,6 +1614,27 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         <span className="font-semibold ml-2">{formData.suffragesExprimes}</span>
                       </div>
                     </div>
+                    {/* Quorum */}
+                    {(() => {
+                      const inscrits = parseInt(formData.inscrits) || 0;
+                      const exprimes = parseInt(formData.suffragesExprimes) || 0;
+                      if (inscrits === 0) return null;
+                      const quorum = inscrits / 2;
+                      const atteint = exprimes >= quorum;
+                      return (
+                        <div className={`flex items-center justify-between rounded-lg px-4 py-2.5 border ${atteint ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+                          <div className="flex items-center gap-2 text-sm font-medium">
+                            <Calculator className={`w-4 h-4 ${atteint ? 'text-green-600' : 'text-red-600'}`} />
+                            <span className={atteint ? 'text-green-800' : 'text-red-800'}>
+                              Quorum ({inscrits} ÷ 2 = <strong>{quorum % 1 === 0 ? quorum : quorum.toFixed(1)}</strong>)
+                            </span>
+                          </div>
+                          <span className={`text-sm font-bold ${atteint ? 'text-green-700' : 'text-red-700'}`}>
+                            {atteint ? '✓ Atteint' : '✗ Non atteint'}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   
                   <div>
@@ -1695,7 +1734,46 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     }
   };
 
+  const quorumInscrits = parseInt(formData.inscrits) || 0;
+  const quorumExprimes = parseInt(formData.suffragesExprimes) || 0;
+  const quorumSeuil = quorumInscrits / 2;
+
   return (
+    <>
+    {/* Modal confirmation quorum non atteint */}
+    <Dialog open={showQuorumWarning} onOpenChange={setShowQuorumWarning}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-red-700">
+            <AlertCircle className="w-5 h-5" />
+            Quorum non atteint
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800 space-y-1">
+            <p><strong>Quorum requis :</strong> {quorumSeuil % 1 === 0 ? quorumSeuil : quorumSeuil.toFixed(1)} suffrages exprimés</p>
+            <p><strong>Suffrages exprimés :</strong> {quorumExprimes}</p>
+          </div>
+          <p className="text-sm text-gray-700">
+            Ce PV <strong>ne sera pas pris en compte</strong> dans les résultats de l'élection faute de quorum.
+            Voulez-vous quand même le soumettre ?
+          </p>
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="outline" onClick={() => setShowQuorumWarning(false)}>
+              Annuler
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleSubmitPVConfirmed}
+              disabled={submitting}
+            >
+              {submitting ? 'Soumission...' : 'Soumettre quand même'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     <div className="space-y-6">
       {/* Alerte de restauration de brouillon */}
       {hasDraft && (
@@ -1852,6 +1930,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         </CardContent>
       </Card>
     </div>
+    </>
   );
 };
 

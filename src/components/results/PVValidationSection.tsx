@@ -892,19 +892,24 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {filteredPVs.map((pv) => (
-                <div 
-                  key={pv.id} 
+              {filteredPVs.map((pv) => {
+                const quorumSeuil = (pv.total_registered || 0) / 2;
+                const quorumAtteint = pv.total_registered
+                  ? (pv.votes_expressed || 0) >= quorumSeuil
+                  : true;
+                return (
+                <div
+                  key={pv.id}
                   className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                    selectedPV === pv.id 
-                      ? 'border-blue-500 bg-blue-50' 
-                      : 'border-gray-200 hover:border-gray-300'
+                    selectedPV === pv.id
+                      ? quorumAtteint ? 'border-blue-500 bg-blue-50' : 'border-red-500 bg-red-50'
+                      : quorumAtteint ? 'border-gray-200 hover:border-gray-300' : 'border-red-300 bg-red-50 hover:border-red-400'
                   }`}
                   onClick={() => { setSelectedPV(pv.id); setDetailOpen(true); }}
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2 flex-wrap gap-1">
-                      <span className="font-medium text-gray-900">{pv.bureauLabel}</span>
+                      <span className={`font-medium ${quorumAtteint ? 'text-gray-900' : 'text-red-800'}`}>{pv.bureauLabel}</span>
                       {pv.college_type && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
                           pv.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
@@ -916,6 +921,11 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           {pv.college_type === 'cadres' ? 'Cadres' : pv.college_type === 'employes' ? 'Maîtrise' : pv.college_type === 'ouvriers' ? 'Exécution' : pv.college_type === 'general' ? 'Encadrement' : 'Général'}
                         </span>
                       )}
+                      {!quorumAtteint && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-300">
+                          Quorum non atteint
+                        </span>
+                      )}
                     </div>
                     {getPriorityBadge(pv.status)}
                   </div>
@@ -925,19 +935,23 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       <span>{pv.timestamp}</span>
                     </div>
                   </div>
-                  
+
                   {pv.status === 'validated' && (
                     <div className="text-xs text-green-700 mt-1">
                       Validé par {pv.validated_by} le {pv.validated_at_str}
                     </div>
                   )}
-                  
-                  <div className="mt-2 flex justify-between text-xs text-gray-500">
+
+                  <div className={`mt-2 flex justify-between text-xs ${quorumAtteint ? 'text-gray-500' : 'text-red-600'}`}>
                     <span>Votants: {pv.total_voters}</span>
                     <span>Exprimés: {pv.votes_expressed}</span>
+                    {!quorumAtteint && pv.total_registered > 0 && (
+                      <span className="font-medium">Quorum: {quorumSeuil % 1 === 0 ? quorumSeuil : quorumSeuil.toFixed(1)}</span>
+                    )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
