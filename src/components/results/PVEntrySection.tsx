@@ -490,7 +490,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     });
   };
 
-  // Ouvre le picker de PV existants pour le centre sélectionné
+  // Ouvre le picker de PV existants pour le centre + bureau + collège sélectionnés
   const handleOpenExistingPvPicker = async () => {
     if (!formData.centre) {
       toast.warning('Veuillez d\'abord sélectionner un établissement.');
@@ -499,26 +499,69 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     setLoadingExistingPvs(true);
     setShowExistingPvPicker(true);
     try {
-      // Récupérer les PV validés/publiés avec un document, pour les bureaux de ce centre
+      // Collège du bureau sélectionné (pour filtrer les establishment_documents)
+      const selectedBureauObj = votingBureaux.find((b: any) => String(b.id) === String(formData.bureau));
+      const bureauCollegeType: string | null =
+        selectedBureauObj?.college_type || selectedBureauObj?.college || null;
+
+      const results: { id: string; bureau_name: string; pv_photo_url: string }[] = [];
+
+      // ── Source 1 : procès_verbaux (PVs déjà saisis avec photo) ─────────────
       const { data: pvRows } = await supabase
         .from('procès_verbaux')
-        .select('id, pv_photo_url, bureau_id, voting_bureaux!bureau_id(id, name, center_id)')
+        .select('id, pv_photo_url, bureau_id, college_type, voting_bureaux!bureau_id(id, name, center_id)')
         .eq('election_id', selectedElection)
         .in('status', ['validated', 'validé', 'published'])
         .not('pv_photo_url', 'is', null);
 
-      const centerPvs = (pvRows || []).filter((pv: any) =>
-        String((pv as any).voting_bureaux?.center_id) === String(formData.centre) &&
-        pv.pv_photo_url
-      );
+      (pvRows || [])
+        .filter((pv: any) =>
+          String((pv as any).voting_bureaux?.center_id) === String(formData.centre) &&
+          pv.pv_photo_url
+        )
+        .forEach((pv: any) => {
+          results.push({
+            id:          `pv_${pv.id}`,
+            bureau_name: (pv as any).voting_bureaux?.name || 'Bureau',
+            pv_photo_url: pv.pv_photo_url as string,
+          });
+        });
 
-      setExistingValidatedPvs(
-        centerPvs.map((pv: any) => ({
-          id: String(pv.id),
-          bureau_name: (pv as any).voting_bureaux?.name || 'Bureau',
-          pv_photo_url: pv.pv_photo_url as string,
-        }))
-      );
+      // ── Source 2 : establishment_documents (PV déposés par le président) ────
+      // Filtres : élection + centre + type PV + statut validé/réservé
+      // + collège correspondant au bureau sélectionné (si connu)
+      let docQuery = supabase
+        .from('establishment_documents')
+        .select('id, file_url, file_name, college_type, status, uploaded_at')
+        .eq('election_id', selectedElection)
+        .eq('center_id', formData.centre)
+        .eq('document_type', 'pv')
+        .in('status', ['validated', 'reserved']);
+
+      // Filtrer par collège uniquement si le bureau a un collège défini
+      if (bureauCollegeType) {
+        docQuery = docQuery.eq('college_type', bureauCollegeType);
+      }
+
+      const { data: docRows } = await docQuery.order('uploaded_at', { ascending: false });
+
+      (docRows || []).forEach((doc: any) => {
+        const collegeLabel = doc.college_type
+          ? ` — ${doc.college_type}`
+          : '';
+        const statusLabel  = doc.status === 'reserved' ? ' (réserve)' : '';
+        results.push({
+          id:           `doc_${doc.id}`,
+          bureau_name:  `PV président${collegeLabel}${statusLabel}`,
+          pv_photo_url: doc.file_url,
+        });
+      });
+
+      if (results.length === 0) {
+        toast.info('Aucun PV validé trouvé pour cet établissement / collège.');
+      }
+
+      setExistingValidatedPvs(results);
     } catch (e) {
       toast.error('Erreur lors du chargement des PV existants.');
       setShowExistingPvPicker(false);
