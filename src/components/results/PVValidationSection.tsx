@@ -173,7 +173,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const { role } = useRBAC();
   const { user } = useAuth();
   // Rôles pouvant soumettre un avis observateur sur un PV
-  const isObserver = role === 'observateur' || role === 'employeur' || role === 'president-etablissement';
+  const isObserver = role === 'observateur' || role === 'president-etablissement';
   // Rôles pouvant réagir à un avis existant (approuver / annuler réserve)
   const canReact = role === 'super-admin' || role === 'admin';
 

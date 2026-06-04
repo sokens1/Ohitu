@@ -793,8 +793,10 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                       <Eye className="w-3.5 h-3.5" />
                                     </button>
                                   )}
-                                  {/* Upload : bloqué si document validé */}
-                                  {(!existing || existing.status !== 'validated') && (
+                                  {/* Upload : bloqué si validé
+                                      Suppléant : ne peut remplacer que son propre document */}
+                                  {(!existing || existing.status !== 'validated') &&
+                                   (user?.role !== 'suppleant-president' || !existing || existing.uploaded_by === user?.id) && (
                                     <button
                                       disabled={isUp}
                                       onClick={() => triggerUpload(center.id, college, docType)}
