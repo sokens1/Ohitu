@@ -16,13 +16,8 @@ import {
   Upload, Download, FileText, FileImage, Building2, BookOpen,
   CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp,
   ZoomIn, ZoomOut, RotateCw, ExternalLink, Trash2, LayoutGrid,
+  List, RefreshCw, Filter, BadgeCheck, EyeOff, Scale,
 } from 'lucide-react';
-import {
-  MdDescription, MdFormatListBulleted, MdVisibility, MdDownload,
-  MdDeleteOutline, MdCheckCircle, MdCancel, MdWarning, MdPending,
-  MdBusiness, MdClass, MdCloudUpload, MdGavel, MdAutorenew,
-  MdFilterList, MdVerified, MdUnpublished,
-} from 'react-icons/md';
 import { toast } from 'sonner';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -629,11 +624,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
   // Config affichage de la confirmation par type
   const CONFIRM_CFG = {
-    delete:   { label: 'Supprimer ce document ?',        color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',          icon: MdDeleteOutline },
-    validate: { label: 'Valider ce document ?',          color: 'text-emerald-700', confirmCls: 'bg-emerald-600 hover:bg-emerald-700 text-white',   icon: MdCheckCircle   },
-    reserve:  { label: 'Valider avec réserve ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: MdWarning       },
-    reject:   { label: 'Rejeter ce document ?',          color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',           icon: MdCancel        },
-    retract:  { label: 'Rétracter la validation ?',      color: 'text-amber-700',   confirmCls: 'bg-amber-500 hover:bg-amber-600 text-white',       icon: MdAutorenew     },
+    delete:   { label: 'Supprimer ce document ?',        color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',          icon: Trash2 },
+    validate: { label: 'Valider ce document ?',          color: 'text-emerald-700', confirmCls: 'bg-emerald-600 hover:bg-emerald-700 text-white',   icon: CheckCircle   },
+    reserve:  { label: 'Valider avec réserve ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: AlertTriangle       },
+    reject:   { label: 'Rejeter ce document ?',          color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',           icon: XCircle        },
+    retract:  { label: 'Rétracter la validation ?',      color: 'text-amber-700',   confirmCls: 'bg-amber-500 hover:bg-amber-600 text-white',       icon: RefreshCw     },
   };
 
   // ── Rendu ────────────────────────────────────────────────────────────────────
@@ -856,16 +851,16 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
   // Couleurs de header par type de document (comme les cartes IEC)
   const DOC_HEADER: Record<string, { bg: string; icon: React.ComponentType<any> }> = {
-    pv:                 { bg: 'bg-[#1B2E5A]',   icon: MdDescription        },
-    participation_list: { bg: 'bg-[#1565C0]',   icon: MdFormatListBulleted },
+    pv:                 { bg: 'bg-[#1B2E5A]',   icon: FileText        },
+    participation_list: { bg: 'bg-[#1565C0]',   icon: List },
   };
 
   // Statut → config icône + couleur
   const STATUS_MD: Record<string, { icon: React.ComponentType<any>; color: string; label: string }> = {
-    pending:   { icon: MdPending,     color: 'text-amber-500',   label: 'En attente'  },
-    validated: { icon: MdVerified,    color: 'text-emerald-500', label: 'Validé'      },
-    reserved:  { icon: MdWarning,     color: 'text-orange-500',  label: 'Réserve'     },
-    rejected:  { icon: MdUnpublished, color: 'text-red-500',     label: 'Rejeté'      },
+    pending:   { icon: Clock,     color: 'text-amber-500',   label: 'En attente'  },
+    validated: { icon: BadgeCheck,    color: 'text-emerald-500', label: 'Validé'      },
+    reserved:  { icon: AlertTriangle,     color: 'text-orange-500',  label: 'Réserve'     },
+    rejected:  { icon: EyeOff, color: 'text-red-500',     label: 'Rejeté'      },
   };
 
   const STAT_ITEMS = [
@@ -897,7 +892,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
         {/* Select filtre établissement */}
         <div className="flex items-center gap-2 flex-1">
-          <MdBusiness size={20} className="text-[#1B2E5A] flex-shrink-0" />
+          <Building2 size={20} className="text-[#1B2E5A] flex-shrink-0" />
           <div className="relative flex-1">
             <select
               value={adminCenterFilter}
@@ -910,7 +905,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                 return <option key={c.id} value={c.id}>{c.name} ({cnt})</option>;
               })}
             </select>
-            <MdFilterList size={16} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <Filter size={16} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
         </div>
 
@@ -937,12 +932,12 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
               <button onClick={() => setDeleteAllConfirm('pv')}
                 disabled={!docs.some(d => d.document_type === 'pv')}
                 className="inline-flex items-center gap-1.5 px-3 h-9 rounded-xl border-2 border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors disabled:opacity-40">
-                <MdDeleteOutline size={16} /> PV
+                <Trash2 size={16} /> PV
               </button>
               <button onClick={() => setDeleteAllConfirm('participation_list')}
                 disabled={!docs.some(d => d.document_type === 'participation_list')}
                 className="inline-flex items-center gap-1.5 px-3 h-9 rounded-xl border-2 border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors disabled:opacity-40">
-                <MdDeleteOutline size={16} /> Listes
+                <Trash2 size={16} /> Listes
               </button>
             </div>
           )
@@ -953,7 +948,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
       {filteredDocs.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
           <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center">
-            <MdDescription size={32} className="text-gray-300" />
+            <FileText size={32} className="text-gray-300" />
           </div>
           <p className="text-sm font-medium text-gray-500">
             {adminCenterFilter !== 'all' || adminStatusFilter !== 'all'
@@ -1035,11 +1030,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                         <div className="flex gap-2">
                           <button onClick={executeConfirmedAction}
                             className={`flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${cfg.confirmCls}`}>
-                            <MdCheckCircle size={13} /> Confirmer
+                            <CheckCircle size={13} /> Confirmer
                           </button>
                           <button onClick={() => setConfirmAction(null)}
                             className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 transition-colors">
-                            <MdAutorenew size={13} /> Annuler
+                            <RefreshCw size={13} /> Annuler
                           </button>
                         </div>
                       </div>
@@ -1049,26 +1044,26 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                     <div className="flex items-center gap-1">
                       <button onClick={() => openPreview(doc)} title="Voir"
                         className="p-1.5 rounded-lg text-[#1B2E5A] hover:bg-blue-50 transition-colors">
-                        <MdVisibility size={16} />
+                        <Eye size={16} />
                       </button>
                       {canDownload && (
                         <button onClick={() => handleDownload(doc)} title="Télécharger"
                           className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
-                          <MdDownload size={16} />
+                          <Download size={16} />
                         </button>
                       )}
                       {/* Valider : masqué si déjà validé */}
                       {canReview && doc.status !== 'validated' && (
                         <button onClick={() => setReview({ docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors ml-auto">
-                          <MdCheckCircle size={13} /> Valider
+                          <CheckCircle size={13} /> Valider
                         </button>
                       )}
                       {/* Rétracter : uniquement admin/super-admin si document validé */}
                       {(user?.role === 'super-admin' || user?.role === 'admin') && doc.status === 'validated' && (
                         <button onClick={() => setConfirmAction({ docId: doc.id, type: 'retract' })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors ml-auto">
-                          <MdAutorenew size={13} /> Rétracter
+                          <RefreshCw size={13} /> Rétracter
                         </button>
                       )}
                       {/* Supprimer : bloqué si document validé */}
@@ -1077,7 +1072,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'delete' })}
                           title="Supprimer"
                           className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40">
-                          <MdDeleteOutline size={16} />
+                          <Trash2 size={16} />
                         </button>
                       )}
                     </div>
@@ -1092,21 +1087,21 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                         <button disabled={review?.submitting}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'validate', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50">
-                          <MdCheckCircle size={12} /> Valider
+                          <CheckCircle size={12} /> Valider
                         </button>
                         <button disabled={review?.submitting || commentReq}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'reserve', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 hover:bg-orange-100 disabled:opacity-40">
-                          <MdWarning size={12} /> Réserve
+                          <AlertTriangle size={12} /> Réserve
                         </button>
                         <button disabled={review?.submitting || commentReq}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'reject', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 disabled:opacity-40">
-                          <MdCancel size={12} /> Rejeter
+                          <XCircle size={12} /> Rejeter
                         </button>
                         <button onClick={() => setReview(null)}
                           className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 ml-auto">
-                          <MdAutorenew size={14} />
+                          <RefreshCw size={14} />
                         </button>
                       </div>
                       {commentReq && (
