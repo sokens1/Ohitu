@@ -3,12 +3,13 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import auditService from '@/services/auditService';
 
-export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau' | 'president-etablissement';
+export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau' | 'president-etablissement' | 'employeur' | 'suppleant-president';
 
 export interface User {
   id: string;
   name: string;
   email: string;
+  phone?: string | null;
   role: UserRole;
   isActive: boolean;
   assigned_election_id?: string | null;
@@ -23,7 +24,8 @@ export interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<boolean>;
+  /** Accepte un email OU un numéro de téléphone + mot de passe */
+  login: (emailOrPhone: string, password: string) => Promise<boolean>;
   logout: () => void;
   isAuthenticated: boolean;
   authLoading: boolean;
@@ -65,6 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               id: userData.id,
               name: userData.name,
               email: userData.email,
+              phone: userData.phone ?? null,
               role: userData.role,
               isActive: userData.is_active,
               assigned_election_id: userData.assigned_election_id,
@@ -94,12 +97,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     init();
   }, []);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (emailOrPhone: string, password: string): Promise<boolean> => {
     try {
-      // Authentification Supabase
+      // Résoudre l'email si l'identifiant est un numéro de téléphone
+      let email = emailOrPhone.trim();
+      const isPhone = !email.includes('@');
+
+      if (isPhone) {
+        // Utiliser la fonction SECURITY DEFINER qui bypasse RLS avant authentification.
+        // La normalisation (suppression des tirets/espaces) est faite côté SQL.
+        const { data: foundEmail, error: findErr } = await supabase
+          .rpc('get_email_by_phone', { p_phone: email });
+
+        if (findErr || !foundEmail) {
+          throw new Error('PHONE_NOT_FOUND');
+        }
+        email = foundEmail as string;
+      }
+
+      // Authentification Supabase avec l'email résolu
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
-        password
+        password,
       });
 
       if (authError) {
@@ -144,6 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: userData.id,
           name: userData.name,
           email: userData.email,
+          phone: userData.phone ?? null,
           role: userData.role,
           isActive: userData.is_active,
           assigned_election_id: userData.assigned_election_id,

@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 import { useAuth } from '@/contexts/AuthContext';
 import { notifyPVSubmitted } from '@/lib/notificationService';
+import DocumentPreviewModal from '@/components/ui/DocumentPreviewModal';
 import { getRegisteredVotersLabel, isProfessionalElection } from '@/utils/electionCalculations';
 
 import { useNetworkQuality } from '@/hooks/useNetworkQuality';
@@ -96,6 +97,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   const [existingValidatedPvs, setExistingValidatedPvs] = useState<{ id: string; bureau_name: string; pv_photo_url: string }[]>([]);
   const [loadingExistingPvs, setLoadingExistingPvs] = useState(false);
   const [selectedExistingPvUrl, setSelectedExistingPvUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl]     = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState<string>('Document');
   const [formData, setFormData] = useState({
     province: '',
     ville: '',
@@ -491,7 +494,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     });
   };
 
-  // Ouvre le picker de PV existants pour le centre sélectionné
+  // Ouvre le picker de PV existants pour le centre + bureau + collège sélectionnés
   const handleOpenExistingPvPicker = async () => {
     if (!formData.centre) {
       toast.warning('Veuillez d\'abord sélectionner un établissement.');
@@ -500,26 +503,69 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     setLoadingExistingPvs(true);
     setShowExistingPvPicker(true);
     try {
-      // Récupérer les PV validés/publiés avec un document, pour les bureaux de ce centre
+      // Collège du bureau sélectionné (pour filtrer les establishment_documents)
+      const selectedBureauObj = votingBureaux.find((b: any) => String(b.id) === String(formData.bureau));
+      const bureauCollegeType: string | null =
+        selectedBureauObj?.college_type || selectedBureauObj?.college || null;
+
+      const results: { id: string; bureau_name: string; pv_photo_url: string }[] = [];
+
+      // ── Source 1 : procès_verbaux (PVs déjà saisis avec photo) ─────────────
       const { data: pvRows } = await supabase
         .from('procès_verbaux')
-        .select('id, pv_photo_url, bureau_id, voting_bureaux!bureau_id(id, name, center_id)')
+        .select('id, pv_photo_url, bureau_id, college_type, voting_bureaux!bureau_id(id, name, center_id)')
         .eq('election_id', selectedElection)
         .in('status', ['validated', 'validé', 'published'])
         .not('pv_photo_url', 'is', null);
 
-      const centerPvs = (pvRows || []).filter((pv: any) =>
-        String((pv as any).voting_bureaux?.center_id) === String(formData.centre) &&
-        pv.pv_photo_url
-      );
+      (pvRows || [])
+        .filter((pv: any) =>
+          String((pv as any).voting_bureaux?.center_id) === String(formData.centre) &&
+          pv.pv_photo_url
+        )
+        .forEach((pv: any) => {
+          results.push({
+            id:          `pv_${pv.id}`,
+            bureau_name: (pv as any).voting_bureaux?.name || 'Bureau',
+            pv_photo_url: pv.pv_photo_url as string,
+          });
+        });
 
-      setExistingValidatedPvs(
-        centerPvs.map((pv: any) => ({
-          id: String(pv.id),
-          bureau_name: (pv as any).voting_bureaux?.name || 'Bureau',
-          pv_photo_url: pv.pv_photo_url as string,
-        }))
-      );
+      // ── Source 2 : establishment_documents (PV déposés par le président) ────
+      // Filtres : élection + centre + type PV + statut validé/réservé
+      // + collège correspondant au bureau sélectionné (si connu)
+      let docQuery = supabase
+        .from('establishment_documents')
+        .select('id, file_url, file_name, college_type, status, uploaded_at')
+        .eq('election_id', selectedElection)
+        .eq('center_id', formData.centre)
+        .eq('document_type', 'pv')
+        .in('status', ['validated', 'reserved']);
+
+      // Filtrer par collège uniquement si le bureau a un collège défini
+      if (bureauCollegeType) {
+        docQuery = docQuery.eq('college_type', bureauCollegeType);
+      }
+
+      const { data: docRows } = await docQuery.order('uploaded_at', { ascending: false });
+
+      (docRows || []).forEach((doc: any) => {
+        const collegeLabel = doc.college_type
+          ? ` — ${doc.college_type}`
+          : '';
+        const statusLabel  = doc.status === 'reserved' ? ' (réserve)' : '';
+        results.push({
+          id:           `doc_${doc.id}`,
+          bureau_name:  `PV président${collegeLabel}${statusLabel}`,
+          pv_photo_url: doc.file_url,
+        });
+      });
+
+      if (results.length === 0) {
+        toast.info('Aucun PV validé trouvé pour cet établissement / collège.');
+      }
+
+      setExistingValidatedPvs(results);
     } catch (e) {
       toast.error('Erreur lors du chargement des PV existants.');
       setShowExistingPvPicker(false);
@@ -1473,17 +1519,30 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               {formData.uploadedFile && (
                 <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-green-700">
-                      <FileText className="w-4 h-4" />
-                      <span className="text-sm font-medium">{formData.uploadedFile.name}</span>
-                      <CheckCircle className="w-4 h-4" />
+                    <div className="flex items-center gap-2 text-green-700 min-w-0">
+                      <FileText className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm font-medium truncate">{formData.uploadedFile.name}</span>
+                      <CheckCircle className="w-4 h-4 flex-shrink-0" />
                     </div>
-                    <button
-                      onClick={() => setFormData(prev => ({ ...prev, uploadedFile: null }))}
-                      className="text-green-600 hover:text-green-800 transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Prévisualiser le fichier local via URL.createObjectURL */}
+                      <button
+                        onClick={() => {
+                          const localUrl = URL.createObjectURL(formData.uploadedFile!);
+                          setPreviewTitle(formData.uploadedFile!.name);
+                          setPreviewUrl(localUrl);
+                        }}
+                        className="text-xs font-medium text-green-700 hover:text-green-900 underline-offset-2 hover:underline transition-colors"
+                      >
+                        Voir
+                      </button>
+                      <button
+                        onClick={() => setFormData(prev => ({ ...prev, uploadedFile: null }))}
+                        className="text-green-600 hover:text-green-800 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1494,18 +1553,19 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-blue-700">
                       <FileText className="w-4 h-4" />
-                      <span className="text-sm font-medium">PV existant sélectionné</span>
+                      <span className="text-sm font-medium">PV sélectionné</span>
                       <CheckCircle className="w-4 h-4" />
                     </div>
                     <div className="flex items-center gap-2">
-                      <a
-                        href={selectedExistingPvUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-blue-600 underline hover:text-blue-800"
+                      <button
+                        onClick={() => {
+                          setPreviewTitle('PV sélectionné');
+                          setPreviewUrl(selectedExistingPvUrl);
+                        }}
+                        className="text-xs font-medium text-blue-700 hover:text-blue-900 underline-offset-2 hover:underline transition-colors"
                       >
                         Voir
-                      </a>
+                      </button>
                       <button
                         onClick={() => setSelectedExistingPvUrl(null)}
                         className="text-blue-500 hover:text-blue-700 transition-colors"
@@ -1554,7 +1614,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                           setSelectedExistingPvUrl(pv.pv_photo_url);
                           setFormData(prev => ({ ...prev, uploadedFile: null }));
                           setShowExistingPvPicker(false);
-                          toast.success('PV existant sélectionné.');
+                          toast.success('PV sélectionné.');
                         }}
                         className="w-full text-left p-3 border border-gray-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-colors flex items-center gap-3 group"
                       >
@@ -1773,7 +1833,6 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         </div>
       </DialogContent>
     </Dialog>
-
     <div className="space-y-6">
       {/* Alerte de restauration de brouillon */}
       {hasDraft && (
@@ -1930,6 +1989,16 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         </CardContent>
       </Card>
     </div>
+
+    {/* Modal de prévisualisation partagé */}
+    <DocumentPreviewModal
+      url={previewUrl}
+      title={previewTitle}
+      onClose={() => {
+        if (previewUrl?.startsWith('blob:')) URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(null);
+      }}
+    />
     </>
   );
 };

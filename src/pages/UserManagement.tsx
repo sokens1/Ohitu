@@ -42,6 +42,7 @@ interface AppUser {
   assigned_election_ids?: string[] | null;
   created_by?: string | null;
   electionTitle?: string;
+  phone?: string | null;
   assigned_center_ids?: string[] | null;
   assigned_center_bureaux?: Record<string, string[]> | null;
   assigned_center_colleges?: Record<string, string[]> | null;
@@ -57,8 +58,9 @@ const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string; disabled?: boole
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
+  { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
+  { value: 'suppleant-president',    label: "Suppléant Président" },
 ];
 
 // Tous les rôles (super-admin seulement)
@@ -68,8 +70,9 @@ const ALL_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
+  { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
+  { value: 'suppleant-president',    label: "Suppléant Président" },
 ];
 
 const ROLE_BADGE: Record<UserRole, string> = {
@@ -78,8 +81,10 @@ const ROLE_BADGE: Record<UserRole, string> = {
   'validateur':               'bg-green-100 text-green-800 border-green-200',
   'agent-saisie':             'bg-yellow-100 text-yellow-800 border-yellow-200',
   'observateur':              'bg-gray-100 text-gray-700 border-gray-200',
+  'employeur':                'bg-slate-100 text-slate-700 border-slate-200',
   'president-bureau':         'bg-orange-100 text-orange-800 border-orange-200',
   'president-etablissement':  'bg-teal-100 text-teal-800 border-teal-200',
+  'suppleant-president':      'bg-cyan-100 text-cyan-800 border-cyan-200',
 };
 
 const getRoleLabel = (role: UserRole): string =>
@@ -189,6 +194,7 @@ const UserManagement = () => {
   // Champs formulaire
   const [fName, setFName] = useState('');
   const [fEmail, setFEmail] = useState('');
+  const [fPhone, setFPhone] = useState('');
   const [fPassword, setFPassword] = useState('');
   const [fRole, setFRole] = useState<UserRole>('observateur');
   const [fActive, setFActive] = useState(true);
@@ -266,6 +272,7 @@ const UserManagement = () => {
           assigned_election_ids: u.assigned_election_ids ?? null,
           created_by: u.created_by,
           electionTitle: u.elections?.title ?? undefined,
+          phone: u.phone ?? null,
           assigned_center_ids:      u.assigned_center_ids      ?? null,
           assigned_center_bureaux:  u.assigned_center_bureaux  ?? null,
           assigned_center_colleges: u.assigned_center_colleges ?? null,
@@ -295,7 +302,7 @@ const UserManagement = () => {
 
   // ── Helpers formulaire ──────────────────────────────────────────────────────
   const resetForm = () => {
-    setFName(''); setFEmail(''); setFPassword('');
+    setFName(''); setFEmail(''); setFPhone(''); setFPassword('');
     setFRole('observateur'); setFActive(true);
     setFElectionIds([]); setFCenterBureaux({}); setFCenterColleges({});
     setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]);
@@ -304,7 +311,7 @@ const UserManagement = () => {
 
   const openEdit = (u: AppUser) => {
     setEditingUser(u);
-    setFName(u.name); setFEmail(u.email);
+    setFName(u.name); setFEmail(u.email); setFPhone(u.phone ?? '');
     setFPassword(''); setFRole(u.role); setFActive(u.isActive);
     const ids = u.assigned_election_ids?.length
       ? u.assigned_election_ids
@@ -320,8 +327,8 @@ const UserManagement = () => {
     setShowEditModal(true);
   };
 
-  const ROLES_WITH_BUREAUX:  UserRole[] = ['president-etablissement'];
-  const ROLES_WITH_COLLEGES: UserRole[] = ['validateur', 'agent-saisie', 'observateur'];
+  const ROLES_WITH_BUREAUX:  UserRole[] = ['president-etablissement', 'suppleant-president'];
+  const ROLES_WITH_COLLEGES: UserRole[] = ['validateur', 'agent-saisie', 'observateur', 'employeur'];
   const ROLES_WITH_CENTERS:  UserRole[] = [...ROLES_WITH_BUREAUX, ...ROLES_WITH_COLLEGES];
 
   useEffect(() => {
@@ -427,6 +434,7 @@ const UserManagement = () => {
             ? fCenterBureaux : null,
           assigned_center_colleges: (ROLES_WITH_COLLEGES.includes(fRole) || ROLES_WITH_BUREAUX.includes(fRole)) && Object.keys(fCenterColleges).length > 0
             ? fCenterColleges : null,
+          phone: fPhone.trim() || null,
           created_by: currentUser?.id || null,
         }),
       });
@@ -478,6 +486,7 @@ const UserManagement = () => {
       const updatePayload: Record<string, unknown> = {
         name: fName.trim(),
         email: fEmail.trim(),
+        phone: fPhone.trim() || null,
         role: fRole,
         is_active: fActive,
         assigned_election_id: fElectionIds[0] ?? null,
@@ -602,7 +611,23 @@ const UserManagement = () => {
         />
       </div>
 
-      {/* Ligne 2 : Rôle */}
+      {/* Ligne 2 : Téléphone */}
+      <FloatingInput
+        label="Numéro de téléphone — format 077-00-00-00 (optionnel)"
+        type="tel"
+        value={fPhone}
+        onChange={e => {
+          const digits = e.target.value.replace(/[^0-9]/g, '').slice(0, 9);
+          let formatted = digits;
+          if (digits.length > 3 && digits.length <= 5)       formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
+          else if (digits.length > 5 && digits.length <= 7)  formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+          else if (digits.length > 7)                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5, 7)}-${digits.slice(7)}`;
+          setFPhone(formatted);
+        }}
+        autoComplete="off"
+      />
+
+      {/* Ligne 3 : Rôle */}
       <FloatingSelect
         label="Rôle"
         options={availableRoles.map(r => ({ value: r.value, label: r.label }))}
