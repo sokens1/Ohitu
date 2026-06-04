@@ -613,10 +613,17 @@ const UserManagement = () => {
 
       {/* Ligne 2 : Téléphone */}
       <FloatingInput
-        label="Numéro de téléphone(Ex:+241 07 00 00 00)"
+        label="Numéro de téléphone — format 077-00-00-00 (optionnel)"
         type="tel"
         value={fPhone}
-        onChange={e => setFPhone(e.target.value)}
+        onChange={e => {
+          const digits = e.target.value.replace(/[^0-9]/g, '').slice(0, 9);
+          let formatted = digits;
+          if (digits.length > 3 && digits.length <= 5)       formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
+          else if (digits.length > 5 && digits.length <= 7)  formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+          else if (digits.length > 7)                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5, 7)}-${digits.slice(7)}`;
+          setFPhone(formatted);
+        }}
         autoComplete="off"
       />
 

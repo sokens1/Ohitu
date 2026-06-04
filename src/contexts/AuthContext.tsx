@@ -104,21 +104,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const isPhone = !email.includes('@');
 
       if (isPhone) {
-        // Chercher l'email correspondant au numéro (SECURITY DEFINER non nécessaire —
-        // la table users.phone est lisible publiquement via "users can read own row",
-        // et ici l'utilisateur n'est pas encore authentifié. On utilise la clé anon
-        // avec une requête ciblée sur le champ phone uniquement.)
-        const { data: found, error: findErr } = await supabase
-          .from('users')
-          .select('email')
-          .eq('phone', email)
-          .eq('is_active', true)
-          .maybeSingle();
+        // Utiliser la fonction SECURITY DEFINER qui bypasse RLS avant authentification.
+        // La normalisation (suppression des tirets/espaces) est faite côté SQL.
+        const { data: foundEmail, error: findErr } = await supabase
+          .rpc('get_email_by_phone', { p_phone: email });
 
-        if (findErr || !found) {
+        if (findErr || !foundEmail) {
           throw new Error('PHONE_NOT_FOUND');
         }
-        email = found.email;
+        email = foundEmail as string;
       }
 
       // Authentification Supabase avec l'email résolu

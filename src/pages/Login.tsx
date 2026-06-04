@@ -416,12 +416,31 @@ const Login = () => {
                 <Input
                   id="email"
                   type="text"
-                  placeholder="email@exemple.com ou +241 07 00 00 00"
+                  placeholder="email@exemple.com ou 077-00-00-00"
                   value={email}
-                  onChange={(e) => { setEmail(e.target.value); setLoginError(null); }}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setLoginError(null);
+                    // Si ça ressemble à un numéro de téléphone, formater en 077-00-00-00
+                    if (!raw.includes('@')) {
+                      const digits = raw.replace(/[^0-9]/g, '').slice(0, 9);
+                      let formatted = digits;
+                      if (digits.length > 3 && digits.length <= 5) {
+                        formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
+                      } else if (digits.length > 5 && digits.length <= 7) {
+                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+                      } else if (digits.length > 7) {
+                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5, 7)}-${digits.slice(7)}`;
+                      }
+                      setEmail(formatted);
+                    } else {
+                      setEmail(raw);
+                    }
+                  }}
                   required
                   className="h-10 sm:h-12 border-gray-200 focus:ring-gov-blue focus:border-gov-blue transition-colors text-sm sm:text-base"
                 />
+                <p className="text-xs text-gray-400">Format téléphone : 077-00-00-00</p>
               </div>
               
               <div className="space-y-2">
