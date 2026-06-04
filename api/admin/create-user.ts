@@ -48,6 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ── Validation des champs ──────────────────────────────────────────────────
   const {
     name, email, password, role, is_active,
+    phone,
     assigned_election_id, assigned_election_ids, created_by,
     assigned_center_ids, assigned_center_bureaux, assigned_center_colleges,
   } = req.body || {};
@@ -100,6 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       id: authUserId,
       name: name.trim(),
       email: email.trim(),
+      phone: phone?.trim() || null,
       role,
       is_active: is_active ?? true,
       assigned_election_id: assigned_election_id || null,

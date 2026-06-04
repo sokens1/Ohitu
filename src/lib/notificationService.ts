@@ -130,8 +130,13 @@ export async function notifyDocumentUploaded(opts: {
   const actorId = await getActorId();
   if (!actorId) return;
 
-  const docLabel = opts.documentType === 'pv' ? 'Procès-verbal' : 'Liste de participation';
-  const collegeLabel = opts.collegeType ? ` — ${opts.collegeType}` : '';
+  const COLLEGE_FR: Record<string, string> = {
+    cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+  };
+  const docLabel     = opts.documentType === 'pv' ? 'Procès-verbal' : 'Liste de participation';
+  const collegeLabel = opts.collegeType
+    ? ` · Collège ${COLLEGE_FR[opts.collegeType] ?? opts.collegeType}`
+    : '';
 
   const recipients = await findRecipients(
     ['super-admin', 'admin', 'agent-saisie'],
@@ -140,8 +145,8 @@ export async function notifyDocumentUploaded(opts: {
 
   await insertNotifications(recipients, actorId, {
     type:       'document_uploaded',
-    title:      `📄 ${docLabel} joint`,
-    message:    `${opts.actorName} a joint un ${docLabel.toLowerCase()} pour ${opts.centerName}${collegeLabel}.`,
+    title:      `${docLabel} joint — ${opts.centerName}${collegeLabel}`,
+    message:    `${opts.actorName} a déposé un ${docLabel.toLowerCase()} pour ${opts.centerName}${collegeLabel}.`,
     severity:   'info',
     election_id: opts.electionId,
     center_id:   opts.centerId,
@@ -153,25 +158,32 @@ export async function notifyDocumentUploaded(opts: {
  * → Notifie : le président qui a uploadé
  */
 export async function notifyDocumentReviewed(opts: {
-  recipientId: string;
-  centerName: string;
+  recipientId:  string;
+  centerName:   string;
+  collegeType?: string | null;
   documentType: 'pv' | 'participation_list';
-  status: 'validated' | 'reserved' | 'rejected';
-  comment: string | null;
-  actorName: string;
-  electionId?: string | null;
+  status:       'validated' | 'reserved' | 'rejected';
+  comment:      string | null;
+  actorName:    string;
+  electionId?:  string | null;
 }): Promise<void> {
   const actorId = await getActorId();
   if (!actorId) return;
 
-  const docLabel  = opts.documentType === 'pv' ? 'PV' : 'Liste de participation';
-  const statusMap = { validated: 'validé ✅', reserved: 'validé avec réserve ⚠️', rejected: 'rejeté ❌' };
-  const severity  = opts.status === 'validated' ? 'success' : opts.status === 'reserved' ? 'warning' : 'error';
+  const COLLEGE_FR: Record<string, string> = {
+    cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+  };
+  const docLabel     = opts.documentType === 'pv' ? 'PV' : 'Liste de participation';
+  const collegeLabel = opts.collegeType
+    ? ` · Collège ${COLLEGE_FR[opts.collegeType] ?? opts.collegeType}`
+    : '';
+  const statusMap    = { validated: 'validé', reserved: 'validé avec réserve', rejected: 'rejeté' };
+  const severity     = opts.status === 'validated' ? 'success' : opts.status === 'reserved' ? 'warning' : 'error';
 
   await insertNotifications([opts.recipientId], actorId, {
     type:       'document_reviewed',
-    title:      `${docLabel} ${statusMap[opts.status]}`,
-    message:    `${opts.actorName} a ${opts.status === 'validated' ? 'validé' : opts.status === 'reserved' ? 'validé avec réserve' : 'rejeté'} votre ${docLabel.toLowerCase()} pour ${opts.centerName}${opts.comment ? ` : "${opts.comment}"` : ''}.`,
+    title:      `${docLabel} ${statusMap[opts.status]} — ${opts.centerName}${collegeLabel}`,
+    message:    `${opts.actorName} a ${statusMap[opts.status]} votre ${docLabel.toLowerCase()} pour ${opts.centerName}${collegeLabel}${opts.comment ? ` : "${opts.comment}"` : ''}.`,
     severity,
     election_id: opts.electionId ?? null,
   });

@@ -137,6 +137,11 @@ const Login = () => {
           type: 'pending',
           message: 'Votre compte est en attente de confirmation. Veuillez patienter l\'activation par votre administrateur.',
         });
+      } else if (error?.message === 'PHONE_NOT_FOUND') {
+        setLoginError({
+          type: 'credentials',
+          message: 'Aucun compte actif trouvé pour ce numéro de téléphone.',
+        });
       } else if (error?.message === 'ACCOUNT_DISABLED') {
         setLoginError({
           type: 'disabled',
@@ -405,15 +410,17 @@ const Login = () => {
             <CardContent className="px-4 sm:px-6">
               <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
               <div className="space-y-2">
-                  <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email</Label>
+                <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                  Email ou numéro de téléphone
+                </Label>
                 <Input
                   id="email"
-                  type="email"
-                  placeholder="votre.email@gabon.ga"
+                  type="text"
+                  placeholder="email@exemple.com ou +241 07 00 00 00"
                   value={email}
                   onChange={(e) => { setEmail(e.target.value); setLoginError(null); }}
                   required
-                    className="h-10 sm:h-12 border-gray-200 focus:ring-gov-blue focus:border-gov-blue transition-colors text-sm sm:text-base"
+                  className="h-10 sm:h-12 border-gray-200 focus:ring-gov-blue focus:border-gov-blue transition-colors text-sm sm:text-base"
                 />
               </div>
               

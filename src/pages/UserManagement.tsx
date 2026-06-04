@@ -42,6 +42,7 @@ interface AppUser {
   assigned_election_ids?: string[] | null;
   created_by?: string | null;
   electionTitle?: string;
+  phone?: string | null;
   assigned_center_ids?: string[] | null;
   assigned_center_bureaux?: Record<string, string[]> | null;
   assigned_center_colleges?: Record<string, string[]> | null;
@@ -193,6 +194,7 @@ const UserManagement = () => {
   // Champs formulaire
   const [fName, setFName] = useState('');
   const [fEmail, setFEmail] = useState('');
+  const [fPhone, setFPhone] = useState('');
   const [fPassword, setFPassword] = useState('');
   const [fRole, setFRole] = useState<UserRole>('observateur');
   const [fActive, setFActive] = useState(true);
@@ -270,6 +272,7 @@ const UserManagement = () => {
           assigned_election_ids: u.assigned_election_ids ?? null,
           created_by: u.created_by,
           electionTitle: u.elections?.title ?? undefined,
+          phone: u.phone ?? null,
           assigned_center_ids:      u.assigned_center_ids      ?? null,
           assigned_center_bureaux:  u.assigned_center_bureaux  ?? null,
           assigned_center_colleges: u.assigned_center_colleges ?? null,
@@ -299,7 +302,7 @@ const UserManagement = () => {
 
   // ── Helpers formulaire ──────────────────────────────────────────────────────
   const resetForm = () => {
-    setFName(''); setFEmail(''); setFPassword('');
+    setFName(''); setFEmail(''); setFPhone(''); setFPassword('');
     setFRole('observateur'); setFActive(true);
     setFElectionIds([]); setFCenterBureaux({}); setFCenterColleges({});
     setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]);
@@ -308,7 +311,7 @@ const UserManagement = () => {
 
   const openEdit = (u: AppUser) => {
     setEditingUser(u);
-    setFName(u.name); setFEmail(u.email);
+    setFName(u.name); setFEmail(u.email); setFPhone(u.phone ?? '');
     setFPassword(''); setFRole(u.role); setFActive(u.isActive);
     const ids = u.assigned_election_ids?.length
       ? u.assigned_election_ids
@@ -431,6 +434,7 @@ const UserManagement = () => {
             ? fCenterBureaux : null,
           assigned_center_colleges: (ROLES_WITH_COLLEGES.includes(fRole) || ROLES_WITH_BUREAUX.includes(fRole)) && Object.keys(fCenterColleges).length > 0
             ? fCenterColleges : null,
+          phone: fPhone.trim() || null,
           created_by: currentUser?.id || null,
         }),
       });
@@ -482,6 +486,7 @@ const UserManagement = () => {
       const updatePayload: Record<string, unknown> = {
         name: fName.trim(),
         email: fEmail.trim(),
+        phone: fPhone.trim() || null,
         role: fRole,
         is_active: fActive,
         assigned_election_id: fElectionIds[0] ?? null,
@@ -606,7 +611,16 @@ const UserManagement = () => {
         />
       </div>
 
-      {/* Ligne 2 : Rôle */}
+      {/* Ligne 2 : Téléphone */}
+      <FloatingInput
+        label="Numéro de téléphone(Ex:+241 07 00 00 00)"
+        type="tel"
+        value={fPhone}
+        onChange={e => setFPhone(e.target.value)}
+        autoComplete="off"
+      />
+
+      {/* Ligne 3 : Rôle */}
       <FloatingSelect
         label="Rôle"
         options={availableRoles.map(r => ({ value: r.value, label: r.label }))}
