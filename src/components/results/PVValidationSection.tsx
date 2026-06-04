@@ -172,8 +172,10 @@ interface PVValidationSectionProps { selectedElection: string; readOnly?: boolea
 const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElection, readOnly = false, onDataRefresh }) => {
   const { role } = useRBAC();
   const { user } = useAuth();
-  const isObserver = role === 'observateur';
-  const canReact = role === 'super-admin' || role === 'admin' || role === 'president-etablissement';
+  // Rôles pouvant soumettre un avis observateur sur un PV
+  const isObserver = role === 'observateur' || role === 'employeur' || role === 'president-etablissement';
+  // Rôles pouvant réagir à un avis existant (approuver / annuler réserve)
+  const canReact = role === 'super-admin' || role === 'admin';
 
   const [selectedPV, setSelectedPV] = useState<string | null>(null);
   const [observerAnnotation, setObserverAnnotation] = useState('');
@@ -383,8 +385,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           // ── Filtrage par rôle ─────────────────────────────────────────────────
           // validateur, agent-saisie, observateur → centres + collèges assignés
           // president-etablissement               → centres + bureaux assignés
-          const roleColleges  = user?.role === 'validateur' || user?.role === 'agent-saisie' || user?.role === 'observateur';
-          const roleBureaux   = user?.role === 'president-etablissement';
+          const roleColleges  = user?.role === 'validateur' || user?.role === 'agent-saisie' || user?.role === 'observateur' || user?.role === 'employeur';
+          const roleBureaux   = user?.role === 'president-etablissement' || user?.role === 'suppleant-president';
 
           if (roleColleges) {
             // Restreindre allowedCenterIds aux centres présents dans assigned_center_colleges

@@ -57,8 +57,9 @@ const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string; disabled?: boole
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
+  { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
+  { value: 'suppleant-president',    label: "Suppléant Président" },
 ];
 
 // Tous les rôles (super-admin seulement)
@@ -68,8 +69,9 @@ const ALL_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
+  { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
+  { value: 'suppleant-president',    label: "Suppléant Président" },
 ];
 
 const ROLE_BADGE: Record<UserRole, string> = {
@@ -78,8 +80,10 @@ const ROLE_BADGE: Record<UserRole, string> = {
   'validateur':               'bg-green-100 text-green-800 border-green-200',
   'agent-saisie':             'bg-yellow-100 text-yellow-800 border-yellow-200',
   'observateur':              'bg-gray-100 text-gray-700 border-gray-200',
+  'employeur':                'bg-slate-100 text-slate-700 border-slate-200',
   'president-bureau':         'bg-orange-100 text-orange-800 border-orange-200',
   'president-etablissement':  'bg-teal-100 text-teal-800 border-teal-200',
+  'suppleant-president':      'bg-cyan-100 text-cyan-800 border-cyan-200',
 };
 
 const getRoleLabel = (role: UserRole): string =>
@@ -320,8 +324,8 @@ const UserManagement = () => {
     setShowEditModal(true);
   };
 
-  const ROLES_WITH_BUREAUX:  UserRole[] = ['president-etablissement'];
-  const ROLES_WITH_COLLEGES: UserRole[] = ['validateur', 'agent-saisie', 'observateur'];
+  const ROLES_WITH_BUREAUX:  UserRole[] = ['president-etablissement', 'suppleant-president'];
+  const ROLES_WITH_COLLEGES: UserRole[] = ['validateur', 'agent-saisie', 'observateur', 'employeur'];
   const ROLES_WITH_CENTERS:  UserRole[] = [...ROLES_WITH_BUREAUX, ...ROLES_WITH_COLLEGES];
 
   useEffect(() => {

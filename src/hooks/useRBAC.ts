@@ -62,12 +62,29 @@ const PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   'president-etablissement': [
     'view:dashboard', 'view:elections', 'view:results',
+    'results:validate', // peut voir l'onglet résultats (readOnly) et donner son avis
     'results:observe',
+    'results:documents', 'documents:upload', 'documents:download',
+  ],
+  // ── Nouveaux rôles ─────────────────────────────────────────────────────────
+  'employeur': [
+    // Mêmes droits que l'observateur
+    'view:dashboard', 'view:elections', 'view:results',
+    'results:validate', // voit l'onglet résultats en lecture seule
+    'results:observe',
+  ],
+  'suppleant-president': [
+    // Suppléant du président : peut uniquement déposer des documents
+    'view:dashboard', 'view:elections', 'view:results',
     'results:documents', 'documents:upload', 'documents:download',
   ],
 };
 
-const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau', 'president-etablissement'];
+const OPERATIONAL_ROLES: UserRole[] = [
+  'agent-saisie', 'validateur', 'observateur',
+  'president-bureau', 'president-etablissement',
+  'employeur', 'suppleant-president',
+];
 
 export function useRBAC() {
   const { user } = useAuth();

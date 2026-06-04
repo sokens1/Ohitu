@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import auditService from '@/services/auditService';
 
-export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau' | 'president-etablissement';
+export type UserRole = 'super-admin' | 'admin' | 'agent-saisie' | 'validateur' | 'observateur' | 'president-bureau' | 'president-etablissement' | 'employeur' | 'suppleant-president';
 
 export interface User {
   id: string;

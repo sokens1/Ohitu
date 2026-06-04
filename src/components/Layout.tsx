@@ -157,10 +157,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 {user?.role === 'super-admin' ? 'Super Administrateur'
                   : user?.role === 'admin' ? 'Administrateur'
                   : user?.role === 'validateur' ? 'Validateur'
-                  : user?.role === 'agent-saisie' ? 'Agent de Saisie'
-                  : user?.role === 'observateur' ? 'Observateur'
+                  : user?.role === 'agent-saisie'           ? 'Agent de Saisie'
+                  : user?.role === 'observateur'            ? 'Observateur'
+                  : user?.role === 'employeur'              ? 'Employeur'
                   : user?.role === 'president-bureau'        ? 'Président de Bureau'
                   : user?.role === 'president-etablissement' ? 'Président de Bureau'
+                  : user?.role === 'suppleant-president'    ? 'Suppléant Président'
                   : user?.role}
               </p>
             </div>
@@ -312,8 +314,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                  : user?.role === 'validateur'             ? 'Validateur'
                  : user?.role === 'agent-saisie'           ? 'Agent de Saisie'
                  : user?.role === 'observateur'            ? 'Observateur'
+                 : user?.role === 'employeur'              ? 'Employeur'
                  : user?.role === 'president-bureau'       ? 'Président de Bureau'
                  : user?.role === 'president-etablissement'? 'Président de Bureau'
+                 : user?.role === 'suppleant-president'   ? 'Suppléant Président'
                  : user?.role}
                 </p>
               </div>
