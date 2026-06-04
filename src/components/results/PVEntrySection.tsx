@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
 import { useAuth } from '@/contexts/AuthContext';
 import { notifyPVSubmitted } from '@/lib/notificationService';
+import DocumentPreviewModal from '@/components/ui/DocumentPreviewModal';
 import { getRegisteredVotersLabel, isProfessionalElection } from '@/utils/electionCalculations';
 
 import { useNetworkQuality } from '@/hooks/useNetworkQuality';
@@ -95,6 +96,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   const [existingValidatedPvs, setExistingValidatedPvs] = useState<{ id: string; bureau_name: string; pv_photo_url: string }[]>([]);
   const [loadingExistingPvs, setLoadingExistingPvs] = useState(false);
   const [selectedExistingPvUrl, setSelectedExistingPvUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl]     = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState<string>('Document');
   const [formData, setFormData] = useState({
     province: '',
     ville: '',
@@ -1498,17 +1501,30 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               {formData.uploadedFile && (
                 <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-green-700">
-                      <FileText className="w-4 h-4" />
-                      <span className="text-sm font-medium">{formData.uploadedFile.name}</span>
-                      <CheckCircle className="w-4 h-4" />
+                    <div className="flex items-center gap-2 text-green-700 min-w-0">
+                      <FileText className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm font-medium truncate">{formData.uploadedFile.name}</span>
+                      <CheckCircle className="w-4 h-4 flex-shrink-0" />
                     </div>
-                    <button
-                      onClick={() => setFormData(prev => ({ ...prev, uploadedFile: null }))}
-                      className="text-green-600 hover:text-green-800 transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Prévisualiser le fichier local via URL.createObjectURL */}
+                      <button
+                        onClick={() => {
+                          const localUrl = URL.createObjectURL(formData.uploadedFile!);
+                          setPreviewTitle(formData.uploadedFile!.name);
+                          setPreviewUrl(localUrl);
+                        }}
+                        className="text-xs font-medium text-green-700 hover:text-green-900 underline-offset-2 hover:underline transition-colors"
+                      >
+                        Voir
+                      </button>
+                      <button
+                        onClick={() => setFormData(prev => ({ ...prev, uploadedFile: null }))}
+                        className="text-green-600 hover:text-green-800 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1519,18 +1535,19 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-blue-700">
                       <FileText className="w-4 h-4" />
-                      <span className="text-sm font-medium">PV existant sélectionné</span>
+                      <span className="text-sm font-medium">PV sélectionné</span>
                       <CheckCircle className="w-4 h-4" />
                     </div>
                     <div className="flex items-center gap-2">
-                      <a
-                        href={selectedExistingPvUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-blue-600 underline hover:text-blue-800"
+                      <button
+                        onClick={() => {
+                          setPreviewTitle('PV sélectionné');
+                          setPreviewUrl(selectedExistingPvUrl);
+                        }}
+                        className="text-xs font-medium text-blue-700 hover:text-blue-900 underline-offset-2 hover:underline transition-colors"
                       >
                         Voir
-                      </a>
+                      </button>
                       <button
                         onClick={() => setSelectedExistingPvUrl(null)}
                         className="text-blue-500 hover:text-blue-700 transition-colors"
@@ -1579,7 +1596,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                           setSelectedExistingPvUrl(pv.pv_photo_url);
                           setFormData(prev => ({ ...prev, uploadedFile: null }));
                           setShowExistingPvPicker(false);
-                          toast.success('PV existant sélectionné.');
+                          toast.success('PV sélectionné.');
                         }}
                         className="w-full text-left p-3 border border-gray-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-colors flex items-center gap-3 group"
                       >
@@ -1739,6 +1756,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   };
 
   return (
+    <>
     <div className="space-y-6">
       {/* Alerte de restauration de brouillon */}
       {hasDraft && (
@@ -1895,6 +1913,17 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         </CardContent>
       </Card>
     </div>
+
+    {/* Modal de prévisualisation partagé */}
+    <DocumentPreviewModal
+      url={previewUrl}
+      title={previewTitle}
+      onClose={() => {
+        if (previewUrl?.startsWith('blob:')) URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(null);
+      }}
+    />
+    </>
   );
 };
 
