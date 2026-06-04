@@ -89,7 +89,6 @@ const Login = () => {
   const [loginError, setLoginError] = useState<{ type: 'credentials' | 'disabled' | 'pending' | 'generic'; message: string } | null>(null);
   const [elections, setElections] = useState<Election[]>([]);
   const [electionsLoading, setElectionsLoading] = useState(true);
-  const [privacyOpen, setPrivacyOpen] = useState(false);
   const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau'];
 
   const { login, user } = useAuth();
@@ -263,12 +262,12 @@ const Login = () => {
               <div className="text-blue-100 text-[10px] lg:text-xs opacity-80">
                 © 2026 o'Hitu - Tous droits réservés
               </div>
-              <button
-                onClick={() => setPrivacyOpen(true)}
+              <Link
+                to="/privacy"
                 className="text-blue-200 text-[10px] lg:text-xs opacity-70 hover:opacity-100 underline underline-offset-2 transition-opacity"
               >
                 Politique de confidentialité
-              </button>
+              </Link>
             </div>
           </div>
           {/* Copyright déplacé plus bas (voir footer absolu ci-dessous) */}
@@ -375,37 +374,17 @@ const Login = () => {
                 <div className="text-blue-100 text-[10px] opacity-80 leading-snug">
                   © 2026 o'Hitu - Tous droits réservés
                 </div>
-                <button
-                  onClick={() => setPrivacyOpen(true)}
-                  className="text-blue-200 text-[10px] opacity-70 hover:opacity-100 underline underline-offset-2 transition-opacity"
+                <Link
+                  to="/privacy"
+                  className="text-blue-200 text-[10px] opacity-70 hover:opacity-100 underline underline-offset-2 transition-colors"
                 >
                   Politique de confidentialité
-                </button>
+                </Link>
               </div>
             </div>
         </div>
         {/* Footer desktop absolu supprimé pour garder l'alignement avec la colonne centralisée */}
 
-      {/* Modal Politique de confidentialité */}
-      <Dialog open={privacyOpen} onOpenChange={setPrivacyOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-gov-blue" />
-              Politique de confidentialité
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 text-center text-gray-500 text-sm">
-            <div className="w-12 h-12 mx-auto mb-4 bg-blue-50 rounded-full flex items-center justify-center">
-              <Shield className="w-6 h-6 text-gov-blue" />
-            </div>
-            <p className="font-medium text-gray-700 mb-2">Contenu à venir</p>
-            <p className="text-xs text-gray-400">
-              La politique de confidentialité de la plateforme o'Hitu sera publiée prochainement.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Chatbot flottant */}
       <FloatingChatbot />
