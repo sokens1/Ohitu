@@ -63,6 +63,7 @@ interface ElectionData {
   nb_electeurs?: number;
   cover_image_url?: string;
   slug?: string;
+  show_quorum_failed_public?: boolean;
 }
 
 interface CandidateResult {
@@ -825,11 +826,15 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
       console.log('📊 [ElectionResults] Résultats candidats chargés:', candidateResultsData);
 
+      // Paramètre admin : afficher ou non les lignes rouges quorum sur la page publique
+      const showQuorumFailedPublic = election.show_quorum_failed_public !== false;
+
       // Construire les données des bureaux
       const filteredBureaux = (pvsData || []).map((pv: any) => {
         const reg = Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0;
         const exp = Number(pv.votes_expressed) || 0;
-        const quorum_failed = reg > 0 && exp < reg / 2;
+        // quorum_failed = false si l'admin a désactivé l'affichage public
+        const quorum_failed = showQuorumFailedPublic && reg > 0 && exp < reg / 2;
         return {
           pv_id: pv.id,
           college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
