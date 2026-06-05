@@ -29,6 +29,7 @@ import { useRBAC } from '@/hooks/useRBAC';
 import type { UserRole } from '@/contexts/AuthContext';
 import FloatingInput from '@/components/ui/floating-input';
 import FloatingSelect from '@/components/ui/floating-select';
+import { auditService } from '@/services/auditService';
 
 interface AppUser {
   id: string;
@@ -469,6 +470,13 @@ const UserManagement = () => {
       }, ...prev]);
 
       toast.success('Utilisateur créé avec succès');
+      auditService.log({
+        action: 'CREATE',
+        resource_type: 'user',
+        resource_id: inserted.id,
+        description: `Création compte : ${fName.trim()} — rôle ${fRole}${fEmail.trim() ? ` — ${fEmail.trim()}` : ''}${fPhone.trim() ? ` — ${fPhone.trim()}` : ''}`,
+        user_id: currentUser?.id,
+      }).catch(() => {});
       setShowAddModal(false);
       resetForm();
     } catch (err) {
@@ -560,6 +568,13 @@ const UserManagement = () => {
         : u
       ));
       toast.success('Utilisateur mis à jour');
+      auditService.log({
+        action: 'UPDATE',
+        resource_type: 'user',
+        resource_id: editingUser.id,
+        description: `Modification compte : ${fName.trim()} — rôle ${fRole}`,
+        user_id: currentUser?.id,
+      }).catch(() => {});
       setShowEditModal(false);
       setEditingUser(null);
       resetForm();
@@ -590,6 +605,13 @@ const UserManagement = () => {
         });
       }
 
+      auditService.log({
+        action: 'DELETE',
+        resource_type: 'user',
+        resource_id: deletingUser.id,
+        description: `Suppression compte : ${deletingUser.name} — rôle ${deletingUser.role}`,
+        user_id: currentUser?.id,
+      }).catch(() => {});
       setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
       toast.success('Utilisateur supprimé');
       setShowDeleteModal(false);
@@ -603,6 +625,14 @@ const UserManagement = () => {
   const handleToggleStatus = async (userId: string, current: boolean) => {
     const { error } = await supabase.from('users').update({ is_active: !current }).eq('id', userId);
     if (error) { toast.error('Échec de la mise à jour du statut'); return; }
+    const targetUser = users.find(u => u.id === userId);
+    auditService.log({
+      action: current ? 'DISABLE' : 'ENABLE',
+      resource_type: 'user',
+      resource_id: userId,
+      description: `Compte ${current ? 'désactivé' : 'activé'} : ${targetUser?.name ?? userId}`,
+      user_id: currentUser?.id,
+    }).catch(() => {});
     setUsers(prev => prev.map(u => u.id === userId ? { ...u, isActive: !current } : u));
   };
 

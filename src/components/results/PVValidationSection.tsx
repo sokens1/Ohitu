@@ -31,6 +31,7 @@ import {
   notifyObserverOpinion,
   notifyOpinionReaction,
 } from '@/lib/notificationService';
+import { auditService } from '@/services/auditService';
 
 // ── Composant Timeline circuit de validation ──────────────────────────────────
 interface ObserverOpinion {
@@ -309,17 +310,28 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         return;
       }
       toast.success(type === 'approved' ? 'Réserve approuvée' : 'Réserve rejetée — avis mis à jour en conforme');
-      // Notifier l'observateur concerné
+      // Audit + Notification observateur
       const pvOpinions = observerOpinions.get(selectedPV ?? '') ?? [];
       const opinion    = pvOpinions.find(op => op.id === opinionId);
       const pvData     = pvs.find(p => p.id === selectedPV);
       const bureau     = pvData ? bureauxMap.get(pvData.bureau_id) : null;
+      auditService.log({
+        action: type === 'approved' ? 'APPROVE' : 'UPDATE',
+        resource_type: 'pv_opinion',
+        resource_id: opinionId,
+        description: `Réaction sur réserve (${type}) — ${bureau?.name ?? ''}${pvData?.college_type ? ` · Collège ${pvData.college_type}` : ''}`,
+        user_id: (await supabase.auth.getUser()).data.user?.id,
+      }).catch(() => {});
       if (opinion && pvData) {
+        const ctr = bureau ? centersMap.get(bureau.center_id) : null;
         notifyOpinionReaction({
           recipientId:   opinion.observer_id,
           pvId:          selectedPV!,
           electionId:    selectedElection,
+          centerId:      bureau?.center_id ?? '',
+          centerName:    ctr?.name ?? 'établissement',
           bureauName:    bureau?.name ?? 'bureau',
+          collegeType:   pvData.college_type ?? null,
           reactionType:  type,
           actorName:     reactorName,
         }).catch(() => {/* silencieux */});
@@ -630,19 +642,27 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       });
 
       toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Réserve');
-      // Notifier admins + président du centre
+      // Audit + Notification admins + président du centre
       const pvData = pvs.find(p => p.id === selectedPV);
       const bureau = pvData ? bureauxMap.get(pvData.bureau_id) : null;
       const center = bureau ? centersMap.get(bureau.center_id) : null;
+      auditService.log({
+        action: 'OPINION',
+        resource_type: 'pv_opinion',
+        resource_id: selectedPV,
+        description: `Avis ${conformity === 'conforme' ? 'conforme' : 'de réserve'} — ${bureau?.name ?? ''}${pvData?.college_type ? ` · Collège ${pvData.college_type}` : ''} — ${center?.name ?? ''}`,
+        user_id: user.id,
+      }).catch(() => {});
       if (pvData && bureau) {
         notifyObserverOpinion({
-          pvId:       selectedPV,
-          electionId: selectedElection,
-          centerId:   bureau.center_id,
-          centerName: center?.name ?? 'établissement',
-          bureauName: bureau.name,
+          pvId:        selectedPV,
+          electionId:  selectedElection,
+          centerId:    bureau.center_id,
+          centerName:  center?.name ?? 'établissement',
+          bureauName:  bureau.name,
+          collegeType: pvData.college_type ?? null,
           conformity,
-          actorName:  user.name,
+          actorName:   user.name,
         }).catch(() => {/* silencieux */});
       }
       setDetailOpen(false);
@@ -1575,10 +1595,18 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       .eq('id', selectedPV);
                     if (!error) {
                       setPvs(prev => prev.map(p => p.id === selectedPV ? { ...p, status: 'validated', validated_by: authUser?.id || null, validated_at: new Date().toISOString() } : p));
-                      // Notification : agent + admins
+                      // Audit
                       const pvD  = pvs.find(p => p.id === selectedPV);
                       const bur  = pvD ? bureauxMap.get(pvD.bureau_id) : null;
                       const ctr  = bur ? centersMap.get(bur.center_id) : null;
+                      auditService.log({
+                        action: 'VALIDATE',
+                        resource_type: 'procès_verbaux',
+                        resource_id: selectedPV!,
+                        description: `Validation du PV — ${bur?.name ?? ''}${pvD?.college_type ? ` · Collège ${pvD.college_type}` : ''} — ${ctr?.name ?? ''}`,
+                        user_id: authUser?.id,
+                      }).catch(() => {});
+                      // Notification : agent + admins
                       if (pvD && bur && user) {
                         notifyPVValidated({
                           pvId:          selectedPV!,
@@ -1586,6 +1614,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           centerId:      bur.center_id,
                           centerName:    ctr?.name ?? 'établissement',
                           bureauName:    bur.name,
+                          collegeType:   pvD.college_type ?? null,
                           submittedById: pvD.entered_by ?? null,
                           actorName:     user.name,
                         }).catch(() => {});
@@ -1749,10 +1778,17 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       : p
                   ));
                   toast.success('PV rejeté — renvoyé en saisie');
-                  // Notification : agent + admins
+                  // Audit + Notification : agent + admins
                   const pvD2 = pvs.find(p => p.id === selectedPV);
                   const bur2 = pvD2 ? bureauxMap.get(pvD2.bureau_id) : null;
                   const ctr2 = bur2 ? centersMap.get(bur2.center_id) : null;
+                  auditService.log({
+                    action: 'REJECT',
+                    resource_type: 'procès_verbaux',
+                    resource_id: selectedPV!,
+                    description: `Rejet du PV — ${bur2?.name ?? ''}${pvD2?.college_type ? ` · Collège ${pvD2.college_type}` : ''} — ${ctr2?.name ?? ''} : ${rejectComment}`,
+                    user_id: authUser?.id,
+                  }).catch(() => {});
                   if (pvD2 && bur2 && user) {
                     notifyPVRejected({
                       pvId:          selectedPV!,
@@ -1760,6 +1796,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       centerId:      bur2.center_id,
                       centerName:    ctr2?.name ?? 'établissement',
                       bureauName:    bur2.name,
+                      collegeType:   pvD2.college_type ?? null,
                       submittedById: pvD2.entered_by ?? null,
                       comment:       rejectComment,
                       actorName:     user.name,
