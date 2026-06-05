@@ -33,7 +33,7 @@ import FloatingSelect from '@/components/ui/floating-select';
 interface AppUser {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   role: UserRole;
   isActive: boolean;
   createdAt: string;
@@ -289,7 +289,8 @@ const UserManagement = () => {
   // ── Filtrage local ──────────────────────────────────────────────────────────
   const filteredUsers = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        u.email.toLowerCase().includes(searchTerm.toLowerCase());
+                        (u.email ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        (u.phone ?? '').includes(searchTerm);
     const matchRole     = roleFilter === 'all' || u.role === roleFilter;
     const matchStatus   = statusFilter === 'all' ||
                           (statusFilter === 'active' && u.isActive) ||
@@ -311,7 +312,7 @@ const UserManagement = () => {
 
   const openEdit = (u: AppUser) => {
     setEditingUser(u);
-    setFName(u.name); setFEmail(u.email); setFPhone(u.phone ?? '');
+    setFName(u.name); setFEmail(u.email ?? ''); setFPhone(u.phone ?? '');
     setFPassword(''); setFRole(u.role); setFActive(u.isActive);
     const ids = u.assigned_election_ids?.length
       ? u.assigned_election_ids
@@ -398,8 +399,11 @@ const UserManagement = () => {
 
   // ── Création via l'endpoint serveur (évite la limite de taux de auth.signUp) ─
   const handleCreate = async () => {
-    if (!fName.trim() || !fEmail.trim() || !fPassword.trim()) {
-      toast.error('Nom, email et mot de passe sont requis'); return;
+    if (!fName.trim() || !fPassword.trim()) {
+      toast.error('Nom et mot de passe sont requis'); return;
+    }
+    if (!fEmail.trim() && !fPhone.trim()) {
+      toast.error('Au moins un identifiant est requis : email ou numéro de téléphone'); return;
     }
     if (fPassword.length < 6) {
       toast.error('Le mot de passe doit contenir au moins 6 caractères'); return;
@@ -477,8 +481,11 @@ const UserManagement = () => {
 
   // ── Mise à jour ─────────────────────────────────────────────────────────────
   const handleUpdate = async () => {
-    if (!editingUser || !fName.trim() || !fEmail.trim()) {
-      toast.error('Nom et email sont requis'); return;
+    if (!editingUser || !fName.trim()) {
+      toast.error('Le nom est requis'); return;
+    }
+    if (!fEmail.trim() && !fPhone.trim()) {
+      toast.error('Au moins un identifiant est requis : email ou numéro de téléphone'); return;
     }
     setUpdating(true);
     try {
@@ -603,7 +610,7 @@ const UserManagement = () => {
           autoComplete="off"
         />
         <FloatingInput
-          label="Email"
+          label={fPhone.trim() ? 'Email (optionnel)' : 'Email'}
           type="email"
           value={fEmail}
           onChange={e => setFEmail(e.target.value)}
@@ -613,7 +620,7 @@ const UserManagement = () => {
 
       {/* Ligne 2 : Téléphone */}
       <FloatingInput
-        label="Numéro de téléphone — format 077-00-00-00 (optionnel)"
+        label={fEmail.trim() ? 'Numéro de téléphone — format 077-00-00-00 (optionnel)' : 'Numéro de téléphone — format 077-00-00-00'}
         type="tel"
         value={fPhone}
         onChange={e => {
@@ -961,7 +968,7 @@ const UserManagement = () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-gray-900 text-sm truncate">{u.name}</p>
-                        <p className="text-xs text-gray-500 truncate">{u.email}</p>
+                        <p className="text-xs text-gray-500 truncate">{u.email || u.phone || '—'}</p>
                         {u.electionTitle && (
                           <p className="text-xs text-blue-600 truncate mt-0.5">
                             Élection : {u.electionTitle}

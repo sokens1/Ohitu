@@ -53,33 +53,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     assigned_center_ids, assigned_center_bureaux, assigned_center_colleges,
   } = req.body || {};
 
-  if (!name || !email || !password || !role) {
-    return res.status(400).json({ error: 'Champs obligatoires manquants (name, email, password, role)' });
+  console.log('[create-user] body reçu:', { name, email: email ? '[fourni]' : '[vide]', phone: phone ? '[fourni]' : '[vide]', role });
+
+  const emailTrimmed = typeof email === 'string' ? email.trim() : '';
+  const phoneTrimmed = typeof phone === 'string' ? phone.trim() : '';
+
+  if (!name || !password || !role) {
+    return res.status(400).json({ error: 'Champs obligatoires manquants (name, password, role)' });
+  }
+  if (!emailTrimmed && !phoneTrimmed) {
+    return res.status(400).json({ error: 'Au moins un identifiant est requis : email ou numéro de téléphone' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
   }
 
   // L'admin ne peut créer que des rôles opérationnels
-  const OPERATIONAL_ROLES = ['validateur', 'agent-saisie', 'observateur', 'president-bureau'];
+  const OPERATIONAL_ROLES = [
+    'validateur', 'agent-saisie', 'observateur', 'president-bureau',
+    'president-etablissement', 'employeur', 'suppleant-president',
+  ];
   if (callerData.role === 'admin' && !OPERATIONAL_ROLES.includes(role)) {
     return res.status(403).json({ error: 'Un admin ne peut créer que des rôles opérationnels' });
   }
 
+  // ── Résolution de l'email pour Supabase Auth (obligatoire côté Auth) ────────
+  // Si aucun email fourni, on génère un email interne basé sur le téléphone
+  const normalizedPhone = phoneTrimmed.replace(/[^0-9]/g, '');
+  const authEmail: string = emailTrimmed || `tel${normalizedPhone}@noreply.ohitu.ga`;
+
   // ── Création du compte Auth ────────────────────────────────────────────────
   let authUserId: string;
   const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-    email,
+    email: authEmail,
     password,
     email_confirm: true,
   });
 
   if (authErr) {
+    console.error('[create-user] Auth error:', authErr.message, '| authEmail used:', authEmail);
     // Compte déjà existant : récupérer son ID
     if (authErr.message?.includes('already been registered') || authErr.message?.includes('already exists')) {
       const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
       if (listErr) return res.status(400).json({ error: `Impossible de récupérer l'utilisateur : ${listErr.message}` });
-      const existing = listData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+      const existing = listData.users.find((u: any) => u.email?.toLowerCase() === authEmail.toLowerCase());
       if (!existing) return res.status(400).json({ error: 'Compte Auth introuvable.' });
       authUserId = existing.id;
       await supabaseAdmin.auth.admin.updateUserById(authUserId, {
@@ -100,8 +117,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .upsert({
       id: authUserId,
       name: name.trim(),
-      email: email.trim(),
-      phone: phone?.trim() || null,
+      email: emailTrimmed || null,
+      phone: phoneTrimmed || null,
       role,
       is_active: is_active ?? true,
       assigned_election_id: assigned_election_id || null,
@@ -115,7 +132,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .single();
 
   if (userErr) {
+    console.error('[create-user] DB error:', userErr.message);
     if (!authErr) await supabaseAdmin.auth.admin.deleteUser(authUserId);
+    if (userErr.message?.includes('not-null') && userErr.message?.includes('email')) {
+      return res.status(400).json({ error: 'Migration requise : exécutez 20260605_users_email_nullable.sql dans Supabase pour autoriser les comptes sans email.' });
+    }
     return res.status(400).json({ error: `Erreur base de données : ${userErr.message}` });
   }
 

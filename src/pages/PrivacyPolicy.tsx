@@ -5,7 +5,7 @@ import {
   Users, FileCheck, Scale, Mail, RefreshCw, AlertCircle, ChevronDown,
 } from 'lucide-react';
 
-// ── Données des sections ──────────────────────────────────────────────────────
+// ── Sections avec texte verbatim du document ──────────────────────────────────
 
 const SECTIONS = [
   {
@@ -13,10 +13,11 @@ const SECTIONS = [
     title: 'Objet',
     body: (
       <p>
-        La présente politique décrit la manière dont la plateforme <strong>o'Hitu</strong>, développée
-        par le cabinet <strong>CNX 4.0</strong> et mise à disposition de la <strong>SEEG</strong> pour
-        les Élections des Délégués du Personnel 2026, collecte, traite et publie les données dans le
-        respect des droits des personnes concernées.
+        La présente politique de confidentialité décrit la manière dont la plateforme <em>o'Hitu</em>,
+        développée par le cabinet <strong>CNX 4.0</strong> et mise à disposition de la Société d'Énergie
+        et d'Eau du Gabon (<strong>SEEG</strong>) pour l'organisation des Élections des Délégués du
+        Personnel de l'année 2026, collecte, traite et publie les données dans le respect des droits
+        des personnes concernées.
       </p>
     ),
   },
@@ -26,18 +27,23 @@ const SECTIONS = [
     body: (
       <div className="space-y-3">
         <p>
-          Le responsable du traitement est <strong>CNX 4.0</strong>, cabinet spécialisé en architecture
-          d'affaires, développeur et opérateur de la plateforme <em>o'Hitu</em>.
+          Le responsable du traitement des données est <strong>CNX 4.0</strong>, cabinet spécialisé en
+          architecture d'affaires, développeur et opérateur de la plateforme <em>o'Hitu</em>.
         </p>
         <p>
-          La <strong>SEEG</strong> est l'organisation cliente. Elle est destinataire des résultats publiés
-          et responsable du processus électoral, mais n'intervient pas dans les aspects techniques du
-          traitement des données.
+          La <strong>SEEG</strong> est l'organisation cliente pour le compte de laquelle la plateforme
+          est déployée dans le cadre des élections des délégués du personnel 2026. À ce titre, elle est
+          destinataire des résultats publiés et responsable des décisions relatives au processus électoral
+          lui-même, mais elle n'intervient pas <em>a priori</em> dans les aspects techniques du traitement
+          des données personnelles sur la plateforme.
         </p>
-        <a href="mailto:support@cnx4-0.com"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-teal-200 bg-teal-50 text-teal-700 text-sm font-medium hover:bg-teal-100 transition-colors">
-          <Mail className="w-4 h-4" /> support@cnx4-0.com
-        </a>
+        <p>
+          Pour toute question relative à la présente politique, CNX 4.0 peut être contacté à l'adresse :{' '}
+          <a href="mailto:support@cnx4-0.com"
+            className="text-teal-600 font-medium hover:underline">
+            support@cnx4-0.com
+          </a>.
+        </p>
       </div>
     ),
   },
@@ -45,33 +51,52 @@ const SECTIONS = [
     id: '03', icon: Database, color: '#4F46E5', light: '#EEF2FF',
     title: 'Données collectées et finalités',
     body: (
-      <div className="space-y-5">
-        <Section3Block
-          title="Données publiées — résultats électoraux"
-          note="Conformément à l'Arrêté n°000147/MTEFP/SG/DGTMOE/DTR du 26 avril 2001"
-          items={[
-            'Nom, prénom et syndicat des candidats élus',
-            'Collège électoral et établissement pour lesquels ils ont été élus',
-            'Résultats agrégés par syndicat, par collège et par établissement',
-            'Statistiques de participation (inscrits, votants, taux, suffrages exprimés)',
-          ]}
-        />
-        <Section3Block
-          title="Données personnelles des candidats"
-          note="Conservées uniquement en interne (art. 17 et 18 de l'Arrêté n°000147)"
-          items={[
-            'Non publiées sur la partie publique de la plateforme',
-            'Conservées à des fins de traçabilité et de départage en cas d\'égalité',
-          ]}
-        />
-        <Section3Block
-          title="Données de connexion des administrateurs"
-          note="Piste d'audit"
-          items={[
-            'Identité de l\'utilisateur, date et heure de connexion',
-            'Actions effectuées — exclusivement pour garantir l\'intégrité du processus',
-          ]}
-        />
+      <div className="space-y-4">
+        <p>La plateforme traite deux catégories distinctes de données, soumises à des régimes différents.</p>
+
+        <div>
+          <p className="font-semibold text-gray-900 mb-2">Données publiées relatives aux résultats électoraux</p>
+          <p className="mb-2">
+            Ces données sont rendues publiques conformément aux dispositions de l'<em>Arrêté
+            n°000147/MTEFP/SG/DGTMOE/DTR du 26 avril 2001</em> réglementant l'institution des Délégués
+            du Personnel, qui prévoit l'affichage des listes de candidats et la communication des résultats
+            aux parties prenantes. Sont publiés :
+          </p>
+          <ul className="space-y-1 pl-4">
+            {[
+              'Le nom, le prénom et le syndicat des candidats élus à l\'issue du scrutin',
+              'Le collège électoral et l\'établissement pour lesquels ils ont été élus',
+              'Les résultats agrégés par syndicat, par collège et par établissement',
+              'Les statistiques de participation (nombre d\'inscrits, de votants, taux de participation, suffrages exprimés)',
+            ].map((item, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0 mt-2" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <p className="font-semibold text-gray-900 mb-2">Données personnelles des candidats</p>
+          <p>
+            Les données personnelles individuelles des candidats — qu'ils aient ou non obtenu un siège —
+            telles que l'âge, l'ancienneté et la situation familiale, ne sont pas publiées sur la partie
+            publique de la plateforme. Elles sont conservées uniquement dans les systèmes internes à des
+            fins de traçabilité du processus électoral et de départage en cas d'égalité, conformément aux
+            Articles 17 et 18 de l'Arrêté n°000147.
+          </p>
+        </div>
+
+        <div>
+          <p className="font-semibold text-gray-900 mb-2">Données de connexion des utilisateurs administrateurs</p>
+          <p>
+            Les accès à l'interface d'administration font l'objet d'une journalisation (piste d'audit)
+            enregistrant l'identité de l'utilisateur, la date et l'heure de connexion, ainsi que des
+            actions effectuées. Ces données sont exclusivement destinées à garantir l'intégrité du
+            processus de saisie et de publication des résultats.
+          </p>
+        </div>
       </div>
     ),
   },
@@ -80,9 +105,9 @@ const SECTIONS = [
     title: 'Données non collectées',
     body: (
       <p>
-        La plateforme ne collecte <strong>aucune donnée sur les visiteurs de la partie publique</strong>.
-        Aucun cookie de traçage, aucun identifiant de navigation et aucune donnée personnelle n'est
-        collecté auprès du public consultant les résultats.
+        La plateforme ne collecte aucune donnée sur les visiteurs de la partie publique. Aucun cookie de
+        traçage, aucun identifiant de navigation et aucune donnée personnelle n'est collecté auprès du
+        public consultant simplement les résultats sur la vue publique.
       </p>
     ),
   },
@@ -90,24 +115,23 @@ const SECTIONS = [
     id: '05', icon: Shield, color: '#1B2E5A', light: '#F1F5F9',
     title: 'Secret du vote et listes d\'émargement',
     body: (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <p>
-          La plateforme ne collecte, ne publie et ne conserve <strong>aucune donnée permettant d'identifier
-          le choix individuel d'un électeur</strong>. Les résultats sont publiés uniquement sous forme
-          agrégée par syndicat, collège et établissement.
+          La plateforme ne collecte, ne publie et ne conserve aucune donnée permettant d'identifier le
+          choix individuel d'un électeur. Les résultats sont publiés uniquement sous forme agrégée par
+          syndicat, par collège et par établissement, de sorte qu'il soit impossible de reconstituer le
+          vote d'une personne.
         </p>
         <p>
-          Les listes d'émargement ne sont <strong>pas accessibles au public</strong>. Elles sont
-          consultables uniquement par l'employeur et la Commission Technique Bipartite, conformément
-          au Protocole d'Accord Préélectoral.
+          Les listes d'émargement ne sont pas accessibles au public. Elles sont uniquement consultables
+          par l'employeur et par la Commission Technique Bipartite, afin de garantir l'intégrité des
+          opérations de dépouillement, de saisie et de publication des résultats, conformément aux
+          dispositions du Protocole d'Accord Préélectoral.
         </p>
-        <div className="flex items-start gap-3 p-4 rounded-2xl bg-[#1B2E5A]/6 border border-[#1B2E5A]/12">
-          <Shield className="w-5 h-5 text-[#1B2E5A] flex-shrink-0 mt-0.5" />
-          <p className="text-sm font-semibold text-[#1B2E5A] leading-snug">
-            Le secret du scrutin est une garantie substantielle du processus électoral à laquelle
-            il ne peut être dérogé.
-          </p>
-        </div>
+        <p className="font-semibold text-[#1B2E5A]">
+          Le secret du scrutin est une garantie substantielle du processus électoral à laquelle il ne
+          peut être dérogé.
+        </p>
       </div>
     ),
   },
@@ -115,23 +139,24 @@ const SECTIONS = [
     id: '06', icon: Scale, color: '#D97706', light: '#FFFBEB',
     title: 'Base légale du traitement',
     body: (
-      <div className="space-y-2.5">
-        {[
-          { ref: 'Loi n°022/2021 du 19 novembre 2021', detail: 'Code du Travail en République Gabonaise — art. 327, 328 et 329' },
-          { ref: 'Arrêté n°000147/MTEFP/SG/DGTMOE/DTR du 26 avril 2001', detail: 'Réglementant l\'institution des Délégués du Personnel' },
-          { ref: 'Arrêté n°0009/MTPEDSFP/MFPRC du 09 avril 2026', detail: 'Portant convocation du collège électoral' },
-          { ref: 'Protocole d\'Accord Préélectoral SEEG 2026', detail: 'Modalités pratiques validées par les parties prenantes' },
-        ].map((item, i) => (
-          <div key={i} className="flex items-start gap-3 p-3.5 rounded-xl bg-amber-50 border border-amber-100">
-            <span className="w-6 h-6 rounded-lg bg-amber-200 text-amber-800 text-xs font-black flex items-center justify-center flex-shrink-0">
-              {i + 1}
-            </span>
-            <div className="text-sm leading-snug">
-              <p className="font-semibold text-gray-900">{item.ref}</p>
-              <p className="text-gray-500 mt-0.5">{item.detail}</p>
-            </div>
-          </div>
-        ))}
+      <div className="space-y-2">
+        <p>
+          Le traitement des données relatives aux résultats électoraux repose sur les obligations légales
+          suivantes :
+        </p>
+        <ul className="space-y-2 pl-2">
+          {[
+            { bold: 'Loi n°022/2021 du 19 novembre 2021 portant Code du Travail en République Gabonaise', detail: ', notamment en ses articles 327, 328 et 329 qui fixent le cadre de l\'élection des Délégués du personnel ;' },
+            { bold: 'Arrêté n°000147/MTEFP/SG/DGTMOE/DTR du 26 avril 2001', detail: ' réglementant l\'institution des Délégués du Personnel ;' },
+            { bold: 'Arrêté n°0009/MTPEDSFP/MFPRC du 09 avril 2026', detail: ' portant convocation du collège électoral pour les élections professionnelles de l\'année 2026 ;' },
+            { bold: 'Protocole d\'Accord Préélectoral SEEG 2026', detail: ', qui fixe les modalités pratiques, validées de commun accord par les parties prenantes, pour l\'organisation de l\'élection.' },
+          ].map((item, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0 mt-2" />
+              <span><strong>{item.bold}</strong>{item.detail}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     ),
   },
@@ -139,18 +164,23 @@ const SECTIONS = [
     id: '07', icon: Clock, color: '#EA580C', light: '#FFF7ED',
     title: 'Durée de conservation',
     body: (
-      <div className="grid sm:grid-cols-3 gap-3">
-        {[
-          { label: 'Données des élus', duration: '3 ans', sub: 'Durée du mandat, puis archivées' },
-          { label: 'Piste d\'audit', duration: '1 mois', sub: 'À compter de la publication des résultats (art. 328)' },
-          { label: 'Données candidates', duration: '1 mois', sub: 'Supprimées une fois le processus clos' },
-        ].map((d, i) => (
-          <div key={i} className="rounded-2xl bg-orange-50 border border-orange-100 p-4 text-center">
-            <p className="text-3xl font-black text-orange-600 leading-none">{d.duration}</p>
-            <p className="text-sm font-semibold text-gray-800 mt-1.5">{d.label}</p>
-            <p className="text-[11px] text-gray-400 mt-1 leading-snug">{d.sub}</p>
-          </div>
-        ))}
+      <div className="space-y-3">
+        <p>
+          Les données publiées relatives aux élus sont conservées par l'employeur pendant la durée du
+          mandat de trois ans. À l'issue de ce mandat, elles sont archivées à des fins d'historique
+          institutionnel.
+        </p>
+        <p>
+          Les données de la piste d'audit sont conservées pendant une durée d'un mois à compter de la
+          date de publication des résultats officiels, durée proportionnée aux délais de recours et de
+          contentieux post-électoraux prévus par la <em>Loi n°022/2021 du 19 novembre 2021 portant Code
+          du Travail en République Gabonaise</em> (Article 328) et par le <em>Protocole d'Accord
+          Préélectoral</em> (Article 13).
+        </p>
+        <p>
+          Les données personnelles des candidats conservées en interne sont supprimées à l'issue de cette
+          même période d'un mois, une fois le processus électoral définitivement clos.
+        </p>
       </div>
     ),
   },
@@ -158,37 +188,21 @@ const SECTIONS = [
     id: '08', icon: Users, color: '#7C3AED', light: '#F5F3FF',
     title: 'Destinataires des données',
     body: (
-      <div className="space-y-2.5">
-        {[
-          {
-            who: 'Grand public',
-            badge: 'Public',
-            badgeColor: 'bg-violet-100 text-violet-700',
-            what: 'Résultats agrégés publiés sur la partie publique, accessibles à toute personne disposant d\'un accès internet.',
-          },
-          {
-            who: 'Direction SEEG & Commission Bipartite',
-            badge: 'Restreint',
-            badgeColor: 'bg-amber-100 text-amber-700',
-            what: 'Données internes (piste d\'audit, données candidates). En cas de contentieux : Inspecteur du Travail.',
-          },
-          {
-            who: 'Équipes techniques CNX 4.0',
-            badge: 'Technique',
-            badgeColor: 'bg-slate-100 text-slate-600',
-            what: 'Accès strictement limité aux obligations d\'administration, maintenance et support.',
-          },
-        ].map((d, i) => (
-          <div key={i} className="flex items-start gap-3 p-4 rounded-2xl bg-white border border-violet-100 shadow-sm">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <p className="text-sm font-semibold text-gray-900">{d.who}</p>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.badgeColor}`}>{d.badge}</span>
-              </div>
-              <p className="text-xs text-gray-500 leading-snug">{d.what}</p>
-            </div>
-          </div>
-        ))}
+      <div className="space-y-3">
+        <p>
+          Les résultats publiés sur la partie publique de la plateforme sont accessibles à toute personne
+          disposant d'un accès internet, conformément à l'objectif de transparence du processus électoral.
+        </p>
+        <p>
+          Les données internes (piste d'audit, données personnelles des candidats) sont accessibles
+          uniquement aux personnes habilitées au sein de la Direction Générale et de la Direction du
+          Capital Humain de la SEEG, ainsi qu'à la Commission Technique Bipartite prévue par le
+          Protocole d'Accord Préélectoral et, en cas de contentieux, à l'Inspecteur du Travail compétent.
+        </p>
+        <p>
+          Les équipes techniques de CNX 4.0 peuvent accéder aux données dans le strict cadre de leurs
+          obligations d'administration, d'animation, de maintenance et de support de la plateforme.
+        </p>
       </div>
     ),
   },
@@ -196,27 +210,33 @@ const SECTIONS = [
     id: '09', icon: Eye, color: '#0891B2', light: '#ECFEFF',
     title: 'Droits des personnes concernées',
     body: (
-      <div className="space-y-4">
-        <div className="grid sm:grid-cols-3 gap-3">
+      <div className="space-y-3">
+        <p>
+          Toute personne dont les données sont traitées dans le cadre de ce processus électoral dispose,
+          dans les limites permises par les obligations légales encadrant la publication des résultats
+          d'une élection professionnelle, des droits suivants :
+        </p>
+        <ul className="space-y-1 pl-2">
           {[
-            { right: 'Accès', desc: 'Obtenir confirmation et copie des données vous concernant.' },
-            { right: 'Rectification', desc: 'Demander la correction de données inexactes.' },
-            { right: 'Opposition', desc: 'S\'opposer à un traitement dans les cas prévus par la loi.' },
-          ].map((d, i) => (
-            <div key={i} className="p-4 rounded-2xl bg-cyan-50 border border-cyan-100 text-center">
-              <p className="text-sm font-bold text-cyan-700 mb-1">Droit de {d.right}</p>
-              <p className="text-xs text-gray-500 leading-snug">{d.desc}</p>
-            </div>
+            { right: 'Droit d\'accès', desc: ' : obtenir confirmation que des données la concernant sont traitées et en obtenir une copie' },
+            { right: 'Droit de rectification', desc: ' : demander la correction de données inexactes' },
+            { right: 'Droit d\'opposition', desc: ' : s\'opposer à un traitement dans les cas prévus par la loi' },
+          ].map((item, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0 mt-2" />
+              <span><strong>{item.right}</strong>{item.desc}</span>
+            </li>
           ))}
-        </div>
-        <div className="flex items-start gap-3 p-4 rounded-2xl bg-white border border-cyan-100">
-          <Mail className="w-4 h-4 text-cyan-600 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-gray-600 leading-snug">
-            <strong>Exercice des droits :</strong> adresser une demande écrite à la Direction du Capital
-            Humain de la SEEG, Avenue Félix Éboué, BP 2187, Libreville. Toute réclamation sur les
-            résultats relève de la Commission Technique Bipartite puis de l'Inspection du Travail.
-          </p>
-        </div>
+        </ul>
+        <p>
+          Ces droits peuvent être exercés en adressant une demande écrite à la Direction du Capital
+          Humain de la SEEG, Avenue Félix Éboué, BP 2187, Libreville.
+        </p>
+        <p>
+          Toute réclamation relative aux résultats électoraux publiés relève, conformément à l'Article 13
+          du Protocole d'Accord Préélectoral, de la Commission Technique Bipartite puis, en dernier
+          ressort, de l'Inspection du Travail du ressort.
+        </p>
       </div>
     ),
   },
@@ -224,21 +244,13 @@ const SECTIONS = [
     id: '10', icon: Lock, color: '#16A34A', light: '#F0FDF4',
     title: 'Sécurité',
     body: (
-      <div className="space-y-3">
-        {[
-          { label: 'Gestion des rôles', desc: 'Système d\'authentification et de contrôle d\'accès par rôles (RBAC) pour tous les utilisateurs administrateurs.' },
-          { label: 'Piste d\'audit horodatée', desc: 'Toutes les actions effectuées sur les données sont enregistrées avec identité, date et heure.' },
-          { label: 'Chiffrement en transit', desc: 'Les communications entre la plateforme et les utilisateurs sont sécurisées par HTTPS.' },
-        ].map((d, i) => (
-          <div key={i} className="flex items-start gap-3 p-3.5 rounded-xl bg-green-50 border border-green-100">
-            <Lock className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-semibold text-gray-800">{d.label}</p>
-              <p className="text-gray-500 text-xs mt-0.5">{d.desc}</p>
-            </div>
-          </div>
-        ))}
-      </div>
+      <p>
+        La plateforme met en œuvre des mesures techniques et organisationnelles appropriées pour protéger
+        les données contre tout accès non autorisé, toute modification ou toute divulgation non prévue,
+        notamment via un système de gestion des rôles et d'authentification des utilisateurs
+        administrateurs, ainsi qu'une piste d'audit horodatée de toutes les actions effectuées sur
+        les données.
+      </p>
     ),
   },
   {
@@ -254,26 +266,6 @@ const SECTIONS = [
   },
 ];
 
-// ── Sous-composant bloc Section 3 ─────────────────────────────────────────────
-function Section3Block({ title, note, items }: { title: string; note: string; items: string[] }) {
-  return (
-    <div className="rounded-xl border border-indigo-100 overflow-hidden">
-      <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-100">
-        <p className="text-xs font-bold text-indigo-700">{title}</p>
-        <p className="text-[11px] text-indigo-400 italic mt-0.5">{note}</p>
-      </div>
-      <ul className="px-4 py-3 space-y-1.5 bg-white">
-        {items.map((item, i) => (
-          <li key={i} className="flex items-start gap-2 text-xs text-gray-600">
-            <span className="w-1 h-1 rounded-full bg-indigo-300 flex-shrink-0 mt-1.5" />
-            {item}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 // ── Accordion item ─────────────────────────────────────────────────────────────
 function SectionCard({ section }: { section: typeof SECTIONS[0] }) {
   const [open, setOpen] = useState(true);
@@ -284,24 +276,25 @@ function SectionCard({ section }: { section: typeof SECTIONS[0] }) {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors"
+        className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors text-left"
       >
-        {/* Numéro + icône */}
         <div className="flex-shrink-0 flex items-center gap-3">
-          <span className="text-[11px] font-black tabular-nums" style={{ color: section.color }}>{section.id}</span>
+          <span className="text-[11px] font-black tabular-nums" style={{ color: section.color }}>
+            {section.id}
+          </span>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: section.light }}>
             <Icon className="w-4 h-4" style={{ color: section.color }} />
           </div>
         </div>
-        <h2 className="flex-1 text-left text-sm font-bold text-gray-900">{section.title}</h2>
+        <h2 className="flex-1 text-sm font-bold text-gray-900">{section.title}</h2>
         <ChevronDown
           className="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200"
-          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0)' }}
         />
       </button>
 
       {open && (
-        <div className="px-5 pb-5 pt-1 text-sm text-gray-600 leading-relaxed border-t border-gray-50">
+        <div className="px-5 pb-5 pt-1 text-sm text-gray-700 leading-relaxed border-t border-gray-50">
           {section.body}
         </div>
       )}
@@ -309,17 +302,17 @@ function SectionCard({ section }: { section: typeof SECTIONS[0] }) {
   );
 }
 
-// ── Page principale ───────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 const PrivacyPolicy: React.FC = () => (
-  <div className="min-h-screen" style={{ background: 'linear-gradient(160deg, #f0f4ff 0%, #f8fafc 60%)' }}>
+  <div className="min-h-screen" style={{ background: 'linear-gradient(160deg,#f0f4ff 0%,#f8fafc 60%)' }}>
 
-    {/* ── Hero ── */}
-    <div className="relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0f1f3d 0%, #1B2E5A 60%, #1e3a6e 100%)' }}>
-      {/* Cercles décoratifs */}
+    {/* Hero */}
+    <div className="relative overflow-hidden"
+      style={{ background: 'linear-gradient(135deg,#0f1f3d 0%,#1B2E5A 60%,#1e3a6e 100%)' }}>
       <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full opacity-10"
-        style={{ background: 'radial-gradient(circle, #60a5fa, transparent)' }} />
+        style={{ background: 'radial-gradient(circle,#60a5fa,transparent)' }} />
       <div className="absolute -bottom-10 -left-10 w-48 h-48 rounded-full opacity-8"
-        style={{ background: 'radial-gradient(circle, #34d399, transparent)' }} />
+        style={{ background: 'radial-gradient(circle,#34d399,transparent)' }} />
 
       <div className="relative max-w-3xl mx-auto px-5 sm:px-8 pt-8 pb-12">
         <Link to="/"
@@ -327,17 +320,15 @@ const PrivacyPolicy: React.FC = () => (
           <ArrowLeft className="w-3.5 h-3.5" /> Retour à l'accueil
         </Link>
 
-        {/* Badges */}
         <div className="flex flex-wrap gap-2 mb-6">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] font-semibold text-blue-200">
-            <Clock className="w-3 h-3" /> Juin 2026
+            <Clock className="w-3 h-3" /> Dernière mise à jour : juin 2026
           </span>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/25 text-[11px] font-semibold text-emerald-300">
-            <FileCheck className="w-3 h-3" /> Loi n°022/2021
+            <FileCheck className="w-3 h-3" /> Conforme Loi n°022/2021
           </span>
         </div>
 
-        {/* Titre */}
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center flex-shrink-0">
             <Shield className="w-6 h-6 text-white" />
@@ -347,7 +338,7 @@ const PrivacyPolicy: React.FC = () => (
               Politique de confidentialité
             </h1>
             <p className="text-blue-300 text-sm mt-1.5 font-medium">
-              Élections des Délégués du Personnel SEEG · Édition 2026
+              Élections des Délégués du Personnel SEEG — Édition 2026
             </p>
             <p className="text-blue-400 text-xs mt-1">
               Plateforme o'Hitu — développée et opérée par CNX 4.0
@@ -355,12 +346,11 @@ const PrivacyPolicy: React.FC = () => (
           </div>
         </div>
 
-        {/* Résumé en 3 points */}
         <div className="grid grid-cols-3 gap-3 mt-8 pt-6 border-t border-white/10">
           {[
-            { icon: Eye,      label: 'Transparence', sub: 'Résultats publics' },
-            { icon: Lock,     label: 'Sécurité',     sub: 'RBAC + audit' },
-            { icon: Shield,   label: 'Secret',       sub: 'Vote individuel protégé' },
+            { icon: Eye,   label: 'Transparence', sub: 'Résultats publics' },
+            { icon: Lock,  label: 'Sécurité',     sub: 'RBAC + audit' },
+            { icon: Shield,label: 'Secret',       sub: 'Vote individuel protégé' },
           ].map(({ icon: I, label, sub }) => (
             <div key={label} className="text-center">
               <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center mx-auto mb-1.5">
@@ -374,12 +364,13 @@ const PrivacyPolicy: React.FC = () => (
       </div>
     </div>
 
-    {/* ── Sections ── */}
+    {/* Sections */}
     <div className="max-w-3xl mx-auto px-5 sm:px-8 py-8 space-y-3">
       {SECTIONS.map(s => <SectionCard key={s.id} section={s} />)}
 
       {/* Footer */}
-      <div className="rounded-2xl overflow-hidden mt-6" style={{ background: 'linear-gradient(135deg, #0f1f3d, #1B2E5A)' }}>
+      <div className="rounded-2xl overflow-hidden mt-6"
+        style={{ background: 'linear-gradient(135deg,#0f1f3d,#1B2E5A)' }}>
         <div className="px-6 py-6 text-center space-y-2">
           <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center mx-auto mb-3">
             <Shield className="w-5 h-5 text-blue-300" />
@@ -390,7 +381,8 @@ const PrivacyPolicy: React.FC = () => (
           </p>
           <p className="text-xs text-blue-400 mt-2">
             CNX 4.0 ·{' '}
-            <a href="mailto:support@cnx4-0.com" className="hover:text-white transition-colors underline underline-offset-2">
+            <a href="mailto:support@cnx4-0.com"
+              className="hover:text-white transition-colors underline underline-offset-2">
               support@cnx4-0.com
             </a>
           </p>
