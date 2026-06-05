@@ -162,12 +162,13 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const [electionType, setElectionType] = useState<string | undefined>();
   const [rawResultsData, setRawResultsData] = useState<{
     crRows: any[];
-    pvMeta: Map<string, { centerId: string; centerName: string; collegeType: string | null }>;
+    pvMeta: Map<string, { centerId: string; centerName: string; collegeType: string | null; status: string }>;
     baseVotesByCandidate: Record<string, any>;
     availableCenters: { id: string; name: string }[];
     availableColleges: string[];
     bureauSeats: Map<string, number>; // "centerId_collegeType" → seats_to_fill (per-establishment)
     collegeSeatsMap: Record<string, number>; // collegeType → seats_to_fill (global fallback)
+    pvQuorumFailed: Set<string>; // IDs des PV dont le quorum n'est pas atteint
   } | null>(null);
   const [logosByParty, setLogosByParty] = useState<Record<string, string>>({});
   const [showSimulation, setShowSimulation] = useState(() =>
@@ -176,6 +177,14 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const [hideSimulationFromPublic, setHideSimulationFromPublic] = useState(() =>
     selectedElection ? localStorage.getItem(`sim_public_hidden_${selectedElection}`) !== 'false' : true
   );
+  const [filterCenter, setFilterCenter] = useState('');
+  const [filterCollege, setFilterCollege] = useState('');
+
+  // Réinitialiser les filtres lors du changement d'élection
+  useEffect(() => {
+    setFilterCenter('');
+    setFilterCollege('');
+  }, [selectedElection]);
 
   // Synchroniser les états simulation quand l'élection change
   useEffect(() => {
@@ -302,8 +311,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
 
         
 
-        // 2) Récupérer résultats par candidat pour ces PV (hors quorum échoué)
-        const pvIds = Array.from(new Set((filteredPvsForResults || []).map((p: any) => p.id).filter(Boolean)));
+        // 2) Récupérer résultats par candidat pour TOUS les PV (filtrage quorum dans votesByCandidate)
+        const pvIds = Array.from(new Set((filteredPvsAll || []).map((p: any) => p.id).filter(Boolean)));
         let crRows: any[] = [];
         if (pvIds.length > 0) {
           const { data: cr, error: crErr } = await supabase
@@ -407,8 +416,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           setLogosByParty({});
         }
 
-        // Totaux calculés uniquement sur les PV avec quorum atteint
-        const totalInscritsDesBureauxAvecPV = (filteredPvsForResults || []).reduce((sum: number, pv: any) => {
+        // Totaux de participation : tous les PV (quorum atteint ou non + saisis)
+        const totalInscritsDesBureauxAvecPV = (filteredPvsAll || []).reduce((sum: number, pv: any) => {
           const bureau = bureauMap.get(pv.bureau_id);
           const centerTotal = bureau ? Number(centerMap.get(bureau.center_id)?.total_voters) || 0 : 0;
           const regFromPV = Number(pv.total_registered) || 0;
@@ -417,7 +426,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           return sum + chosen;
         }, 0);
 
-        (filteredPvsForResults || []).forEach((pv: any) => {
+        (filteredPvsAll || []).forEach((pv: any) => {
           totalVotants += Number(pv.total_voters) || 0;
           bulletinsNuls += Number(pv.null_votes) || 0;
           totalExprimesPV += Number(pv.votes_expressed) || 0;
@@ -674,6 +683,35 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     loadFinalResults();
   }, [loadFinalResults]);
 
+  // Recompute votes per candidate when a center/college filter is active
+  const filteredRawCandidates = useMemo(() => {
+    if (!rawResultsData || (!filterCenter && !filterCollege)) return finalResults?.candidates ?? [];
+    const { crRows, pvMeta, baseVotesByCandidate } = rawResultsData;
+    const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
+    const result: Record<string, any> = {};
+    Object.entries(baseVotesByCandidate).forEach(([id, c]: [string, any]) => {
+      result[id] = { ...c, votes: 0 };
+    });
+    crRows.forEach((r: any) => {
+      const meta = pvMeta.get(r.pv_id);
+      if (!meta) return;
+      if (filterCenter && meta.centerId !== filterCenter) return;
+      if (filterCollege && normalizeCollegeKey(meta.collegeType) !== normalizeCollegeKey(filterCollege)) return;
+      const cid = r.candidates?.id || r.candidate_id;
+      if (!result[cid]) return;
+      result[cid].votes += r.votes || 0;
+    });
+    const total = Object.values(result).reduce((s: number, c: any) => s + c.votes, 0);
+    return Object.values(result)
+      .filter((c: any) => c.votes > 0)
+      .sort((a: any, b: any) => b.votes - a.votes)
+      .map((c: any, idx: number) => ({
+        ...c,
+        percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
+        color: colorPalette[idx % colorPalette.length],
+      }));
+  }, [rawResultsData, filterCenter, filterCollege, finalResults?.candidates]);
+
   // Calcul des sièges par algorithme légal CSE (Cas 1/2) par bureau (collège électoral au sein d'un établissement)
   const computedSeatsResult = useMemo<{
     seats: Record<string, number>;
@@ -683,8 +721,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     if (!rawResultsData || !isProfessionalElection(electionType)) return empty;
     const { crRows, pvMeta, baseVotesByCandidate, bureauSeats } = rawResultsData;
 
-    const activeCenter  = '';
-    const activeCollege = '';
+    const activeCenter  = filterCenter;
+    const activeCollege = filterCollege ? normalizeCollegeKey(filterCollege) || '' : '';
     const resultSeats: Record<string, number> = {};
     const manualTies: { group: string; parties: string[] }[] = [];
 
@@ -785,7 +823,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   // Pour les élections pro, plusieurs shadow-candidats partagent le même party (syndicat + collège,
   // un par établissement). On les fusionne ici pour n'afficher qu'une ligne par liste syndicale.
   const groupedCandidates = useMemo(() => {
-    const raw: any[] = finalResults?.candidates ?? [];
+    const raw: any[] = filteredRawCandidates;
     if (!isProfessionalElection(electionType) || raw.length === 0) return raw;
 
     const colorPalette = ['#22c55e','#ef4444','#3b82f6','#a855f7','#f59e0b','#06b6d4'];
@@ -812,7 +850,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       percentage: total > 0 ? Number(((100 * c.votes) / total).toFixed(2)) : 0,
       color: colorPalette[idx % colorPalette.length],
     }));
-  }, [finalResults, electionType, computedSeats]);
+  }, [filteredRawCandidates, electionType, computedSeats]);
 
   // Candidats — utiliser directement les candidats groupés
   const displayedCandidates = groupedCandidates;
@@ -843,10 +881,18 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   ), [groupedCandidates]);
 
   const CenterAndBureauTables = () => {
-    const filteredNVCenter    = nonValidatedByCenter;
-    const filteredCenterBreak = centerBreakdown;
-    const filteredCollegeBreak = collegeBreakdown;
-    const visibleQFCenters = showQuorumFailed ? quorumFailedByCenter : [];
+    const filteredNVCenter = filterCenter
+      ? nonValidatedByCenter.filter((r: any) => String(r.center_id) === filterCenter)
+      : nonValidatedByCenter;
+    const filteredCenterBreak = filterCenter
+      ? centerBreakdown.filter((r: any) => String(r.center_id) === filterCenter)
+      : centerBreakdown;
+    const filteredCollegeBreak = filterCollege
+      ? collegeBreakdown.filter((r: any) => normalizeCollegeKey(r.college_type) === normalizeCollegeKey(filterCollege))
+      : collegeBreakdown;
+    const visibleQFCenters = showQuorumFailed
+      ? (filterCenter ? quorumFailedByCenter.filter((r: any) => String(r.center_id) === filterCenter) : quorumFailedByCenter)
+      : [];
 
     return (
     <div className="mt-8 space-y-8">
@@ -1087,10 +1133,45 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
               <div className="font-medium">{finalResults?.lastUpdate || '—'}</div>
             </div>
           </div>
-          <Progress 
-            value={finalResults && finalResults.totalBureaux > 0 ? (finalResults.validatedBureaux / finalResults.totalBureaux) * 100 : 0} 
+          <Progress
+            value={finalResults && finalResults.totalBureaux > 0 ? (finalResults.validatedBureaux / finalResults.totalBureaux) * 100 : 0}
             className="mt-3"
           />
+
+          {/* Filtres établissement / collège */}
+          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-gray-500 flex-shrink-0">Filtrer par :</span>
+            <select
+              value={filterCenter}
+              onChange={e => setFilterCenter(e.target.value)}
+              disabled={!rawResultsData || rawResultsData.availableCenters.length === 0}
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[200px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <option value="">Tous les établissements</option>
+              {(rawResultsData?.availableCenters || []).map((c: any) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <select
+              value={filterCollege}
+              onChange={e => setFilterCollege(e.target.value)}
+              disabled={!rawResultsData || rawResultsData.availableColleges.length === 0}
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[160px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <option value="">Tous les collèges</option>
+              {(rawResultsData?.availableColleges || []).map((col: string) => (
+                <option key={col} value={col}>{toCollegeLabel(col)}</option>
+              ))}
+            </select>
+            {(filterCenter || filterCollege) && (
+              <button
+                onClick={() => { setFilterCenter(''); setFilterCollege(''); }}
+                className="text-xs text-blue-600 hover:text-blue-800 underline ml-1"
+              >
+                Réinitialiser
+              </button>
+            )}
+          </div>
         </CardContent>
       </Card>
 
