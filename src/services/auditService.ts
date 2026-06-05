@@ -3,24 +3,31 @@ import { supabase } from '@/lib/supabase';
 /**
  * Types d'actions pour la piste d'audit
  */
-export type AuditAction = 
-  | 'CREATE' 
-  | 'UPDATE' 
-  | 'DELETE' 
-  | 'VALIDATE' 
-  | 'PUBLISH' 
-  | 'LOGIN' 
+export type AuditAction =
+  | 'CREATE'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'VALIDATE'
+  | 'PUBLISH'
+  | 'LOGIN'
   | 'LOGOUT'
-  | 'EXPORT' 
+  | 'EXPORT'
   | 'IMPORT'
   | 'APPROVE'
   | 'REJECT'
-  | 'ARCHIVE';
+  | 'ARCHIVE'
+  | 'SUBMIT'
+  | 'RETRACT'
+  | 'UPLOAD'
+  | 'REVIEW'
+  | 'OPINION'
+  | 'ENABLE'
+  | 'DISABLE';
 
 /**
  * Types de ressources pour la piste d'audit
  */
-export type ResourceType = 
+export type ResourceType =
   | 'election'
   | 'candidate'
   | 'voting_center'
@@ -31,7 +38,9 @@ export type ResourceType =
   | 'election_center'
   | 'campaign_operation'
   | 'notification'
-  | 'activity_logs';
+  | 'activity_logs'
+  | 'document'
+  | 'pv_opinion';
 
 /**
  * Interface pour les changements dans l'audit
