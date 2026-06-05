@@ -854,8 +854,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       // Bureaux avec quorum atteint → utilisés pour tous les calculs officiels
       const filteredBureauxForResults = filteredBureaux.filter((b: any) => !b.quorum_failed);
 
+      // centersMap construit depuis TOUS les bureaux publiés (y compris quorum non atteint)
+      // pour que la vue détaillée les affiche (en rouge si quorum non atteint)
       const centersMap = new Map();
-      filteredBureauxForResults.forEach((b: any) => {
+      filteredBureaux.forEach((b: any) => {
         if (!centersMap.has(b.center_id)) {
           centersMap.set(b.center_id, {
             center_id: b.center_id,
@@ -880,12 +882,15 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
       const filteredCenters = Array.from(centersMap.values());
 
-      // Totaux globaux sur bureaux avec quorum atteint uniquement
-      const votersSum = filteredBureauxForResults.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
+      // Totaux d'affichage (cartes stats) = TOUS les PVs publiés y compris quorum non atteint
+      const votersSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
+      const registeredInBureauxWithResults = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
+      // Suffrages exprimés affichage (tous PVs, y compris quorum non atteint)
+      const expressedSumAll = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
+      // Suffrages exprimés pour les pourcentages candidats = quorum OK uniquement
       const expressedSum = filteredBureauxForResults.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
-      const registeredInBureauxWithResults = filteredBureauxForResults.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
-      
-      const totalVotesCast = expressedSum; // bulletins exprimés
+
+      const totalVotesCast = expressedSumAll; // pour les cartes stats (affichage complet)
       let totalRegistered = registeredInBureauxWithResults;
       const totalRegisteredElection = totalElectorsElection > 0
         ? totalElectorsElection
@@ -1140,6 +1145,25 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           }
         });
 
+        // Attacher les données syndicales aux bureaux quorum-failed (affichage, sièges = 0)
+        const pvCandidateResultsAll = new Map<string, any[]>();
+        (candidateResultsData || []).forEach((cr: any) => {
+          if (!pvCandidateResultsAll.has(cr.pv_id)) pvCandidateResultsAll.set(cr.pv_id, []);
+          pvCandidateResultsAll.get(cr.pv_id)!.push(cr);
+        });
+        filteredBureaux.filter((b: any) => b.quorum_failed).forEach((bRow: any) => {
+          const results = pvCandidateResultsAll.get(bRow.pv_id) || [];
+          if (results.length === 0) return;
+          const partyVotes = new Map<string, number>();
+          results.forEach((r: any) => {
+            const syndicat = ((r.candidates?.party || '').split(' — ')[0] || '').trim() || String(r.candidate_id);
+            partyVotes.set(syndicat, (partyVotes.get(syndicat) || 0) + (Number(r.votes) || 0));
+          });
+          bRow.syndicats = Array.from(partyVotes.entries())
+            .map(([syndicatName, votes]) => ({ syndicatName, votes, seats: 0 }))
+            .sort((a: any, b: any) => b.votes - a.votes);
+        });
+
         // Total des sièges de l'élection
         const tSeats = allBureauxList
           .filter(b => b.college)
@@ -1183,7 +1207,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             candidate_name: c.candidate_name,
             party_name: c.party || '',
             total_votes: c.total_votes || 0,
-            percentage: totalVotesCast > 0 ? (100 * (c.total_votes || 0)) / totalVotesCast : 0,
+            percentage: expressedSum > 0 ? (100 * (c.total_votes || 0)) / expressedSum : 0,
             rank: 0,
             seats: c.seats,
             colleges: Array.from(c.colleges),
@@ -1451,6 +1475,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       total_registered: number;
       total_voters: number;
       total_expressed_votes: number;
+      quorum_failed: boolean;
       syndicats: Map<string, { syndicat: string; seats: number; votes: number }>;
     }>();
 
@@ -1462,14 +1487,18 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           total_registered: 0,
           total_voters: 0,
           total_expressed_votes: 0,
+          quorum_failed: false,
           syndicats: new Map()
         });
       }
       const entry = collegeMap.get(collegeName)!;
+      // Stats affichage : tous les bureaux (y compris quorum non atteint)
       entry.total_registered += Number(b.total_registered) || 0;
       entry.total_voters += Number(b.total_voters) || 0;
       entry.total_expressed_votes += Number(b.total_expressed_votes) || 0;
+      if (b.quorum_failed) entry.quorum_failed = true;
 
+      // Syndicats : tous les bureaux (sièges = 0 pour quorum non atteint, déjà géré à la source)
       if (b.syndicats) {
         b.syndicats.forEach((s: any) => {
           if (!entry.syndicats.has(s.syndicatName)) {
@@ -3145,45 +3174,50 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     {/* Lignes par collège avec accordéon syndicats */}
                     <div className="divide-y divide-gray-100">
                       {collegeRows.length > 0 ? collegeRows.map((row, rIdx) => {
+                        const qFailed = (row as any).quorum_failed === true;
                         const abstPct = row.total_registered > 0
                           ? (100 - (row.total_voters / row.total_registered * 100))
                           : null;
-                        const abstColor = abstPct === null ? 'text-gray-400'
+                        const abstColor = qFailed ? 'text-red-600'
+                          : abstPct === null ? 'text-gray-400'
                           : abstPct >= 49.51 ? 'text-red-600'
                           : abstPct > 20.5 ? 'text-yellow-600'
                           : 'text-green-600';
-                        const abstBadge = abstPct === null ? 'bg-gray-100 text-gray-400'
+                        const abstBadge = qFailed ? 'bg-red-100 text-red-700'
+                          : abstPct === null ? 'bg-gray-100 text-gray-400'
                           : abstPct >= 49.51 ? 'bg-red-100 text-red-700'
                           : abstPct > 20.5 ? 'bg-yellow-100 text-yellow-700'
                           : 'bg-green-100 text-green-700';
                         return (
-                          <details key={rIdx} className="group/col">
+                          <details key={rIdx} className={`group/col ${qFailed ? 'bg-red-50' : ''}`}>
                             <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                               {/* Ligne desktop : 5 colonnes */}
-                              <div className="hidden sm:grid grid-cols-5 px-4 sm:px-6 py-3 hover:bg-blue-50 transition-colors items-center">
-                                <div className="flex items-center gap-2 font-semibold text-gray-800 text-sm">
-                                  <ChevronDown className="w-4 h-4 text-blue-400 transition-transform duration-200 group-open/col:rotate-180 shrink-0" />
+                              <div className={`hidden sm:grid grid-cols-5 px-4 sm:px-6 py-3 transition-colors items-center ${qFailed ? 'hover:bg-red-100' : 'hover:bg-blue-50'}`}>
+                                <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : 'text-gray-800'}`}>
+                                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : 'text-blue-400'}`} />
                                   {row.collegeName}
                                 </div>
-                                <div className="text-right text-sm text-gray-700">{row.total_registered?.toLocaleString() || '-'}</div>
-                                <div className="text-right text-sm text-gray-700">{row.total_voters?.toLocaleString() || '-'}</div>
-                                <div className="text-right text-sm text-gray-700">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
+                                <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_registered?.toLocaleString() || '-'}</div>
+                                <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_voters?.toLocaleString() || '-'}</div>
+                                <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_expressed_votes?.toLocaleString() || '-'}</div>
                                 <div className="text-right">
-                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>
-                                    {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}
-                                  </span>
+                                  {qFailed
+                                    ? <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Quorum non atteint</span>
+                                    : <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>{abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
+                                  }
                                 </div>
                               </div>
                               {/* Ligne mobile : card */}
-                              <div className="sm:hidden px-4 py-3 hover:bg-blue-50 transition-colors">
+                              <div className={`sm:hidden px-4 py-3 transition-colors ${qFailed ? 'hover:bg-red-100' : 'hover:bg-blue-50'}`}>
                                 <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2 font-semibold text-gray-800 text-sm">
-                                    <ChevronDown className="w-4 h-4 text-blue-400 transition-transform duration-200 group-open/col:rotate-180 shrink-0" />
+                                  <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : 'text-gray-800'}`}>
+                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : 'text-blue-400'}`} />
                                     {row.collegeName}
                                   </div>
-                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>
-                                    Abs. {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}
-                                  </span>
+                                  {qFailed
+                                    ? <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Quorum non atteint</span>
+                                    : <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>Abs. {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
+                                  }
                                 </div>
                                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-center ml-6">
                                   <div>
