@@ -333,9 +333,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             );
             rv = Number(pseudo?.registered_voters) || 0;
             if (!bureauId && pseudo?.id) bureauId = String(pseudo.id);
-            // Sièges depuis electoral_colleges (correct — nombre de sièges par collège pour l'élection)
+            // Sièges : priorité aux données per-établissement (voting_bureaux), fallback global electoral_colleges
             const col  = loadedColleges.find((c: any) => toRawCollegeKey(c.college_type) === preCollegeType);
-            sieges = Number(col?.seats_to_fill) || Number(pseudo?.seats_to_fill) || 0;
+            sieges = Number(pseudo?.seats_to_fill) || Number(col?.seats_to_fill) || 0;
           } else if (bureauId) {
             const preBureau = physicalBureaux.find((b: any) => String(b.id) === bureauId);
             rv = Number(preBureau?.registered_voters) || 0;
@@ -938,7 +938,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             // NE PAS utiliser ec?.total_voters (electoral_colleges) qui est le total GLOBAL
                             const ec = electoralColleges.find((c: any) => toRawCollegeKey(c.college_type) === collegeKey);
                             const rv = ps.reduce((s: number, p: any) => s + (Number(p.registered_voters) || 0), 0);
-                            const sieges = Number(ec?.seats_to_fill) || ps.reduce((s: number, p: any) => s + (Number(p.seats_to_fill) || 0), 0);
+                            // Sièges : priorité aux données per-établissement (voting_bureaux), fallback global
+                            const sieges = ps.reduce((s: number, p: any) => s + (Number(p.seats_to_fill) || 0), 0) || Number(ec?.seats_to_fill) || 0;
                             // Pré-remplir votants = inscrits - votants déjà saisis sur les autres bureaux du collège
                             const otherVotants = allB
                               .filter((b: any) => String(b.id) !== bureauId)
@@ -1092,7 +1093,6 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               const selectedCenter = votingCenters.find(c => c.id === formData.centre);
               const isPro = isProfessionalElection(electionInfo?.type);
               if (isPro && formData.college) {
-                const ec = electoralColleges.find((c: any) => toRawCollegeKey(c.college_type) === formData.college);
                 return (
                   <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
                     <h4 className="font-semibold text-blue-900 text-sm">Récapitulatif</h4>
@@ -1105,10 +1105,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         <p className="text-xs text-blue-500 font-medium">Collège</p>
                         <p className="font-semibold text-blue-900">{toCollegeLabel(formData.college)}</p>
                       </div>
-                      {ec?.seats_to_fill > 0 && (
+                      {Number(formData.sieges) > 0 && (
                         <div>
                           <p className="text-xs text-blue-500 font-medium">Sièges à pourvoir</p>
-                          <p className="font-semibold text-blue-900">{ec.seats_to_fill}</p>
+                          <p className="font-semibold text-blue-900">{formData.sieges}</p>
                         </div>
                       )}
                     </div>

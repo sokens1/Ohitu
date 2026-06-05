@@ -203,12 +203,14 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         setLoading(true);
         _loadingTimeout = setTimeout(() => setLoading(false), 3000);
 
-        // 0) Charger le type de l'élection (pour différencier pro / standard)
+        // 0) Charger le type de l'élection et le paramètre d'affichage du quorum
         const { data: electionData } = await supabase
           .from('elections')
-          .select('type, nb_electeurs')
+          .select('type, nb_electeurs, show_quorum_failed_public')
           .eq('id', selectedElection)
           .single();
+        // Initialiser le toggle depuis la BDD (défaut = true si colonne absente)
+        setShowQuorumFailed((electionData as any)?.show_quorum_failed_public !== false);
 
         const isPro = isProfessionalElection(electionData?.type);
         setElectionType(electionData?.type);
@@ -858,9 +860,16 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                   <div className="flex items-center gap-2">
                     <Badge className="bg-red-100 text-red-800">{quorumFailedByCenter.length} centre(s) quorum non atteint</Badge>
                     <button
-                      onClick={() => setShowQuorumFailed(v => !v)}
+                      onClick={async () => {
+                        const next = !showQuorumFailed;
+                        setShowQuorumFailed(next);
+                        await supabase
+                          .from('elections')
+                          .update({ show_quorum_failed_public: next })
+                          .eq('id', selectedElection);
+                      }}
                       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${showQuorumFailed ? 'bg-red-500' : 'bg-gray-300'}`}
-                      title={showQuorumFailed ? 'Masquer les PV sans quorum' : 'Afficher les PV sans quorum'}
+                      title={showQuorumFailed ? 'Masquer les PV sans quorum sur la page publique' : 'Afficher les PV sans quorum sur la page publique'}
                     >
                       <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${showQuorumFailed ? 'translate-x-4' : 'translate-x-1'}`} />
                     </button>
