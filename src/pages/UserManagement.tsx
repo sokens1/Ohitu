@@ -33,7 +33,7 @@ import FloatingSelect from '@/components/ui/floating-select';
 interface AppUser {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   role: UserRole;
   isActive: boolean;
   createdAt: string;
@@ -42,6 +42,7 @@ interface AppUser {
   assigned_election_ids?: string[] | null;
   created_by?: string | null;
   electionTitle?: string;
+  phone?: string | null;
   assigned_center_ids?: string[] | null;
   assigned_center_bureaux?: Record<string, string[]> | null;
   assigned_center_colleges?: Record<string, string[]> | null;
@@ -57,8 +58,9 @@ const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string; disabled?: boole
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
+  { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
+  { value: 'suppleant-president',    label: "Suppléant Président" },
 ];
 
 // Tous les rôles (super-admin seulement)
@@ -68,8 +70,9 @@ const ALL_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
   { value: 'validateur',              label: 'Validateur' },
   { value: 'agent-saisie',           label: 'Agent de Saisie' },
   { value: 'observateur',            label: 'Observateur' },
+  { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  // { value: 'president-bureau', label: 'Président de Bureau' }, // À venir
+  { value: 'suppleant-president',    label: "Suppléant Président" },
 ];
 
 const ROLE_BADGE: Record<UserRole, string> = {
@@ -78,8 +81,10 @@ const ROLE_BADGE: Record<UserRole, string> = {
   'validateur':               'bg-green-100 text-green-800 border-green-200',
   'agent-saisie':             'bg-yellow-100 text-yellow-800 border-yellow-200',
   'observateur':              'bg-gray-100 text-gray-700 border-gray-200',
+  'employeur':                'bg-slate-100 text-slate-700 border-slate-200',
   'president-bureau':         'bg-orange-100 text-orange-800 border-orange-200',
   'president-etablissement':  'bg-teal-100 text-teal-800 border-teal-200',
+  'suppleant-president':      'bg-cyan-100 text-cyan-800 border-cyan-200',
 };
 
 const getRoleLabel = (role: UserRole): string =>
@@ -189,6 +194,7 @@ const UserManagement = () => {
   // Champs formulaire
   const [fName, setFName] = useState('');
   const [fEmail, setFEmail] = useState('');
+  const [fPhone, setFPhone] = useState('');
   const [fPassword, setFPassword] = useState('');
   const [fRole, setFRole] = useState<UserRole>('observateur');
   const [fActive, setFActive] = useState(true);
@@ -266,6 +272,7 @@ const UserManagement = () => {
           assigned_election_ids: u.assigned_election_ids ?? null,
           created_by: u.created_by,
           electionTitle: u.elections?.title ?? undefined,
+          phone: u.phone ?? null,
           assigned_center_ids:      u.assigned_center_ids      ?? null,
           assigned_center_bureaux:  u.assigned_center_bureaux  ?? null,
           assigned_center_colleges: u.assigned_center_colleges ?? null,
@@ -282,7 +289,8 @@ const UserManagement = () => {
   // ── Filtrage local ──────────────────────────────────────────────────────────
   const filteredUsers = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        u.email.toLowerCase().includes(searchTerm.toLowerCase());
+                        (u.email ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        (u.phone ?? '').includes(searchTerm);
     const matchRole     = roleFilter === 'all' || u.role === roleFilter;
     const matchStatus   = statusFilter === 'all' ||
                           (statusFilter === 'active' && u.isActive) ||
@@ -295,7 +303,7 @@ const UserManagement = () => {
 
   // ── Helpers formulaire ──────────────────────────────────────────────────────
   const resetForm = () => {
-    setFName(''); setFEmail(''); setFPassword('');
+    setFName(''); setFEmail(''); setFPhone(''); setFPassword('');
     setFRole('observateur'); setFActive(true);
     setFElectionIds([]); setFCenterBureaux({}); setFCenterColleges({});
     setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]);
@@ -304,7 +312,7 @@ const UserManagement = () => {
 
   const openEdit = (u: AppUser) => {
     setEditingUser(u);
-    setFName(u.name); setFEmail(u.email);
+    setFName(u.name); setFEmail(u.email ?? ''); setFPhone(u.phone ?? '');
     setFPassword(''); setFRole(u.role); setFActive(u.isActive);
     const ids = u.assigned_election_ids?.length
       ? u.assigned_election_ids
@@ -320,8 +328,8 @@ const UserManagement = () => {
     setShowEditModal(true);
   };
 
-  const ROLES_WITH_BUREAUX:  UserRole[] = ['president-etablissement'];
-  const ROLES_WITH_COLLEGES: UserRole[] = ['validateur', 'agent-saisie', 'observateur'];
+  const ROLES_WITH_BUREAUX:  UserRole[] = ['president-etablissement', 'suppleant-president'];
+  const ROLES_WITH_COLLEGES: UserRole[] = ['validateur', 'agent-saisie', 'observateur', 'employeur'];
   const ROLES_WITH_CENTERS:  UserRole[] = [...ROLES_WITH_BUREAUX, ...ROLES_WITH_COLLEGES];
 
   useEffect(() => {
@@ -391,8 +399,11 @@ const UserManagement = () => {
 
   // ── Création via l'endpoint serveur (évite la limite de taux de auth.signUp) ─
   const handleCreate = async () => {
-    if (!fName.trim() || !fEmail.trim() || !fPassword.trim()) {
-      toast.error('Nom, email et mot de passe sont requis'); return;
+    if (!fName.trim() || !fPassword.trim()) {
+      toast.error('Nom et mot de passe sont requis'); return;
+    }
+    if (!fEmail.trim() && !fPhone.trim()) {
+      toast.error('Au moins un identifiant est requis : email ou numéro de téléphone'); return;
     }
     if (fPassword.length < 6) {
       toast.error('Le mot de passe doit contenir au moins 6 caractères'); return;
@@ -427,6 +438,7 @@ const UserManagement = () => {
             ? fCenterBureaux : null,
           assigned_center_colleges: (ROLES_WITH_COLLEGES.includes(fRole) || ROLES_WITH_BUREAUX.includes(fRole)) && Object.keys(fCenterColleges).length > 0
             ? fCenterColleges : null,
+          phone: fPhone.trim() || null,
           created_by: currentUser?.id || null,
         }),
       });
@@ -469,8 +481,11 @@ const UserManagement = () => {
 
   // ── Mise à jour ─────────────────────────────────────────────────────────────
   const handleUpdate = async () => {
-    if (!editingUser || !fName.trim() || !fEmail.trim()) {
-      toast.error('Nom et email sont requis'); return;
+    if (!editingUser || !fName.trim()) {
+      toast.error('Le nom est requis'); return;
+    }
+    if (!fEmail.trim() && !fPhone.trim()) {
+      toast.error('Au moins un identifiant est requis : email ou numéro de téléphone'); return;
     }
     setUpdating(true);
     try {
@@ -478,6 +493,7 @@ const UserManagement = () => {
       const updatePayload: Record<string, unknown> = {
         name: fName.trim(),
         email: fEmail.trim(),
+        phone: fPhone.trim() || null,
         role: fRole,
         is_active: fActive,
         assigned_election_id: fElectionIds[0] ?? null,
@@ -557,9 +573,23 @@ const UserManagement = () => {
     if (!deletingUser) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('users').delete().eq('id', deletingUser.id);
-      if (error) { toast.error('Échec de la suppression'); return; }
-      try { await supabase.auth.admin.deleteUser(deletingUser.id); } catch { /* ignore */ }
+      // 1. Supprimer de la table users
+      const { error: dbErr } = await supabase.from('users').delete().eq('id', deletingUser.id);
+      if (dbErr) { toast.error('Échec de la suppression'); return; }
+
+      // 2. Supprimer le compte Auth via l'endpoint serveur (service_role requis)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await fetch('/api/admin/delete-user', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ userId: deletingUser.id }),
+        });
+      }
+
       setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
       toast.success('Utilisateur supprimé');
       setShowDeleteModal(false);
@@ -594,7 +624,7 @@ const UserManagement = () => {
           autoComplete="off"
         />
         <FloatingInput
-          label="Email"
+          label={fPhone.trim() ? 'Email (optionnel)' : 'Email'}
           type="email"
           value={fEmail}
           onChange={e => setFEmail(e.target.value)}
@@ -602,7 +632,23 @@ const UserManagement = () => {
         />
       </div>
 
-      {/* Ligne 2 : Rôle */}
+      {/* Ligne 2 : Téléphone */}
+      <FloatingInput
+        label={fEmail.trim() ? 'Numéro de téléphone — format 077-00-00-00 (optionnel)' : 'Numéro de téléphone — format 077-00-00-00'}
+        type="tel"
+        value={fPhone}
+        onChange={e => {
+          const digits = e.target.value.replace(/[^0-9]/g, '').slice(0, 9);
+          let formatted = digits;
+          if (digits.length > 3 && digits.length <= 5)       formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
+          else if (digits.length > 5 && digits.length <= 7)  formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+          else if (digits.length > 7)                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5, 7)}-${digits.slice(7)}`;
+          setFPhone(formatted);
+        }}
+        autoComplete="off"
+      />
+
+      {/* Ligne 3 : Rôle */}
       <FloatingSelect
         label="Rôle"
         options={availableRoles.map(r => ({ value: r.value, label: r.label }))}
@@ -936,7 +982,7 @@ const UserManagement = () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-gray-900 text-sm truncate">{u.name}</p>
-                        <p className="text-xs text-gray-500 truncate">{u.email}</p>
+                        <p className="text-xs text-gray-500 truncate">{u.email || u.phone || '—'}</p>
                         {u.electionTitle && (
                           <p className="text-xs text-blue-600 truncate mt-0.5">
                             Élection : {u.electionTitle}

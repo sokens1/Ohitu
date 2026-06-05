@@ -418,6 +418,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         notifyDocumentReviewed({
           recipientId:  doc.uploaded_by,
           centerName:   center?.name ?? doc.center_id,
+          collegeType:  doc.college_type,
           documentType: doc.document_type,
           status:       status as 'validated' | 'reserved' | 'rejected',
           comment:      comment || null,
@@ -461,7 +462,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                   <span>{(previewDoc.file_size / 1024).toFixed(0)} Ko</span>
                 )}
                 <span>Déposé par <strong>{previewDoc.uploader_name ?? '—'}</strong></span>
-                <span>{new Date(previewDoc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                <span>{new Date(previewDoc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) + ' à ' + new Date(previewDoc.uploaded_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
                 <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
                   previewDoc.status === 'validated' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                   previewDoc.status === 'reserved'  ? 'bg-orange-50 text-orange-700 border-orange-200' :
@@ -788,8 +789,10 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                       <Eye className="w-3.5 h-3.5" />
                                     </button>
                                   )}
-                                  {/* Upload : bloqué si document validé */}
-                                  {(!existing || existing.status !== 'validated') && (
+                                  {/* Upload : bloqué si validé
+                                      Suppléant : ne peut remplacer que son propre document */}
+                                  {(!existing || existing.status !== 'validated') &&
+                                   (user?.role !== 'suppleant-president' || !existing || existing.uploaded_by === user?.id) && (
                                     <button
                                       disabled={isUp}
                                       onClick={() => triggerUpload(center.id, college, docType)}
@@ -1003,7 +1006,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                   {/* Une seule ligne de métadonnées */}
                   <p className="text-[10px] text-gray-400 truncate">
                     <span className="font-medium text-gray-600">{doc.uploader_name ?? '—'}</span>
-                    {' · '}{new Date(doc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                    {' · '}{new Date(doc.uploaded_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ' à ' + new Date(doc.uploaded_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                   </p>
 
                   {doc.review_comment && !isReviewing && (

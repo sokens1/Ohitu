@@ -24,6 +24,7 @@ import VotingCenters from "./pages/VotingCenters";
 import Voters from "./pages/Voters";
 import AuditLogs from "./pages/AuditLogs";
 import NotificationsPage from "./pages/NotificationsPage";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 import AdminPublicPreview from "./pages/AdminPublicPreview";
 // Create QueryClient outside of component to avoid recreation on every render
 const queryClient = new QueryClient({
@@ -58,6 +59,7 @@ const App = () => {
                   <Route path="/audit" element={<ProtectedRoute allowedRoles={['super-admin']}><AuditLogs /></ProtectedRoute>} />
                   <Route path="/results" element={<ProtectedRoute><Results /></ProtectedRoute>} />
                   <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+                  <Route path="/privacy" element={<PrivacyPolicy />} />
                   <Route path="/public-preview" element={<ProtectedRoute><AdminPublicPreview /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>

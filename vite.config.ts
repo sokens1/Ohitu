@@ -61,13 +61,30 @@ function adminApiPlugin(): Plugin {
             return;
           }
 
-          const { name, email, password, role, is_active, assigned_election_id, assigned_election_ids, created_by } = body;
+          const {
+            name, email, password, role, is_active,
+            phone,
+            assigned_election_id, assigned_election_ids, created_by,
+            assigned_center_ids, assigned_center_bureaux, assigned_center_colleges,
+          } = body;
 
-          if (!name || !email || !password || !role) {
+          const emailTrimmed = typeof email === "string" ? email.trim() : "";
+          const phoneTrimmed = typeof phone === "string" ? phone.trim() : "";
+
+          if (!name || !password || !role) {
             res.statusCode = 400;
-            res.end(JSON.stringify({ error: "Champs obligatoires manquants" }));
+            res.end(JSON.stringify({ error: "Champs obligatoires manquants (nom, mot de passe, rôle)" }));
             return;
           }
+          if (!emailTrimmed && !phoneTrimmed) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Au moins un identifiant est requis : email ou numéro de téléphone" }));
+            return;
+          }
+
+          // Si aucun email fourni, on génère un email interne basé sur le téléphone
+          const normalizedPhone = phoneTrimmed.replace(/[^0-9]/g, "");
+          const authEmail = emailTrimmed || `tel${normalizedPhone}@noreply.ohitu.ga`;
 
           // Import dynamique pour éviter de bundler @supabase/supabase-js côté serveur Vite
           const { createClient } = await import("@supabase/supabase-js");
@@ -100,14 +117,16 @@ function adminApiPlugin(): Plugin {
             return;
           }
 
-          // Créer le compte Auth (sans email de confirmation)
+          // Créer le compte Auth
           let authUserId: string;
-          const { data: authData, error: authErr } =
+          let authErr: any = null;
+          const { data: authData, error: authErrRaw } =
             await adminClient.auth.admin.createUser({
-              email: String(email),
+              email: authEmail,
               password: String(password),
               email_confirm: true,
             });
+          authErr = authErrRaw;
 
           if (authErr) {
             // Si le compte Auth existe déjà, récupérer son ID
@@ -120,7 +139,7 @@ function adminApiPlugin(): Plugin {
                 return;
               }
               const existing = listData.users.find(
-                (u) => u.email?.toLowerCase() === String(email).toLowerCase()
+                (u) => u.email?.toLowerCase() === authEmail.toLowerCase()
               );
               if (!existing) {
                 res.statusCode = 400;
@@ -128,7 +147,6 @@ function adminApiPlugin(): Plugin {
                 return;
               }
               authUserId = existing.id;
-              // Confirmer l'email + mettre à jour le mot de passe
               await adminClient.auth.admin.updateUserById(authUserId, {
                 email_confirm: true,
                 ...(password ? { password: String(password) } : {}),
@@ -153,18 +171,21 @@ function adminApiPlugin(): Plugin {
             .upsert({
               id: authUserId,
               name: String(name).trim(),
-              email: String(email).trim(),
+              email: emailTrimmed || null,
+              phone: phoneTrimmed || null,
               role,
               is_active: is_active ?? true,
               assigned_election_id: assigned_election_id || null,
               assigned_election_ids: Array.isArray(assigned_election_ids) && assigned_election_ids.length > 0 ? assigned_election_ids : null,
               created_by: created_by || null,
-            }, { onConflict: 'id' })
+              assigned_center_ids: assigned_center_ids || null,
+              assigned_center_bureaux: assigned_center_bureaux || null,
+              assigned_center_colleges: assigned_center_colleges || null,
+            }, { onConflict: "id" })
             .select()
             .single();
 
           if (userErr) {
-            // Ne supprimer le compte Auth que s'il vient d'être créé (pas récupéré)
             if (!authErr) await adminClient.auth.admin.deleteUser(authUserId);
             res.statusCode = 400;
             res.end(JSON.stringify({ error: `Erreur base de données : ${userErr.message}` }));
@@ -173,6 +194,90 @@ function adminApiPlugin(): Plugin {
 
           res.statusCode = 200;
           res.end(JSON.stringify({ user: userData }));
+        }
+      );
+
+      // ── DELETE /api/admin/delete-user ────────────────────────────────────────
+      server.middlewares.use(
+        "/api/admin/delete-user",
+        async (req: any, res: any) => {
+          res.setHeader("Content-Type", "application/json");
+
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? "";
+          const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+          if (!SERVICE_KEY) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: "SUPABASE_SERVICE_ROLE_KEY manquante." }));
+            return;
+          }
+
+          let rawBody = "";
+          await new Promise<void>((resolve) => {
+            req.on("data", (c: Buffer) => (rawBody += c.toString()));
+            req.on("end", resolve);
+          });
+
+          let body: Record<string, unknown>;
+          try { body = JSON.parse(rawBody); } catch {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Corps JSON invalide" }));
+            return;
+          }
+
+          const { userId } = body;
+          if (!userId || typeof userId !== "string") {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "userId manquant" }));
+            return;
+          }
+
+          const { createClient } = await import("@supabase/supabase-js");
+          const adminClient = createClient(SUPABASE_URL, SERVICE_KEY, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          });
+
+          // Vérifier le token du demandeur
+          const authHeader = req.headers["authorization"] as string | undefined;
+          if (!authHeader?.startsWith("Bearer ")) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: "Non authentifié" }));
+            return;
+          }
+          const { data: { user: caller }, error: verifyErr } =
+            await adminClient.auth.getUser(authHeader.replace("Bearer ", ""));
+          if (verifyErr || !caller) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: "Token invalide" }));
+            return;
+          }
+          const { data: callerData } = await adminClient
+            .from("users")
+            .select("role")
+            .eq("id", caller.id)
+            .single();
+          if (!callerData || !["super-admin", "admin"].includes(callerData.role as string)) {
+            res.statusCode = 403;
+            res.end(JSON.stringify({ error: "Accès interdit" }));
+            return;
+          }
+
+          // Supprimer le compte Auth
+          const { error: deleteErr } = await adminClient.auth.admin.deleteUser(userId);
+          if (deleteErr) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: `Erreur Auth : ${deleteErr.message}` }));
+            return;
+          }
+
+          res.statusCode = 200;
+          res.end(JSON.stringify({ success: true }));
         }
       );
     },
