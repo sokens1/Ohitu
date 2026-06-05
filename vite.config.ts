@@ -196,6 +196,90 @@ function adminApiPlugin(): Plugin {
           res.end(JSON.stringify({ user: userData }));
         }
       );
+
+      // ── DELETE /api/admin/delete-user ────────────────────────────────────────
+      server.middlewares.use(
+        "/api/admin/delete-user",
+        async (req: any, res: any) => {
+          res.setHeader("Content-Type", "application/json");
+
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? "";
+          const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+          if (!SERVICE_KEY) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: "SUPABASE_SERVICE_ROLE_KEY manquante." }));
+            return;
+          }
+
+          let rawBody = "";
+          await new Promise<void>((resolve) => {
+            req.on("data", (c: Buffer) => (rawBody += c.toString()));
+            req.on("end", resolve);
+          });
+
+          let body: Record<string, unknown>;
+          try { body = JSON.parse(rawBody); } catch {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Corps JSON invalide" }));
+            return;
+          }
+
+          const { userId } = body;
+          if (!userId || typeof userId !== "string") {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "userId manquant" }));
+            return;
+          }
+
+          const { createClient } = await import("@supabase/supabase-js");
+          const adminClient = createClient(SUPABASE_URL, SERVICE_KEY, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          });
+
+          // Vérifier le token du demandeur
+          const authHeader = req.headers["authorization"] as string | undefined;
+          if (!authHeader?.startsWith("Bearer ")) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: "Non authentifié" }));
+            return;
+          }
+          const { data: { user: caller }, error: verifyErr } =
+            await adminClient.auth.getUser(authHeader.replace("Bearer ", ""));
+          if (verifyErr || !caller) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: "Token invalide" }));
+            return;
+          }
+          const { data: callerData } = await adminClient
+            .from("users")
+            .select("role")
+            .eq("id", caller.id)
+            .single();
+          if (!callerData || !["super-admin", "admin"].includes(callerData.role as string)) {
+            res.statusCode = 403;
+            res.end(JSON.stringify({ error: "Accès interdit" }));
+            return;
+          }
+
+          // Supprimer le compte Auth
+          const { error: deleteErr } = await adminClient.auth.admin.deleteUser(userId);
+          if (deleteErr) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: `Erreur Auth : ${deleteErr.message}` }));
+            return;
+          }
+
+          res.statusCode = 200;
+          res.end(JSON.stringify({ success: true }));
+        }
+      );
     },
   };
 }

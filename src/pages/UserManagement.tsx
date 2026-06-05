@@ -573,9 +573,23 @@ const UserManagement = () => {
     if (!deletingUser) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('users').delete().eq('id', deletingUser.id);
-      if (error) { toast.error('Échec de la suppression'); return; }
-      try { await supabase.auth.admin.deleteUser(deletingUser.id); } catch { /* ignore */ }
+      // 1. Supprimer de la table users
+      const { error: dbErr } = await supabase.from('users').delete().eq('id', deletingUser.id);
+      if (dbErr) { toast.error('Échec de la suppression'); return; }
+
+      // 2. Supprimer le compte Auth via l'endpoint serveur (service_role requis)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await fetch('/api/admin/delete-user', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ userId: deletingUser.id }),
+        });
+      }
+
       setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
       toast.success('Utilisateur supprimé');
       setShowDeleteModal(false);
