@@ -158,6 +158,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const [nonValidatedCount, setNonValidatedCount] = useState<number>(0);
   const [quorumFailedByCenter, setQuorumFailedByCenter] = useState<any[]>([]);
   const [quorumFailedByBureau, setQuorumFailedByBureau] = useState<any[]>([]);
+  const [showQuorumFailed, setShowQuorumFailed] = useState(true);
   const [electionType, setElectionType] = useState<string | undefined>();
   const [rawResultsData, setRawResultsData] = useState<{
     crRows: any[];
@@ -843,6 +844,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     const filteredNVCenter    = nonValidatedByCenter;
     const filteredCenterBreak = centerBreakdown;
     const filteredCollegeBreak = collegeBreakdown;
+    const visibleQFCenters = showQuorumFailed ? quorumFailedByCenter : [];
 
     return (
     <div className="mt-8 space-y-8">
@@ -853,7 +855,16 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
               <span>Par Centre de Vote</span>
               <div className="flex items-center gap-2 flex-wrap">
                 {quorumFailedByCenter.length > 0 && (
-                  <Badge className="bg-red-100 text-red-800">{quorumFailedByCenter.length} centre(s) avec quorum non atteint</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-red-100 text-red-800">{quorumFailedByCenter.length} centre(s) quorum non atteint</Badge>
+                    <button
+                      onClick={() => setShowQuorumFailed(v => !v)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${showQuorumFailed ? 'bg-red-500' : 'bg-gray-300'}`}
+                      title={showQuorumFailed ? 'Masquer les PV sans quorum' : 'Afficher les PV sans quorum'}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${showQuorumFailed ? 'translate-x-4' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
                 )}
                 {filteredNVCenter.length > 0 && (
                   <Badge className="bg-yellow-100 text-yellow-800">{filteredNVCenter.length} centre(s) avec PV non validés</Badge>
@@ -873,7 +884,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {quorumFailedByCenter.map((row: any, idx: number) => (
+                  {visibleQFCenters.map((row: any, idx: number) => (
                     <TableRow key={`qf-center-${idx}`} className="bg-red-50">
                       <TableCell className="font-medium text-red-800">
                         {row.center_name}
