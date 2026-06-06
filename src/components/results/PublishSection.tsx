@@ -364,8 +364,16 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             status: pv.status || '',
           });
         });
-        const availableCenters = centers.map((c: any) => ({ id: String(c.id), name: c.name }));
-        const availableColleges = [...new Set(filteredPvsAll.map((pv: any) => pv.college_type).filter(Boolean))] as string[];
+        // Filtres : seulement les établissements/collèges ayant au moins un PV validé
+        const validatedCenterIds = new Set(
+          filteredValidatedPvs
+            .map((pv: any) => { const b = bureauMap.get(pv.bureau_id); return b?.center_id ? String(b.center_id) : null; })
+            .filter(Boolean)
+        );
+        const availableCenters = centers
+          .filter((c: any) => validatedCenterIds.has(String(c.id)))
+          .map((c: any) => ({ id: String(c.id), name: c.name }));
+        const availableColleges = [...new Set(filteredValidatedPvs.map((pv: any) => pv.college_type).filter(Boolean))] as string[];
 
         // N'additionner les voix QUE pour les PV avec quorum atteint
         const enteredCandidateIds = new Set<string>();
@@ -915,10 +923,15 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                           .eq('id', selectedElection);
                       }}
                       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${showQuorumFailed ? 'bg-red-500' : 'bg-gray-300'}`}
-                      title={showQuorumFailed ? 'Masquer les PV sans quorum sur la page publique' : 'Afficher les PV sans quorum sur la page publique'}
+                      title={showQuorumFailed
+                        ? 'Quorum non atteint inclus à la publication — cliquer pour exclure'
+                        : 'Quorum non atteint exclus de la publication — cliquer pour inclure'}
                     >
                       <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${showQuorumFailed ? 'translate-x-4' : 'translate-x-1'}`} />
                     </button>
+                    <span className="text-xs text-gray-500">
+                      {showQuorumFailed ? 'Inclus à la publication' : 'Exclus de la publication'}
+                    </span>
                   </div>
                 )}
                 {filteredNVCenter.length > 0 && (
@@ -1036,12 +1049,31 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       
       console.log('✅ [Publication] Élection mise à jour');
 
-      // 2. Changer le statut de TOUS les PV validés en 'published'
+      // 2. Récupérer tous les PV validés
+      const { data: allValidatedPVs } = await supabase
+        .from('procès_verbaux')
+        .select('id, total_registered, votes_expressed')
+        .eq('election_id', selectedElection)
+        .in('status', ['validated', 'validé']);
+
+      // Si toggle OFF → exclure les PV dont le quorum n'est pas atteint
+      const idsToPublish = (allValidatedPVs || [])
+        .filter(pv => showQuorumFailed || !(
+          (pv.total_registered || 0) > 0 &&
+          (pv.votes_expressed || 0) < (pv.total_registered || 0) / 2
+        ))
+        .map(pv => pv.id);
+
+      if (idsToPublish.length === 0) {
+        setShowPublishConfirm(false);
+        toast.info('Aucun PV éligible à la publication.');
+        return;
+      }
+
       const { data: updatedPVs, error: pvError } = await supabase
         .from('procès_verbaux')
         .update({ status: 'published' })
-        .eq('election_id', selectedElection)
-        .eq('status', 'validated')
+        .in('id', idsToPublish)
         .select('id, bureau_id, status');
       
       if (pvError) {
