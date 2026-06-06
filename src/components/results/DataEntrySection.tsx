@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -17,9 +17,12 @@ import {
   Flag,
   Plus,
   Search,
+  Download,
+  Upload,
 } from 'lucide-react';
 import PVEntrySection from './PVEntrySection';
 import { toast } from 'sonner';
+import { importPVsFromExcel } from '@/utils/pvExcelImport';
 
 // Retry automatique sur erreurs réseau (ERR_CONNECTION_RESET, ERR_HTTP2_PING_FAILED)
 async function sbQuery<T>(
@@ -67,11 +70,18 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
   const [pvPrefill, setPvPrefill] = useState<{ centreId: string; bureauId: string; collegeType: string | null } | null>(null);
   const [votingCenters, setVotingCenters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [electionType, setElectionType] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const fetchVotingCenters = useCallback(async () => {
     if (!selectedElection) return;
       try {
         setLoading(true);
+
+        // Charger le type de l'élection pour l'import Excel
+        supabase.from('elections').select('type').eq('id', selectedElection).single()
+          .then(({ data }) => setElectionType(data?.type ?? null));
 
         // Étape 1 : récupérer les centre_ids liés à cette élection
         const { data: ecRows, error: ecError } = await sbQuery<{ center_id: string }[]>(() =>
@@ -258,6 +268,30 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
+  const handleImportExcel = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedElection) return;
+    e.target.value = '';
+    setImporting(true);
+    try {
+      const result = await importPVsFromExcel(file, selectedElection, electionType);
+      const parts: string[] = [];
+      if (result.created > 0) parts.push(`${result.created} PV créé(s)`);
+      if (result.updated > 0) parts.push(`${result.updated} mis à jour`);
+      if (result.skipped > 0) parts.push(`${result.skipped} ignoré(s)`);
+      if (parts.length > 0) toast.success(`Import réussi : ${parts.join(', ')}.`);
+      if (result.errors.length > 0) {
+        result.errors.slice(0, 5).forEach(err => toast.error(err));
+        if (result.errors.length > 5) toast.error(`… et ${result.errors.length - 5} autre(s) erreur(s).`);
+      }
+      if (result.created > 0 || result.updated > 0) fetchVotingCenters();
+    } catch (err: any) {
+      toast.error(`Erreur import : ${err?.message ?? 'inconnue'}`);
+    } finally {
+      setImporting(false);
+    }
+  }, [selectedElection, electionType, fetchVotingCenters]);
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'published':
@@ -377,9 +411,37 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
 
   return (
     <div className="space-y-6">
-      {/* Bouton d'action principal */}
+      {/* Boutons d'action */}
       {!readOnly && (
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* Télécharger le modèle Excel */}
+          <a href="/modele_saisie_pv.xlsx" download>
+            <Button variant="outline" size="sm" className="flex items-center gap-1.5">
+              <Download className="w-4 h-4" />
+              Modèle Excel
+            </Button>
+          </a>
+
+          {/* Importer un fichier rempli */}
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleImportExcel}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={importing}
+            onClick={() => importInputRef.current?.click()}
+            className="flex items-center gap-1.5"
+          >
+            <Upload className="w-4 h-4" />
+            {importing ? 'Import en cours…' : 'Importer résultats'}
+          </Button>
+
+          {/* Saisie manuelle */}
           <Button
             onClick={() => setShowPVEntry(true)}
             size="lg"
