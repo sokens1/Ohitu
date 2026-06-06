@@ -200,6 +200,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resettingAll, setResettingAll] = useState(false);
+  const [showResetAllConfirm, setShowResetAllConfirm] = useState(false);
   const [usersMap, setUsersMap] = useState<Map<string, string>>(new Map());
 
   // Filtres internes
@@ -718,6 +720,46 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     }
   };
 
+  // Réinitialiser tous les PV non publiés de l'élection
+  const handleResetAllPVs = async () => {
+    if (!selectedElection) return;
+    setResettingAll(true);
+    try {
+      // Récupérer les IDs des PV non publiés
+      const { data: pvRows, error: fetchErr } = await supabase
+        .from('procès_verbaux')
+        .select('id')
+        .eq('election_id', selectedElection)
+        .not('status', 'in', '("published")');
+      if (fetchErr) { toast.error('Erreur lors de la récupération des PV.'); return; }
+      const ids = (pvRows || []).map((r: any) => r.id);
+      if (ids.length === 0) { toast.info('Aucun PV à réinitialiser.'); return; }
+
+      // Supprimer les résultats candidats
+      const { error: crErr } = await supabase
+        .from('candidate_results')
+        .delete()
+        .in('pv_id', ids);
+      if (crErr) { toast.error('Erreur suppression résultats candidats.'); return; }
+
+      // Supprimer les PV
+      const { error: pvErr } = await supabase
+        .from('procès_verbaux')
+        .delete()
+        .in('id', ids);
+      if (pvErr) { toast.error('Erreur suppression des PV.'); return; }
+
+      toast.success(`${ids.length} PV réinitialisé(s) avec succès.`);
+      await loadPVs();
+      onDataRefresh?.();
+    } catch (err) {
+      console.error('Erreur réinitialisation globale:', err);
+      toast.error('Erreur lors de la réinitialisation.');
+    } finally {
+      setResettingAll(false);
+    }
+  };
+
   // Charger les résultats par candidat pour le PV sélectionné
   useEffect(() => {
     const loadCandidateResults = async () => {
@@ -804,9 +846,23 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               <FileCheck className="w-5 h-5" />
               <span>File d'Attente de Validation</span>
             </div>
-            <Badge className="bg-orange-100 text-orange-800">
-              {loading ? '...' : pvs.length} PV
-            </Badge>
+            <div className="flex items-center gap-2">
+              {!readOnly && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2.5 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                  disabled={resettingAll || pvs.filter(p => p.status !== 'published').length === 0}
+                  onClick={() => setShowResetAllConfirm(true)}
+                >
+                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                  Réinitialiser tous les PV
+                </Button>
+              )}
+              <Badge className="bg-orange-100 text-orange-800">
+                {loading ? '...' : pvs.length} PV
+              </Badge>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1679,6 +1735,50 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               className="bg-orange-600 hover:bg-orange-700 text-white"
             >
               {resetting ? 'Réinitialisation...' : 'Confirmer la réinitialisation'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de confirmation réinitialisation GLOBALE */}
+      <Dialog open={showResetAllConfirm} onOpenChange={setShowResetAllConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" />
+              Réinitialiser tous les PV
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Tous les PV saisis (hors publiés) seront supprimés définitivement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+                <div className="text-sm text-red-800">
+                  <p className="font-medium mb-2">Cette action va :</p>
+                  <ul className="space-y-1 text-red-700">
+                    <li>• Supprimer tous les PV en attente, saisis, validés et rejetés</li>
+                    <li>• Supprimer tous les votes candidats associés</li>
+                    <li>• Remettre tous les bureaux à "En attente de saisie"</li>
+                    <li>• Les PV déjà publiés ne sont pas affectés</li>
+                  </ul>
+                  <p className="font-semibold mt-2">Cette action est irréversible.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowResetAllConfirm(false)} disabled={resettingAll}>
+              Annuler
+            </Button>
+            <Button
+              onClick={async () => { setShowResetAllConfirm(false); await handleResetAllPVs(); }}
+              disabled={resettingAll}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {resettingAll ? 'Réinitialisation…' : 'Confirmer — Tout réinitialiser'}
             </Button>
           </DialogFooter>
         </DialogContent>

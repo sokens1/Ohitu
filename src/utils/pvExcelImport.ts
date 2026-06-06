@@ -28,7 +28,8 @@ export interface PVImportResult {
 export async function importPVsFromExcel(
   file: File,
   electionId: string,
-  electionType: string | null
+  electionType: string | null,
+  onProgress?: (phase: string, current: number, total: number) => void
 ): Promise<PVImportResult> {
   const result: PVImportResult = { created: 0, updated: 0, skipped: 0, errors: [] };
 
@@ -117,6 +118,17 @@ export async function importPVsFromExcel(
 
   // ── 5. Traiter chaque ligne ─────────────────────────────────────────────────
   const dataRows = rows.slice(1);
+  // Pré-filtrer les lignes non vides pour avoir le total réel
+  const nonEmptyRows = dataRows.filter((row) => {
+    const etab = String(row[0] ?? '').trim();
+    const col  = String(row[1] ?? '').trim();
+    const bur  = String(row[2] ?? '').trim();
+    const nb   = String(row[3] ?? '').trim();
+    return etab || col || bur || nb || syndicatCols.some(sc => String(row[sc.idx] ?? '').trim() !== '');
+  });
+  const totalRows = Math.max(nonEmptyRows.length, 1);
+  let processedRows = 0;
+  onProgress?.('Lecture du fichier…', 0, totalRows);
 
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
@@ -137,6 +149,10 @@ export async function importPVsFromExcel(
       syndicatCols.some(sc => String(row[sc.idx] ?? '').trim() !== '');
     if (!hasVoteData) { result.skipped++; continue; }
 
+    // Rapport de progression au début de chaque ligne significative
+    processedRows++;
+    onProgress?.(`Traitement ligne ${lineNum}…`, processedRows, totalRows);
+
     if (!etabRaw) { result.errors.push(`L${lineNum}: Etablissement manquant.`); continue; }
     if (!bureauRaw && !colRaw) { result.errors.push(`L${lineNum}: Bureau/Collège manquant.`); continue; }
 
@@ -153,17 +169,18 @@ export async function importPVsFromExcel(
     let bureau: any = null;
 
     if (isPro) {
-      // 1) Chercher un bureau physique par nom
-      if (bureauRaw) {
-        bureau = physicalByKey.get(`${center.id}|${norm(bureauRaw)}`);
-        // 2) Fallback : n'importe quel bureau physique de ce centre
-        if (!bureau) {
-          bureau = physicalBureaux.find(b => b.center_id === center.id);
-        }
-      }
-      // 3) Fallback : pseudo-bureau du collège
-      if (!bureau && collegeType) {
+      // 1) Priorité : pseudo-bureau du collège (College - xxx) quand le collège est connu
+      //    → les PVs doivent être sur les pseudo-bureaux pour être visibles dans DataEntrySection
+      if (collegeType) {
         bureau = pseudoByKey.get(`${center.id}|${collegeType}`);
+      }
+      // 2) Si aucun pseudo-bureau : essayer le bureau physique par nom exact
+      if (!bureau && bureauRaw) {
+        bureau = physicalByKey.get(`${center.id}|${norm(bureauRaw)}`);
+      }
+      // 3) Dernier recours : n'importe quel bureau physique du centre
+      if (!bureau) {
+        bureau = physicalBureaux.find(b => b.center_id === center.id);
       }
     } else {
       bureau = physicalByKey.get(`${center.id}|${norm(bureauRaw)}`);

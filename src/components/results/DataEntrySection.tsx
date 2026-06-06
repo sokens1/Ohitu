@@ -72,6 +72,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
   const [loading, setLoading] = useState(true);
   const [electionType, setElectionType] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ phase: string; current: number; total: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const fetchVotingCenters = useCallback(async () => {
@@ -273,8 +274,15 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     if (!file || !selectedElection) return;
     e.target.value = '';
     setImporting(true);
+    setImportProgress({ phase: 'Préparation…', current: 0, total: 1 });
     try {
-      const result = await importPVsFromExcel(file, selectedElection, electionType);
+      const result = await importPVsFromExcel(
+        file,
+        selectedElection,
+        electionType,
+        (phase, current, total) => setImportProgress({ phase, current, total })
+      );
+      setImportProgress(null);
       const parts: string[] = [];
       if (result.created > 0) parts.push(`${result.created} PV créé(s)`);
       if (result.updated > 0) parts.push(`${result.updated} mis à jour`);
@@ -286,6 +294,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
       }
       if (result.created > 0 || result.updated > 0) fetchVotingCenters();
     } catch (err: any) {
+      setImportProgress(null);
       toast.error(`Erreur import : ${err?.message ?? 'inconnue'}`);
     } finally {
       setImporting(false);
@@ -450,6 +459,28 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
             <Plus className="w-5 h-5 mr-2" />
             Saisir un PV
           </Button>
+        </div>
+      )}
+
+      {/* Barre de progression import Excel */}
+      {importing && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-blue-700 font-medium">
+              {importProgress?.phase ?? 'Import en cours…'}
+            </span>
+            {importProgress && importProgress.total > 1 && (
+              <span className="text-blue-500 text-xs">
+                {importProgress.current} / {importProgress.total}
+              </span>
+            )}
+          </div>
+          <Progress
+            value={importProgress && importProgress.total > 0
+              ? Math.round((importProgress.current / importProgress.total) * 100)
+              : 5}
+            className="h-2 bg-blue-100"
+          />
         </div>
       )}
 
