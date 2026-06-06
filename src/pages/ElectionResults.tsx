@@ -835,25 +835,30 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const showQuorumFailedPublic = election.show_quorum_failed_public !== false;
 
       // Construire les données des bureaux
-      const filteredBureaux = (pvsData || []).map((pv: any) => {
-        const reg = Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0;
-        const exp = Number(pv.votes_expressed) || 0;
-        // quorum_failed = false si l'admin a désactivé l'affichage public
-        const quorum_failed = showQuorumFailedPublic && reg > 0 && exp < reg / 2;
-        return {
-          pv_id: pv.id,
-          college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
-          bureau_id: pv.bureau_id,
-          bureau_name: pv.voting_bureaux?.name || '',
-          center_id: pv.voting_bureaux?.center_id || '',
-          total_registered: reg,
-          total_voters: Number(pv.total_voters) || 0,
-          total_expressed_votes: exp,
-          total_null_votes: Number(pv.null_votes) || 0,
-          participation_pct: reg > 0 ? (Number(pv.total_voters) / reg) * 100 : 0,
-          quorum_failed,
-        };
-      });
+      // Quand show_quorum_failed_public = false : les PV à quorum non atteint sont complètement
+      // exclus de la vue publique (pas seulement masqués en rouge — invisibles).
+      const filteredBureaux = (pvsData || [])
+        .map((pv: any) => {
+          const reg = Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0;
+          const exp = Number(pv.votes_expressed) || 0;
+          const isActuallyQuorumFailed = reg > 0 && exp < reg / 2;
+          const quorum_failed = showQuorumFailedPublic && isActuallyQuorumFailed;
+          return {
+            pv_id: pv.id,
+            college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
+            bureau_id: pv.bureau_id,
+            bureau_name: pv.voting_bureaux?.name || '',
+            center_id: pv.voting_bureaux?.center_id || '',
+            total_registered: reg,
+            total_voters: Number(pv.total_voters) || 0,
+            total_expressed_votes: exp,
+            total_null_votes: Number(pv.null_votes) || 0,
+            participation_pct: reg > 0 ? (Number(pv.total_voters) / reg) * 100 : 0,
+            quorum_failed,
+            isActuallyQuorumFailed,
+          };
+        })
+        .filter((b: any) => showQuorumFailedPublic || !b.isActuallyQuorumFailed);
 
       // IDs des PV dont le quorum est atteint → seuls ceux-ci alimentent les résultats globaux
       const quorumOkPvIds = new Set<string>(
@@ -1183,9 +1188,15 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
         // Avancement du dépouillement en SIÈGES
         // Numérateur : somme des sièges des groupes (centerId_colType) ayant un PV publié
-        // Dénominateur : totalSeats (tSeats) déjà calculé ci-dessus
+        // Si showQuorumFailedPublic=false → on exclut les PV à quorum non atteint du décompte
         const publishedGroupKeys = new Set<string>(
           (pvsData || [])
+            .filter((pv: any) => {
+              if (showQuorumFailedPublic) return true;
+              const reg = Number(pv.total_registered) || 0;
+              const exp = Number(pv.votes_expressed) || 0;
+              return !(reg > 0 && exp < reg / 2);
+            })
             .map((pv: any) => {
               const centerId = String(pv.voting_bureaux?.center_id || '');
               const ct = normalizeCollegeKey(pv.college_type || (pv.voting_bureaux as any)?.college_type || '') || '';
@@ -3157,6 +3168,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                         </div>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
+                        {centerTotalSeats > 0 && (
+                          <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                            <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Sièges en lice</div>
+                            <div className="font-bold text-gray-800 text-sm sm:text-base">{centerTotalSeats}</div>
+                          </div>
+                        )}
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_registered === 'number' ? c.total_registered.toLocaleString('fr-FR') : (c.total_registered || '-')}</div>
@@ -3177,23 +3194,17 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                             {typeof c.participation_pct === 'number' ? `${(100 - Math.min(Math.max(c.participation_pct, 0), 100)).toFixed(2)}%` : '-'}
                           </div>
                         </div>
-                        {centerTotalSeats > 0 && (
-                          <div className="bg-blue-50 rounded-lg px-3 py-2 border border-blue-200 shadow-sm text-center">
-                            <div className="text-[9px] sm:text-[10px] uppercase text-blue-600 font-medium mb-0.5">Sièges en lice</div>
-                            <div className="font-bold text-blue-700 text-sm sm:text-base">{centerTotalSeats}</div>
-                          </div>
-                        )}
                       </div>
                     </div>
 
                     {/* En-tête de tableau (desktop) */}
                     <div className={`hidden sm:grid ${centerTotalSeats > 0 ? 'grid-cols-6' : 'grid-cols-5'} px-4 sm:px-6 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase tracking-wide`}>
                       <div className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-blue-400" />Collège</div>
+                      {centerTotalSeats > 0 && <div className="text-right">Sièges en lice</div>}
                       <div className="text-right">{electorsLabel}</div>
                       <div className="text-right">Votants</div>
                       <div className="text-right">Exprimés</div>
                       <div className="text-right">Abstention</div>
-                      {centerTotalSeats > 0 && <div className="text-right text-blue-600">Sièges en lice</div>}
                     </div>
 
                     {/* Lignes par collège avec accordéon syndicats */}
@@ -3223,6 +3234,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : 'text-blue-400'}`} />
                                   {row.collegeName}
                                 </div>
+                                {centerTotalSeats > 0 && (
+                                  <div className={`text-right font-semibold text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{rowSeats > 0 ? rowSeats : '-'}</div>
+                                )}
                                 <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_registered?.toLocaleString() || '-'}</div>
                                 <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_voters?.toLocaleString() || '-'}</div>
                                 <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_expressed_votes?.toLocaleString() || '-'}</div>
@@ -3232,9 +3246,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     : <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>{abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
                                   }
                                 </div>
-                                {centerTotalSeats > 0 && (
-                                  <div className="text-right font-semibold text-blue-700 text-sm">{rowSeats > 0 ? rowSeats : '-'}</div>
-                                )}
                               </div>
                               {/* Ligne mobile : card */}
                               <div className={`sm:hidden px-4 py-3 transition-colors ${qFailed ? 'hover:bg-red-100' : 'hover:bg-blue-50'}`}>
@@ -3249,6 +3260,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   }
                                 </div>
                                 <div className={`mt-2 grid ${centerTotalSeats > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-2 text-xs text-center ml-6`}>
+                                  {centerTotalSeats > 0 && (
+                                    <div>
+                                      <div className="text-gray-500 uppercase">Sièges</div>
+                                      <div className="font-semibold text-gray-800">{rowSeats > 0 ? rowSeats : '-'}</div>
+                                    </div>
+                                  )}
                                   <div>
                                     <div className="text-gray-500 uppercase">{electorsLabel}</div>
                                     <div className="font-semibold text-gray-800">{row.total_registered?.toLocaleString() || '-'}</div>
@@ -3261,12 +3278,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     <div className="text-gray-500 uppercase">Exprimés</div>
                                     <div className="font-semibold text-gray-800">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
                                   </div>
-                                  {centerTotalSeats > 0 && (
-                                    <div>
-                                      <div className="text-blue-600 uppercase">Sièges</div>
-                                      <div className="font-semibold text-blue-700">{rowSeats > 0 ? rowSeats : '-'}</div>
-                                    </div>
-                                  )}
                                 </div>
                               </div>
                             </summary>
