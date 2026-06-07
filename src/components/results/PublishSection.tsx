@@ -276,7 +276,10 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             .in('center_id', Array.from(allowedCenterIds));
           if (bureauErr) throw bureauErr;
           allBureaux = bureauRows || [];
-          totalInscritsElection = allBureaux.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
+          // Pour les élections pro : source de vérité = electoral_colleges.total_voters (chargé plus haut via totalElectorsElection).
+          // On ne somme que les bureaux physiques (pas les pseudo "College -") pour éviter le double comptage.
+          const physicalBureaux = allBureaux.filter((b: any) => !b.name?.startsWith?.('College -'));
+          totalInscritsElection = physicalBureaux.reduce((sum: number, b: any) => sum + (Number(b.registered_voters) || 0), 0);
           // Build "centerId_collegeType" → seats_to_fill from pseudo-entries
           allBureaux.forEach((b: any) => {
             const colKey = normalizeCollegeKey(b.college || b.college_type);
@@ -287,7 +290,10 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           });
         }
 
-        if (totalInscritsElection === 0 && totalElectorsElection > 0) {
+        // Pour les élections pro, la source de vérité est electoral_colleges.total_voters
+        if (isPro && totalElectorsElection > 0) {
+          totalInscritsElection = totalElectorsElection;
+        } else if (totalInscritsElection === 0 && totalElectorsElection > 0) {
           totalInscritsElection = totalElectorsElection;
         }
 
@@ -425,6 +431,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         }
 
         // Totaux de participation : tous les PV (quorum atteint ou non + saisis)
+        // Pour les élections pro : les PVs à quorum raté sont exclus des votes_expressed
+        // (leur total_voters et null_votes sont néanmoins comptés — la participation est réelle)
         const totalInscritsDesBureauxAvecPV = (filteredPvsAll || []).reduce((sum: number, pv: any) => {
           const bureau = bureauMap.get(pv.bureau_id);
           const centerTotal = bureau ? Number(centerMap.get(bureau.center_id)?.total_voters) || 0 : 0;
@@ -437,13 +445,18 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         (filteredPvsAll || []).forEach((pv: any) => {
           totalVotants += Number(pv.total_voters) || 0;
           bulletinsNuls += Number(pv.null_votes) || 0;
-          totalExprimesPV += Number(pv.votes_expressed) || 0;
+          // Exclure les PVs à quorum raté des votes exprimés → cohérence avec les résultats candidats
+          if (!pvQuorumFailed.has(pv.id)) {
+            totalExprimesPV += Number(pv.votes_expressed) || 0;
+          }
         });
 
-        // Prefer the PV-based base when available (shows electors entered / electors total)
-        const totalInscrits = (totalInscritsDesBureauxAvecPV && totalInscritsDesBureauxAvecPV > 0)
-          ? totalInscritsDesBureauxAvecPV
-          : totalInscritsElection;
+        // Pour les élections pro : source de vérité = electoral_colleges.total_voters
+        const totalInscrits = (isPro && totalElectorsElection > 0)
+          ? totalElectorsElection
+          : (totalInscritsDesBureauxAvecPV && totalInscritsDesBureauxAvecPV > 0)
+            ? totalInscritsDesBureauxAvecPV
+            : totalInscritsElection;
         
         
 
@@ -1281,7 +1294,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     {finalResults ? (
                       <>
                         {Number(finalResults.participation.totalInscrits).toLocaleString()}
-                        {finalResults.participation.totalInscritsElection && (
+                        {finalResults.participation.totalInscritsElection > 0 &&
+                         finalResults.participation.totalInscritsElection !== finalResults.participation.totalInscrits && (
                           <span className="text-gray-500 font-normal">
                             {' '}/{' '}{Number(finalResults.participation.totalInscritsElection).toLocaleString()}
                           </span>
@@ -1305,13 +1319,20 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                 </div>
               </div>
 
-              {finalResults?.participation?.verificationAlt && (
-                <div className="mt-3 text-xs">
-                  <span className="inline-block px-2 py-1 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                    Vérif (modèle 2) — Exprimés: {Number(finalResults.participation.verificationAlt.exprimésAlt || finalResults.participation.verificationAlt.exprimesAlt).toLocaleString()} • Taux (participation): {Number(finalResults.participation.verificationAlt.tauxAlt).toFixed(2)}% • Abstention: {(100 - Number(finalResults.participation.verificationAlt.tauxAlt)).toFixed(2)}%
-                  </span>
-                </div>
-              )}
+              {finalResults?.participation?.verificationAlt && (() => {
+                const vAlt = finalResults.participation.verificationAlt;
+                const expAlt = Number(vAlt.exprimésAlt || vAlt.exprimesAlt || 0);
+                const expMain = Number(finalResults.participation.suffragesExprimes || 0);
+                const diffPct = expMain > 0 ? Math.abs(expAlt - expMain) / expMain : 0;
+                if (diffPct < 0.05) return null; // < 5% d'écart : ne pas afficher
+                return (
+                  <div className="mt-3 text-xs">
+                    <span className="inline-block px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                      ⚠ Vérif — Exprimés candidats : {expAlt.toLocaleString()} (écart de {(diffPct * 100).toFixed(1)}% avec les PVs). Taux participation : {Number(vAlt.tauxAlt).toFixed(2)}%
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
           </CardContent>
         </Card>
