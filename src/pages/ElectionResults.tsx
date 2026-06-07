@@ -834,31 +834,33 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       // Paramètre admin : afficher ou non les lignes rouges quorum sur la page publique
       const showQuorumFailedPublic = election.show_quorum_failed_public !== false;
 
-      // Construire les données des bureaux
-      // Quand show_quorum_failed_public = false : les PV à quorum non atteint sont complètement
-      // exclus de la vue publique (pas seulement masqués en rouge — invisibles).
-      const filteredBureaux = (pvsData || [])
-        .map((pv: any) => {
-          const reg = Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0;
-          const exp = Number(pv.votes_expressed) || 0;
-          const isActuallyQuorumFailed = reg > 0 && exp < reg / 2;
-          const quorum_failed = showQuorumFailedPublic && isActuallyQuorumFailed;
-          return {
-            pv_id: pv.id,
-            college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
-            bureau_id: pv.bureau_id,
-            bureau_name: pv.voting_bureaux?.name || '',
-            center_id: pv.voting_bureaux?.center_id || '',
-            total_registered: reg,
-            total_voters: Number(pv.total_voters) || 0,
-            total_expressed_votes: exp,
-            total_null_votes: Number(pv.null_votes) || 0,
-            participation_pct: reg > 0 ? (Number(pv.total_voters) / reg) * 100 : 0,
-            quorum_failed,
-            isActuallyQuorumFailed,
-          };
-        })
-        .filter((b: any) => showQuorumFailedPublic || !b.isActuallyQuorumFailed);
+      // Mapper tous les PV publiés (sans filtre quorum) — utilisé pour les cartes stats
+      const allPublishedBureaux = (pvsData || []).map((pv: any) => {
+        const reg = Number(pv.total_registered) || Number(pv.voting_bureaux?.registered_voters) || 0;
+        const exp = Number(pv.votes_expressed) || 0;
+        const isActuallyQuorumFailed = reg > 0 && exp < reg / 2;
+        const quorum_failed = showQuorumFailedPublic && isActuallyQuorumFailed;
+        return {
+          pv_id: pv.id,
+          college_type: pv.college_type || (pv.voting_bureaux as any)?.college_type || '',
+          bureau_id: pv.bureau_id,
+          bureau_name: pv.voting_bureaux?.name || '',
+          center_id: pv.voting_bureaux?.center_id || '',
+          total_registered: reg,
+          total_voters: Number(pv.total_voters) || 0,
+          total_expressed_votes: exp,
+          total_null_votes: Number(pv.null_votes) || 0,
+          participation_pct: reg > 0 ? (Number(pv.total_voters) / reg) * 100 : 0,
+          quorum_failed,
+          isActuallyQuorumFailed,
+        };
+      });
+
+      // Vue détaillée : quand show_quorum_failed_public = false, les PV à quorum non atteint
+      // sont invisibles dans la vue par collège/bureau (mais leurs données restent dans les cartes)
+      const filteredBureaux = showQuorumFailedPublic
+        ? allPublishedBureaux
+        : allPublishedBureaux.filter((b: any) => !b.isActuallyQuorumFailed);
 
       // IDs des PV dont le quorum est atteint → seuls ceux-ci alimentent les résultats globaux
       const quorumOkPvIds = new Set<string>(
@@ -898,10 +900,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const filteredCenters = Array.from(centersMap.values());
 
       // Totaux d'affichage (cartes stats) = TOUS les PVs publiés y compris quorum non atteint
-      const votersSum = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
-      const registeredInBureauxWithResults = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
+      // On utilise allPublishedBureaux pour que la désactivation de l'affichage quorum
+      // n'affecte que la vue détaillée, pas les chiffres globaux
+      const votersSum = allPublishedBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_voters) || 0), 0);
+      const registeredInBureauxWithResults = allPublishedBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_registered) || 0), 0);
       // Suffrages exprimés affichage (tous PVs, y compris quorum non atteint)
-      const expressedSumAll = filteredBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
+      const expressedSumAll = allPublishedBureaux.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
       // Suffrages exprimés pour les pourcentages candidats = quorum OK uniquement
       const expressedSum = filteredBureauxForResults.reduce((sum: number, b: any) => sum + (Number(b.total_expressed_votes) || 0), 0);
 
@@ -3275,7 +3279,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                               <div className={`hidden sm:grid ${centerTotalSeats > 0 ? 'grid-cols-6' : 'grid-cols-5'} px-4 sm:px-6 py-3 transition-colors items-center ${qFailed ? 'hover:bg-red-100' : 'hover:bg-blue-50'}`}>
                                 <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : 'text-gray-800'}`}>
                                   <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : 'text-blue-400'}`} />
-                                  {row.collegeName}
+                                  <span className="flex items-center gap-1.5 flex-wrap">
+                                    {row.collegeName}
+                                    {qFailed && (
+                                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 whitespace-nowrap">⚠ Quorum non atteint</span>
+                                    )}
+                                  </span>
                                 </div>
                                 {centerTotalSeats > 0 && (
                                   <div className={`text-right font-semibold text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{rowSeats > 0 ? rowSeats : '-'}</div>
@@ -3284,10 +3293,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                 <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_voters?.toLocaleString() || '-'}</div>
                                 <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_expressed_votes?.toLocaleString() || '-'}</div>
                                 <div className="text-right">
-                                  {qFailed
-                                    ? <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Quorum non atteint</span>
-                                    : <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>{abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
-                                  }
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>{abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
                                 </div>
                               </div>
                               {/* Ligne mobile : card */}
@@ -3295,12 +3301,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                 <div className="flex items-center justify-between">
                                   <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : 'text-gray-800'}`}>
                                     <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : 'text-blue-400'}`} />
-                                    {row.collegeName}
+                                    <span className="flex flex-col gap-0.5">
+                                      {row.collegeName}
+                                      {qFailed && (
+                                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 w-fit">⚠ Quorum non atteint</span>
+                                      )}
+                                    </span>
                                   </div>
-                                  {qFailed
-                                    ? <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Quorum non atteint</span>
-                                    : <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>Abs. {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
-                                  }
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>Abs. {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
                                 </div>
                                 <div className={`mt-2 grid ${centerTotalSeats > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-2 text-xs text-center ml-6`}>
                                   {centerTotalSeats > 0 && (

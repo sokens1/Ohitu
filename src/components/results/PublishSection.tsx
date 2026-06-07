@@ -269,6 +269,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         let totalInscritsElection = 0;
         let allBureaux: any[] = [];
         let bureauSeats = new Map<string, number>();
+        let bureauByIdForDedup = new Map<any, any>();
         if (allowedCenterIds.size > 0) {
           const { data: bureauRows, error: bureauErr } = await supabase
             .from('voting_bureaux')
@@ -276,6 +277,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             .in('center_id', Array.from(allowedCenterIds));
           if (bureauErr) throw bureauErr;
           allBureaux = bureauRows || [];
+          bureauByIdForDedup = new Map(allBureaux.map((b: any) => [b.id, b]));
           // Pour les élections pro : source de vérité = electoral_colleges.total_voters (chargé plus haut via totalElectorsElection).
           // On ne somme que les bureaux physiques (pas les pseudo "College -") pour éviter le double comptage.
           const physicalBureaux = allBureaux.filter((b: any) => !b.name?.startsWith?.('College -'));
@@ -300,8 +302,30 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         
 
         const allowedBureauIds = new Set(allBureaux.map((b: any) => b.id));
-        const filteredValidatedPvs = pvsValidated.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
-        const filteredEnteredPvs = pvsEntered.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
+        const rawValidatedPvs = pvsValidated.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
+        const rawEnteredPvs   = pvsEntered.filter((pv: any) => !allowedCenterIds.size || allowedBureauIds.has(pv.bureau_id));
+
+        // Pour les élections pro : dédupliquer par groupe (centreId + collègeType)
+        // → garder UN seul PV par collège par établissement (priorité : pseudo-bureau "College -")
+        // pour éviter le double-comptage quand bureaux physiques ET pseudo-bureaux ont tous un PV validé.
+        const deduplicateProPvs = (pvList: any[]): any[] => {
+          if (!isPro) return pvList;
+          const primaryByGroup = new Map<string, any>();
+          for (const pv of pvList) {
+            const bureau = bureauByIdForDedup.get(pv.bureau_id);
+            if (!bureau) continue;
+            const centerId = String(bureau.center_id);
+            const colKey = normalizeCollegeKey(pv.college_type || bureau.college_type || bureau.college);
+            if (!colKey) continue;
+            const gk = `${centerId}_${colKey}`;
+            const isPseudo = !!bureau.name?.startsWith?.('College -');
+            if (!primaryByGroup.has(gk) || isPseudo) primaryByGroup.set(gk, pv);
+          }
+          return Array.from(primaryByGroup.values());
+        };
+
+        const filteredValidatedPvs = deduplicateProPvs(rawValidatedPvs);
+        const filteredEnteredPvs   = deduplicateProPvs(rawEnteredPvs);
 
         // PVs validés dont le quorum est atteint → seuls ceux-ci entrent dans les résultats
         const pvQuorumFailed = new Set<string>(
@@ -313,7 +337,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
 
         const filteredPvsAll = [...filteredValidatedPvs, ...filteredEnteredPvs]; // pour l'affichage
         const filteredPvsForResults = [...filteredValidatedPvsForResults, ...filteredEnteredPvs]; // pour les calculs
-        setNonValidatedCount(filteredEnteredPvs.length);
+        setNonValidatedCount(rawEnteredPvs.length);
 
         
 
@@ -445,10 +469,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         (filteredPvsAll || []).forEach((pv: any) => {
           totalVotants += Number(pv.total_voters) || 0;
           bulletinsNuls += Number(pv.null_votes) || 0;
-          // Exclure les PVs à quorum raté des votes exprimés → cohérence avec les résultats candidats
-          if (!pvQuorumFailed.has(pv.id)) {
-            totalExprimesPV += Number(pv.votes_expressed) || 0;
-          }
+          totalExprimesPV += Number(pv.votes_expressed) || 0;
         });
 
         // Pour les élections pro : source de vérité = electoral_colleges.total_voters
