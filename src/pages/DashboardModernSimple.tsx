@@ -80,7 +80,7 @@ async function fetchElectionsList({
 }): Promise<any[]> {
   let query = supabase
     .from('elections')
-    .select('id, title, status, type, election_date');
+    .select('id, title, status, type, election_date, is_public_visible');
 
   if (userRole === 'super-admin') {
     // accès total — aucun filtre
@@ -749,8 +749,8 @@ const DashboardModernSimple = () => {
                         <div className="flex flex-col min-w-0">
                           <span className="text-sm font-bold text-slate-700 truncate max-w-[250px]">{election.title}</span>
                           <span className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${election.status === 'Terminée' ? 'bg-emerald-500' : 'bg-indigo-400'}`}></span>
-                            {election.type} • {election.status}
+                            <span className={`w-2 h-2 rounded-full ${election.is_public_visible === false ? 'bg-violet-400' : election.status === 'Terminée' ? 'bg-emerald-500' : 'bg-indigo-400'}`}></span>
+                            {election.type} • {election.is_public_visible === false ? 'Masqué au public' : election.status}
                           </span>
                         </div>
                       </label>

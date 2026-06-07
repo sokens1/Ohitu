@@ -186,6 +186,31 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     setFilterCollege('');
   }, [selectedElection]);
 
+  // Réinitialiser le collège si l'établissement sélectionné ne le contient plus
+  useEffect(() => {
+    if (!filterCenter || !rawResultsData || !filterCollege) return;
+    const validCols = new Set<string>();
+    rawResultsData.pvMeta.forEach((meta) => {
+      if (meta.centerId !== filterCenter) return;
+      if (meta.status === 'entered' || meta.status === 'saisi') return;
+      if (meta.collegeType) validCols.add(meta.collegeType);
+    });
+    if (!validCols.has(filterCollege)) setFilterCollege('');
+  }, [filterCenter, rawResultsData, filterCollege]);
+
+  // Collèges disponibles = uniquement ceux ayant un PV validé dans l'établissement sélectionné
+  const shownColleges = useMemo(() => {
+    if (!rawResultsData) return [];
+    if (!filterCenter) return rawResultsData.availableColleges;
+    const cols = new Set<string>();
+    rawResultsData.pvMeta.forEach((meta) => {
+      if (meta.centerId !== filterCenter) return;
+      if (meta.status === 'entered' || meta.status === 'saisi') return;
+      if (meta.collegeType) cols.add(meta.collegeType);
+    });
+    return [...cols];
+  }, [rawResultsData, filterCenter]);
+
   // Synchroniser les états simulation quand l'élection change
   useEffect(() => {
     if (!selectedElection) return;
@@ -724,8 +749,9 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const computedSeatsResult = useMemo<{
     seats: Record<string, number>;
     manualTies: { group: string; parties: string[] }[];
+    seatRankMap: Record<string, number>;
   }>(() => {
-    const empty = { seats: {} as Record<string, number>, manualTies: [] as { group: string; parties: string[] }[] };
+    const empty = { seats: {} as Record<string, number>, manualTies: [] as { group: string; parties: string[] }[], seatRankMap: {} as Record<string, number> };
     if (!rawResultsData || !isProfessionalElection(electionType)) return empty;
     const { crRows, pvMeta, baseVotesByCandidate, bureauSeats } = rawResultsData;
 
@@ -733,6 +759,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     const activeCollege = filterCollege ? normalizeCollegeKey(filterCollege) || '' : '';
     const resultSeats: Record<string, number> = {};
     const manualTies: { group: string; parties: string[] }[] = [];
+    const seatRankMap: Record<string, number> = {};
 
     // Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority }
     const candidateInfoMap = new Map<string, { age: number; seniority: number }>();
@@ -766,63 +793,74 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       pvCandidateResults.get(r.pv_id)!.push(r);
     });
 
-    // 2) Effectuer le calcul bureau par bureau
+    // 2) Calcul par groupe (centerId_colKey) — UN SEUL calcul par collège×établissement.
+    //    Évite les doublons de sièges quand plusieurs PVs existent pour le même collège.
+
+    // Phase A : agréger les voix par groupe
+    const groupAggVotes = new Map<string, Map<string, number>>(); // "centerId_colKey" → syndicatKey → voix
+    const groupMeta     = new Map<string, { centerName: string; collegeType: string | null }>();
+
     pvCandidateResults.forEach((results, pvId) => {
       const meta = pvMeta.get(pvId);
       if (!meta) return;
-
-      // Exclure les PV non validés du calcul officiel des sièges
       if (meta.status === 'entered' || meta.status === 'saisi') return;
-
-      // Appliquer les filtres établissement / collège
       if (activeCenter && meta.centerId !== activeCenter) return;
       if (activeCollege && meta.collegeType !== activeCollege) return;
 
       const centerId = meta.centerId;
       const colKey = normalizeCollegeKey(meta.collegeType);
-      const seatsToFillKey = `${centerId}_${colKey}`;
-      const seatsToFill = bureauSeats.get(seatsToFillKey) || 0;
+      if (!colKey) return;
+      const gk = `${centerId}_${colKey}`;
+      if (!(bureauSeats.get(gk) || 0)) return;
 
-      if (seatsToFill === 0) return;
+      groupMeta.set(gk, { centerName: meta.centerName, collegeType: meta.collegeType });
+      if (!groupAggVotes.has(gk)) groupAggVotes.set(gk, new Map());
+      const gv = groupAggVotes.get(gk)!;
 
-      // Agréger les voix par syndicat pour ce PV
-      const partyVotes = new Map<string, number>();
       results.forEach((r: any) => {
         const cid = r.candidates?.id || r.candidate_id;
         const cand = baseVotesByCandidate[cid];
         if (!cand) return;
         const pk = (cand.party?.split(' — ')[0] || cand.name || '').trim();
-        partyVotes.set(pk, (partyVotes.get(pk) || 0) + (r.votes || 0));
+        gv.set(pk, (gv.get(pk) || 0) + (r.votes || 0));
       });
+    });
 
-      // Construire l'entrée des syndicats avec l'âge et l'ancienneté
-      const syndicats: SyndicatVotes[] = Array.from(partyVotes.entries()).map(([pk, v]) => {
-        const infoKey = `${pk}_${colKey}`;
-        const info = candidateInfoMap.get(infoKey) || { age: 0, seniority: 0 };
-        return {
-          partyKey: pk,
-          votes: v,
-          anciennete: info.seniority,
-          age: info.age
-        };
+    // Phase B : une seule allocation par groupe
+    groupAggVotes.forEach((aggVotes, gk) => {
+      const seatsToFill = bureauSeats.get(gk) || 0;
+      const gm = groupMeta.get(gk)!;
+      const colKey = normalizeCollegeKey(gm.collegeType);
+      const syndicats: SyndicatVotes[] = Array.from(aggVotes.entries()).map(([pk, v]) => {
+        const info = candidateInfoMap.get(`${pk}_${colKey}`) || { age: 0, seniority: 0 };
+        return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age };
       });
 
       const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
 
-      // Cumuler les sièges obtenus
       Object.entries(alloc.seats).forEach(([pk, s]) => {
         resultSeats[pk] = (resultSeats[pk] || 0) + s;
       });
 
+      // Numéro d'ordre (#1 = plus de voix / quotient, #2 = plus forte moyenne)
+      if (seatsToFill >= 2) {
+        const groupWinners = syndicats
+          .filter(s => (alloc.seats[s.partyKey] || 0) > 0)
+          .sort((a, b) => b.votes - a.votes);
+        groupWinners.forEach((w, i) => {
+          if (!(w.partyKey in seatRankMap)) seatRankMap[w.partyKey] = i + 1;
+        });
+      }
+
       if (alloc.manualTie) {
         manualTies.push({
-          group: `${meta.centerName || 'Centre'} - ${toCollegeLabel(meta.collegeType || '')}`,
+          group: `${gm.centerName || 'Centre'} - ${toCollegeLabel(gm.collegeType || '')}`,
           parties: alloc.manualTie
         });
       }
     });
 
-    return { seats: resultSeats, manualTies };
+    return { seats: resultSeats, manualTies, seatRankMap };
   }, [rawResultsData, electionType, unionLists]);
 
   const computedSeats    = computedSeatsResult.seats;
@@ -1187,11 +1225,11 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             <select
               value={filterCollege}
               onChange={e => setFilterCollege(e.target.value)}
-              disabled={!rawResultsData || rawResultsData.availableColleges.length === 0}
+              disabled={shownColleges.length === 0}
               className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[160px] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="">Tous les collèges</option>
-              {(rawResultsData?.availableColleges || []).map((col: string) => (
+              {shownColleges.map((col: string) => (
                 <option key={col} value={col}>{toCollegeLabel(col)}</option>
               ))}
             </select>
@@ -1414,9 +1452,10 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     {isPro && Object.keys(computedSeats).length > 0 && (() => {
                       const syndicatKey = (candidate.party?.split(' — ')[0] || candidate.name || '').trim();
                       const seats = computedSeats[syndicatKey] ?? 0;
+                      const rank = computedSeatsResult.seatRankMap[syndicatKey];
                       return (
                         <div className={`mt-1 text-xs font-semibold rounded px-2 py-0.5 ${seats > 0 ? 'text-green-700 bg-green-50 border border-green-200' : 'text-gray-500 bg-gray-50 border border-gray-200'}`}>
-                          {seats} siège{seats !== 1 ? 's' : ''}
+                          {seats > 0 && rank ? `#${rank} — ` : ''}{seats} siège{seats !== 1 ? 's' : ''}
                         </div>
                       );
                     })()}
