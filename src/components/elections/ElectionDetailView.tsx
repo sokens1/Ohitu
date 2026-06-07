@@ -1929,6 +1929,13 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                                   const s = candidate.suppleants?.[i];
                                   return (
                                     <React.Fragment key={i}>
+                                      {/* Numéro d'ordre siège — affiché car multi-sièges */}
+                                      <div className="col-span-2 flex items-center gap-1.5 mt-1 mb-0.5">
+                                        <span className="text-[8px] font-black px-1.5 py-0.5 bg-purple-600 text-white rounded-full leading-none">
+                                          #{i + 1}
+                                        </span>
+                                        <div className="flex-1 border-t border-purple-100" />
+                                      </div>
                                       <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
                                         <div className="w-6 h-6 rounded-full overflow-hidden bg-purple-100 flex-shrink-0 flex items-center justify-center">
                                           {t.photo

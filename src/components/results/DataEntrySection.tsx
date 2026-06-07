@@ -226,25 +226,22 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           const totalElectors = bureaux.reduce((sum: number, b: any) => sum + Number(b.registered_voters || 0), 0);
           const bureauxSaisis = bureaux.filter((b: any) => enteredStatuses.includes(b.status)).length;
 
-          // Pour les élections professionnelles : compter les PVs par collège, pas les bureaux physiques
-          const totalCollegePVs = collegeBureaux.length;
-          const collegePvsSaisis = collegeBureaux.filter((cb: any) => {
-            const cbKey = toRawKey(cb.college_type || cb.college);
-            const pv = pvMap.get(String(cb.id)) || (cbKey ? pvByCollegeType.get(`${centerId}_${cbKey}`) : null);
-            return pv && doneStatuses.includes(pv.status);
-          }).length;
-
+          const pvCount = allCollegePvs.length;
+          const totalPvExpected = collegeBureaux.length;
+          const isPro = totalPvExpected > 0;
           return {
             id: center.id.toString(),
             name: center.name,
             totalBureaux: bureaux.length,
-            totalCollegePVs,
-            collegePvsSaisis,
             bureauxSaisis,
             electorsEntered,
             totalElectors,
-            status: bureaux.length > 0 && bureauxSaisis === bureaux.length ? 'completed' :
-                   bureauxSaisis > 0 ? 'in-progress' : 'pending',
+            pvCount,
+            totalPvExpected,
+            status: isPro
+              ? (pvCount === totalPvExpected ? 'completed' : pvCount > 0 ? 'in-progress' : 'pending')
+              : (bureaux.length > 0 && bureauxSaisis === bureaux.length ? 'completed' :
+                 bureauxSaisis > 0 ? 'in-progress' : 'pending'),
             bureaux
           };
         }) || [];
@@ -567,8 +564,8 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                     <div>
                       <h3 className="font-semibold text-gray-900">
                         {center.name}{' '}
-                        {center.totalCollegePVs > 0
-                          ? `(${center.collegePvsSaisis} / ${center.totalCollegePVs} PV${center.totalCollegePVs > 1 ? 's' : ''} joint${center.totalCollegePVs > 1 ? 's' : ''})`
+                        {center.totalPvExpected > 0
+                          ? `(${center.pvCount} / ${center.totalPvExpected} PV${center.totalPvExpected > 1 ? 's' : ''} saisis)`
                           : center.totalElectors > 0
                             ? `(${center.electorsEntered.toLocaleString()} / ${center.totalElectors.toLocaleString()} électeurs saisis)`
                             : `(${center.bureauxSaisis} / ${center.totalBureaux} bureaux saisis)`}
@@ -580,8 +577,8 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                           <Badge className="bg-blue-100 text-blue-800 text-xs">⏳ En cours</Badge>
                         )}
                         <Progress
-                          value={center.totalCollegePVs > 0
-                            ? (center.collegePvsSaisis / center.totalCollegePVs) * 100
+                          value={center.totalPvExpected > 0
+                            ? (center.pvCount / center.totalPvExpected) * 100
                             : center.totalElectors > 0
                               ? (center.electorsEntered / center.totalElectors) * 100
                               : center.totalBureaux > 0 ? (center.bureauxSaisis / center.totalBureaux) * 100 : 0

@@ -186,31 +186,6 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     setFilterCollege('');
   }, [selectedElection]);
 
-  // Réinitialiser le collège si l'établissement sélectionné ne le contient plus
-  useEffect(() => {
-    if (!filterCenter || !rawResultsData || !filterCollege) return;
-    const validCols = new Set<string>();
-    rawResultsData.pvMeta.forEach((meta) => {
-      if (meta.centerId !== filterCenter) return;
-      if (meta.status === 'entered' || meta.status === 'saisi') return;
-      if (meta.collegeType) validCols.add(meta.collegeType);
-    });
-    if (!validCols.has(filterCollege)) setFilterCollege('');
-  }, [filterCenter, rawResultsData, filterCollege]);
-
-  // Collèges disponibles = uniquement ceux ayant un PV validé dans l'établissement sélectionné
-  const shownColleges = useMemo(() => {
-    if (!rawResultsData) return [];
-    if (!filterCenter) return rawResultsData.availableColleges;
-    const cols = new Set<string>();
-    rawResultsData.pvMeta.forEach((meta) => {
-      if (meta.centerId !== filterCenter) return;
-      if (meta.status === 'entered' || meta.status === 'saisi') return;
-      if (meta.collegeType) cols.add(meta.collegeType);
-    });
-    return [...cols];
-  }, [rawResultsData, filterCenter]);
-
   // Synchroniser les états simulation quand l'élection change
   useEffect(() => {
     if (!selectedElection) return;
@@ -749,9 +724,8 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   const computedSeatsResult = useMemo<{
     seats: Record<string, number>;
     manualTies: { group: string; parties: string[] }[];
-    seatRankMap: Record<string, number>;
   }>(() => {
-    const empty = { seats: {} as Record<string, number>, manualTies: [] as { group: string; parties: string[] }[], seatRankMap: {} as Record<string, number> };
+    const empty = { seats: {} as Record<string, number>, manualTies: [] as { group: string; parties: string[] }[] };
     if (!rawResultsData || !isProfessionalElection(electionType)) return empty;
     const { crRows, pvMeta, baseVotesByCandidate, bureauSeats } = rawResultsData;
 
@@ -759,7 +733,6 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     const activeCollege = filterCollege ? normalizeCollegeKey(filterCollege) || '' : '';
     const resultSeats: Record<string, number> = {};
     const manualTies: { group: string; parties: string[] }[] = [];
-    const seatRankMap: Record<string, number> = {};
 
     // Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority }
     const candidateInfoMap = new Map<string, { age: number; seniority: number }>();
@@ -842,16 +815,6 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
         resultSeats[pk] = (resultSeats[pk] || 0) + s;
       });
 
-      // Numéro d'ordre (#1 = plus de voix / quotient, #2 = plus forte moyenne)
-      if (seatsToFill >= 2) {
-        const groupWinners = syndicats
-          .filter(s => (alloc.seats[s.partyKey] || 0) > 0)
-          .sort((a, b) => b.votes - a.votes);
-        groupWinners.forEach((w, i) => {
-          if (!(w.partyKey in seatRankMap)) seatRankMap[w.partyKey] = i + 1;
-        });
-      }
-
       if (alloc.manualTie) {
         manualTies.push({
           group: `${gm.centerName || 'Centre'} - ${toCollegeLabel(gm.collegeType || '')}`,
@@ -860,7 +823,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       }
     });
 
-    return { seats: resultSeats, manualTies, seatRankMap };
+    return { seats: resultSeats, manualTies };
   }, [rawResultsData, electionType, unionLists]);
 
   const computedSeats    = computedSeatsResult.seats;
@@ -897,6 +860,22 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       color: colorPalette[idx % colorPalette.length],
     }));
   }, [filteredRawCandidates, electionType, computedSeats]);
+
+  // Résumé sièges (sans filtre) — affiché dans l'en-tête "Résultats Validés Prêts"
+  const seatSummary = useMemo(() => {
+    if (!rawResultsData || !isProfessionalElection(electionType)) return null;
+    const totalSeats = Array.from(rawResultsData.bureauSeats.values()).reduce((a, b) => a + b, 0);
+    const processedGroups = new Set<string>();
+    rawResultsData.pvMeta.forEach((meta) => {
+      if (meta.status === 'entered' || meta.status === 'saisi') return;
+      const colKey = normalizeCollegeKey(meta.collegeType);
+      if (!colKey) return;
+      const gk = `${meta.centerId}_${colKey}`;
+      if (rawResultsData.bureauSeats.get(gk)) processedGroups.add(gk);
+    });
+    const processedSeats = Array.from(processedGroups).reduce((s, gk) => s + (rawResultsData.bureauSeats.get(gk) || 0), 0);
+    return { totalSeats, processedSeats };
+  }, [rawResultsData, electionType]);
 
   // Candidats — utiliser directement les candidats groupés
   const displayedCandidates = groupedCandidates;
@@ -1189,7 +1168,14 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
               <div>
                 <h3 className="font-semibold text-gray-900">Résultats Validés Prêts</h3>
                 <p className="text-sm text-gray-600">
-                  {finalResults ? (
+                  {seatSummary ? (
+                    <>
+                      {seatSummary.processedSeats} sur {seatSummary.totalSeats} sièges dépouillés
+                      {seatSummary.totalSeats > 0 && (
+                        <> ({((seatSummary.processedSeats / seatSummary.totalSeats) * 100).toFixed(0)}%)</>
+                      )}
+                    </>
+                  ) : finalResults ? (
                     <>
                       {finalResults.validatedBureaux} bureaux validés sur {finalResults.totalBureaux}
                       {' '}({finalResults.totalBureaux > 0 ? ((finalResults.validatedBureaux / finalResults.totalBureaux) * 100).toFixed(2) : '0.00'}%)
@@ -1204,44 +1190,63 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             </div>
           </div>
           <Progress
-            value={finalResults && finalResults.totalBureaux > 0 ? (finalResults.validatedBureaux / finalResults.totalBureaux) * 100 : 0}
+            value={seatSummary && seatSummary.totalSeats > 0
+              ? (seatSummary.processedSeats / seatSummary.totalSeats) * 100
+              : finalResults && finalResults.totalBureaux > 0
+                ? (finalResults.validatedBureaux / finalResults.totalBureaux) * 100
+                : 0}
             className="mt-3"
           />
 
           {/* Filtres établissement / collège */}
-          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-3">
-            <span className="text-sm font-medium text-gray-500 flex-shrink-0">Filtrer par :</span>
-            <select
-              value={filterCenter}
-              onChange={e => setFilterCenter(e.target.value)}
-              disabled={!rawResultsData || rawResultsData.availableCenters.length === 0}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[200px] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="">Tous les établissements</option>
-              {(rawResultsData?.availableCenters || []).map((c: any) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-            <select
-              value={filterCollege}
-              onChange={e => setFilterCollege(e.target.value)}
-              disabled={shownColleges.length === 0}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[160px] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="">Tous les collèges</option>
-              {shownColleges.map((col: string) => (
-                <option key={col} value={col}>{toCollegeLabel(col)}</option>
-              ))}
-            </select>
-            {(filterCenter || filterCollege) && (
-              <button
-                onClick={() => { setFilterCenter(''); setFilterCollege(''); }}
-                className="text-xs text-blue-600 hover:text-blue-800 underline ml-1"
-              >
-                Réinitialiser
-              </button>
-            )}
-          </div>
+          {(() => {
+            const collegesForCenter: string[] = filterCenter && rawResultsData
+              ? [...new Set(
+                  Array.from(rawResultsData.pvMeta.entries())
+                    .filter(([, m]) =>
+                      m.centerId === filterCenter &&
+                      m.status !== 'entered' && m.status !== 'saisi' &&
+                      m.collegeType
+                    )
+                    .map(([, m]) => m.collegeType!)
+                )]
+              : rawResultsData?.availableColleges || [];
+            return (
+              <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-3">
+                <span className="text-sm font-medium text-gray-500 flex-shrink-0">Filtrer par :</span>
+                <select
+                  value={filterCenter}
+                  onChange={e => { setFilterCenter(e.target.value); setFilterCollege(''); }}
+                  disabled={!rawResultsData || rawResultsData.availableCenters.length === 0}
+                  className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[200px] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">Tous les établissements</option>
+                  {(rawResultsData?.availableCenters || []).map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={filterCollege}
+                  onChange={e => setFilterCollege(e.target.value)}
+                  disabled={!rawResultsData || collegesForCenter.length === 0}
+                  className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[160px] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">Tous les collèges</option>
+                  {collegesForCenter.map((col: string) => (
+                    <option key={col} value={col}>{toCollegeLabel(col)}</option>
+                  ))}
+                </select>
+                {(filterCenter || filterCollege) && (
+                  <button
+                    onClick={() => { setFilterCenter(''); setFilterCollege(''); }}
+                    className="text-xs text-blue-600 hover:text-blue-800 underline ml-1"
+                  >
+                    Réinitialiser
+                  </button>
+                )}
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 
@@ -1452,10 +1457,9 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
                     {isPro && Object.keys(computedSeats).length > 0 && (() => {
                       const syndicatKey = (candidate.party?.split(' — ')[0] || candidate.name || '').trim();
                       const seats = computedSeats[syndicatKey] ?? 0;
-                      const rank = computedSeatsResult.seatRankMap[syndicatKey];
                       return (
                         <div className={`mt-1 text-xs font-semibold rounded px-2 py-0.5 ${seats > 0 ? 'text-green-700 bg-green-50 border border-green-200' : 'text-gray-500 bg-gray-50 border border-gray-200'}`}>
-                          {seats > 0 && rank ? `#${rank} — ` : ''}{seats} siège{seats !== 1 ? 's' : ''}
+                          {seats} siège{seats !== 1 ? 's' : ''}
                         </div>
                       );
                     })()}
@@ -1539,7 +1543,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
             <div className="p-4 bg-blue-50 rounded-lg">
               <h4 className="font-medium text-blue-900 mb-2">Résumé de la publication :</h4>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• {finalResults ? finalResults.validatedBureaux : 0} bureaux validés</li>
+                <li>• {seatSummary ? `${seatSummary.processedSeats} / ${seatSummary.totalSeats} sièges dépouillés` : `${finalResults ? finalResults.validatedBureaux : 0} bureaux validés`}</li>
                 <li>• {finalResults ? finalResults.participation.suffragesExprimes.toLocaleString() : 0} suffrages exprimés</li>
                 <li>• Taux de participation : {finalResults ? finalResults.participation.tauxParticipation : 0}%</li>
                 <li>• En tête : {groupedCandidates[0] ? `${groupedCandidates[0].party?.split(' — ')[0] || groupedCandidates[0].name} (${groupedCandidates[0].percentage}%)` : '—'}</li>
