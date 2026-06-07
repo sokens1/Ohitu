@@ -196,13 +196,19 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
           anciennete: formData.suppleantAnciennete !== '' ? Number(formData.suppleantAnciennete) : existingSupp.anciennete ?? null,
         };
 
+        // Préserver les sièges supplémentaires (siège #2+) non éditables ici
+        const newTitulaires = [...(candidate.titulaires || [])];
+        newTitulaires[0] = newTitulaire;
+        const newSuppleants = [...(candidate.suppleants || [])];
+        newSuppleants[0] = newSuppleant;
+
         // Mettre à jour union_lists
         const { error } = await supabase
           .from('union_lists')
           .update({
             college: formData.college,
-            titulaires: [newTitulaire],
-            suppleants: [newSuppleant],
+            titulaires: newTitulaires,
+            suppleants: newSuppleants,
           })
           .eq('id', candidate.id);
 
@@ -215,8 +221,8 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
         const updatedCandidate: Candidate = {
           ...candidate,
           college: formData.college,
-          titulaires: [newTitulaire],
-          suppleants: [newSuppleant],
+          titulaires: newTitulaires,
+          suppleants: newSuppleants,
           unionLogo: logoUrl || candidate.unionLogo,
         };
 

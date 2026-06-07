@@ -16,12 +16,12 @@ ALTER TABLE elections ADD CONSTRAINT elections_status_check
   CHECK (status IN ('À venir', 'En cours', 'Terminée', 'Annulée'));
 
 -- 3. Synchroniser les élections déjà « désactivées » via is_published uniquement
+-- NOTE : on ne touche PAS au statut — is_public_visible est indépendant du statut
 UPDATE elections
 SET
-  is_public_visible = FALSE,
-  status = 'Annulée'
+  is_public_visible = FALSE
 WHERE is_published = FALSE
-  AND status IS DISTINCT FROM 'Annulée';
+  AND (is_public_visible IS NULL OR is_public_visible = TRUE);
 
 -- 4. Index pour les listes publiques
 CREATE INDEX IF NOT EXISTS idx_elections_public_visible

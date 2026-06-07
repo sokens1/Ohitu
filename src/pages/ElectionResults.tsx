@@ -1099,66 +1099,102 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         // Map pour stocker les sièges cumulés par collège et par syndicat
         collegeSyndicatSeats = new Map<string, number>();
 
-        // 5) Calculer les sièges pour chaque PV publié et les accumuler
+        // 5) Calcul des sièges par groupe (centerId_colKey) — UN SEUL calcul par collège×établissement.
+        //    Plusieurs PVs publiés pour le même collège (ex : bureau physique + pseudo-bureau créés
+        //    lors d'imports successifs) NE produisent qu'une seule répartition sur les voix agrégées.
+
+        // Phase A : associer chaque PV à son groupe et agréger les voix
+        const pvGroupKey    = new Map<string, string>();  // pvId → "centerId_colKey"
+        const groupColType  = new Map<string, string>();  // "centerId_colKey" → colType brut
+        const groupAggVotes = new Map<string, Map<string, number>>(); // groupe → syndicatKey → voix cumulées
+        const groupHasPseudo = new Set<string>(); // groupes qui ont au moins un PV sur pseudo-bureau
+
         pvCandidateResults.forEach((results, pvId) => {
           const colType = pvToCollegeType.get(String(pvId)) || '';
           if (!colType) return;
-
           const pvObject = (pvsData || []).find((pv: any) => String(pv.id) === String(pvId));
           const centerId = pvObject?.voting_bureaux?.center_id;
           if (!centerId) return;
-
           const colKey = normalizeCollegeKey(colType);
-          const seatsToFillKey = `${centerId}_${colKey}`;
-          const seatsToFill = bureauSeats.get(seatsToFillKey) || 0;
+          if (!colKey) return;
+          const gk = `${centerId}_${colKey}`;
+          if (!(bureauSeats.get(gk) || 0)) return; // collège sans sièges définis → ignorer
 
-          if (seatsToFill === 0) return;
+          pvGroupKey.set(pvId, gk);
+          groupColType.set(gk, colType);
 
-          // Regrouper les voix par syndicat pour ce PV
+          // Détecter les pseudo-bureaux ("College - xxx")
+          const bureauName = pvObject?.voting_bureaux?.name || '';
+          if (bureauName.startsWith('College -')) groupHasPseudo.add(gk);
+
+          // Agréger les voix au niveau du groupe
+          if (!groupAggVotes.has(gk)) groupAggVotes.set(gk, new Map());
+          const gv = groupAggVotes.get(gk)!;
+          results.forEach((r: any) => {
+            const syndicat = ((r.candidates?.party || '').split(' — ')[0] || '').trim() || String(r.candidate_id);
+            gv.set(syndicat, (gv.get(syndicat) || 0) + (Number(r.votes) || 0));
+          });
+        });
+
+        // Phase B : une seule allocation par groupe sur les voix agrégées
+        const groupAllocations = new Map<string, Record<string, number>>();
+        groupAggVotes.forEach((aggVotes, gk) => {
+          const seatsToFill = bureauSeats.get(gk) || 0;
+          const colType = groupColType.get(gk) || '';
+          const colKey  = normalizeCollegeKey(colType) || '';
+          const syndicats = Array.from(aggVotes.entries()).map(([pk, v]) => {
+            const info = candidateInfoMap.get(`${pk}_${colKey}`) || { age: 0, seniority: 0 };
+            return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age };
+          });
+          const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
+          groupAllocations.set(gk, alloc.seats);
+
+          // Répercuter dans filteredSummaryData et collegeSyndicatSeats (une fois par groupe)
+          Object.entries(alloc.seats).forEach(([pk, s]) => {
+            const entry = filteredSummaryData.find(c => c.candidate_id === pk);
+            if (entry) entry.seats = (entry.seats || 0) + s;
+            const collegeLabel = getNormalizedCollegeLabel(colType);
+            const seatKey = `${collegeLabel}_${pk}`;
+            collegeSyndicatSeats.set(seatKey, (collegeSyndicatSeats.get(seatKey) || 0) + s);
+          });
+        });
+
+        // Phase C : attacher les résultats syndicaux à chaque bRow
+        // Les sièges du groupe sont affectés uniquement au PV "primaire" du groupe :
+        //   • le pseudo-bureau (si existant) → seul à recevoir les sièges
+        //   • sinon le premier PV physique rencontré
+        const processedGroupKeys = new Set<string>();
+        pvCandidateResults.forEach((results, pvId) => {
+          const gk = pvGroupKey.get(pvId);
+          const groupAlloc = gk ? (groupAllocations.get(gk) || {}) : {};
+          const pvObject = (pvsData || []).find((pv: any) => String(pv.id) === String(pvId));
+          const bureauName = pvObject?.voting_bureaux?.name || '';
+          const isPseudo = bureauName.startsWith('College -');
+          const hasPseudo = gk ? groupHasPseudo.has(gk) : false;
+
+          // "primaire" = pseudo quand il en existe un ; sinon premier PV du groupe
+          const isPrimary = hasPseudo
+            ? (isPseudo && gk !== undefined && !processedGroupKeys.has(gk))
+            : (gk !== undefined && !processedGroupKeys.has(gk));
+          if (isPrimary && gk) processedGroupKeys.add(gk);
+
+          // Voix de CE PV pour l'affichage (chaque bureau garde ses propres voix)
           const partyVotes = new Map<string, number>();
           results.forEach((r: any) => {
             const syndicat = ((r.candidates?.party || '').split(' — ')[0] || '').trim() || String(r.candidate_id);
             partyVotes.set(syndicat, (partyVotes.get(syndicat) || 0) + (Number(r.votes) || 0));
           });
 
-          // Construire les syndicats avec l'ancienneté et l'âge
-          const syndicats = Array.from(partyVotes.entries()).map(([pk, v]) => {
-            const infoKey = `${pk}_${colKey}`;
-            const info = candidateInfoMap.get(infoKey) || { age: 0, seniority: 0 };
-            return {
-              partyKey: pk,
-              votes: v,
-              anciennete: info.seniority,
-              age: info.age
-            };
-          });
-
-          const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
-
-          // Cumuler les sièges obtenus
-          Object.entries(alloc.seats).forEach(([pk, s]) => {
-            const entry = filteredSummaryData.find(c => c.candidate_id === pk);
-            if (entry) {
-              entry.seats = (entry.seats || 0) + s;
-            }
-
-            // Accumuler par collège électoral et par syndicat pour le tableau détaillé
-            const collegeLabel = getNormalizedCollegeLabel(colType);
-            const seatKey = `${collegeLabel}_${pk}`;
-            collegeSyndicatSeats.set(seatKey, (collegeSyndicatSeats.get(seatKey) || 0) + s);
-          });
-
-          // Attacher les résultats syndicaux détaillés par bureau
-          const bureauSyndicats = syndicats.map(s => ({
-            syndicatName: s.partyKey,
-            votes: s.votes,
-            seats: alloc.seats[s.partyKey] || 0
-          })).sort((a, b) => b.votes - a.votes);
+          const bureauSyndicats = Array.from(partyVotes.entries())
+            .map(([syndicatName, votes]) => ({
+              syndicatName,
+              votes,
+              seats: isPrimary ? (groupAlloc[syndicatName] || 0) : 0
+            }))
+            .sort((a, b) => b.votes - a.votes);
 
           const bRow = filteredBureaux.find(b => String((b as any).pv_id) === String(pvId));
-          if (bRow) {
-            (bRow as any).syndicats = bureauSyndicats;
-          }
+          if (bRow) (bRow as any).syndicats = bureauSyndicats;
         });
 
         // Attacher les données syndicales aux bureaux quorum-failed (affichage, sièges = 0)
@@ -2102,22 +2138,29 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                   const textColor = isLocal ? 'text-[#116917]' : 'text-[#A51C30]';
                   const borderColor = isLocal ? 'border-[#116917]/30' : 'border-[#A51C30]/30';
 
+                  const isHidden = results.election?.is_public_visible === false;
                   return (
                     <div className="mb-3 sm:mb-4">
                       {/* Étiquette de statut de l'élection */}
-                      <div className={`inline-flex items-center gap-1.5 sm:gap-2 ${bgColor} ${textColor} rounded-full px-2.5 sm:px-3 py-1 sm:py-1.5 border ${borderColor}`}>
-                        <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${results.election?.status === 'Terminée' ? 'bg-green-500' :
-                          results.election?.status === 'En cours' ? 'bg-yellow-500 animate-pulse' :
-                            'bg-blue-500'
-                          }`} style={{ backgroundColor: results.election?.status === 'Terminée' ? electionColor : undefined }} />
-                        <span className="text-xs sm:text-sm font-medium">
-                          {results.election?.status} • {(() => {
-                            if (results.election?.type === 'Élection Professionnelle') return 'Élection Professionnelle';
-                            return isLocal ? 'Élections Locales' : 'Élections Législatives';
-                          })()}
-                        </span>
-
-                      </div>
+                      {isHidden ? (
+                        <div className="inline-flex items-center gap-1.5 sm:gap-2 bg-violet-100 text-violet-800 rounded-full px-2.5 sm:px-3 py-1 sm:py-1.5 border border-violet-300">
+                          <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-violet-400" />
+                          <span className="text-xs sm:text-sm font-medium">Masqué au public</span>
+                        </div>
+                      ) : (
+                        <div className={`inline-flex items-center gap-1.5 sm:gap-2 ${bgColor} ${textColor} rounded-full px-2.5 sm:px-3 py-1 sm:py-1.5 border ${borderColor}`}>
+                          <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${results.election?.status === 'Terminée' ? 'bg-green-500' :
+                            results.election?.status === 'En cours' ? 'bg-yellow-500 animate-pulse' :
+                              'bg-blue-500'
+                            }`} style={{ backgroundColor: results.election?.status === 'Terminée' ? electionColor : undefined }} />
+                          <span className="text-xs sm:text-sm font-medium">
+                            {results.election?.status} • {(() => {
+                              if (results.election?.type === 'Élection Professionnelle') return 'Élection Professionnelle';
+                              return isLocal ? 'Élections Locales' : 'Élections Législatives';
+                            })()}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -2859,7 +2902,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                       const allGroups = getSortedAndGroupedData() as CenterGroup[];
                       const activeEtabId = modalEtabId || allGroups[0]?.center.center_id || '';
                       const visibleGroups = activeEtabId
-                        ? allGroups.filter(g => g.center.center_id === activeEtabId)
+                        ? allGroups.filter(g => String(g.center.center_id) === String(activeEtabId))
                         : allGroups;
                       return (
                     <div className="mt-4 space-y-4">
@@ -3145,7 +3188,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               {/* Vue PRO : table fixe par établissement sélectionné */}
               {isProResults ? (() => {
                 const proGroups = getSortedAndGroupedData() as CenterGroup[];
-                const selectedGroup = proGroups.find(g => g.center.center_id === selectedEstablishmentId) || proGroups[0];
+                const selectedGroup = proGroups.find(g => String(g.center.center_id) === String(selectedEstablishmentId)) || proGroups[0];
                 if (!selectedGroup) {
                   return (
                     <div className="text-center text-gray-500 py-8">Aucun établissement à afficher.</div>

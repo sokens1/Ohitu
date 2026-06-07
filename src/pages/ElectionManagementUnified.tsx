@@ -1006,6 +1006,7 @@ const ElectionManagementUnified = () => {
         .from('elections')
         .update({
           is_public_visible: false,
+          status: election.status,
           updated_at: new Date().toISOString(),
         })
         .eq('id', election.id);
@@ -1038,6 +1039,7 @@ const ElectionManagementUnified = () => {
         .from('elections')
         .update({
           is_public_visible: true,
+          status: election.status,
           updated_at: new Date().toISOString(),
         })
         .eq('id', election.id);
