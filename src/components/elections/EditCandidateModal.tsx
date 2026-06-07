@@ -22,6 +22,8 @@ interface Candidate {
   suppleants?: any[];
   unionLogo?: string | null;
   unionId?: string | null;
+  seatsToFill?: number;
+  orderNum?: number | null;
 }
 
 interface EditCandidateModalProps {
@@ -39,12 +41,14 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
 }) => {
   const isPro = electionType?.trim() === 'Élection Professionnelle';
 
+  const seatsToFill = candidate.seatsToFill ?? 1;
   const [formData, setFormData] = useState({
     name: candidate.name,
     party: candidate.party,
     isOurCandidate: candidate.isOurCandidate,
     photo: candidate.photo || '',
     college: candidate.college || 'general',
+    orderNum: candidate.orderNum ?? 1,
     teteDeListeName: candidate.titulaires?.[0]?.name || '',
     teteDeListePhoto: candidate.titulaires?.[0]?.photo || '',
     teteDeListeGenre: candidate.titulaires?.[0]?.genre || '',
@@ -203,17 +207,31 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
         newSuppleants[0] = newSuppleant;
 
         // Mettre à jour union_lists
-        const { error } = await supabase
+        let updateError = (await supabase
           .from('union_lists')
           .update({
             college: formData.college,
+            order_num: formData.orderNum,
             titulaires: newTitulaires,
             suppleants: newSuppleants,
           })
-          .eq('id', candidate.id);
+          .eq('id', candidate.id)).error;
 
-        if (error) {
-          console.error('Erreur lors de la mise à jour de la liste syndicale:', error);
+        if (updateError) {
+          // Fallback sans order_num si la colonne n'existe pas encore
+          const fallback = await supabase
+            .from('union_lists')
+            .update({
+              college: formData.college,
+              titulaires: newTitulaires,
+              suppleants: newSuppleants,
+            })
+            .eq('id', candidate.id);
+          updateError = fallback.error;
+        }
+
+        if (updateError) {
+          console.error('Erreur lors de la mise à jour de la liste syndicale:', updateError);
           toast.error('Erreur lors de la mise à jour de la liste');
           return;
         }
@@ -221,6 +239,7 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
         const updatedCandidate: Candidate = {
           ...candidate,
           college: formData.college,
+          orderNum: formData.orderNum,
           titulaires: newTitulaires,
           suppleants: newSuppleants,
           unionLogo: logoUrl || candidate.unionLogo,
@@ -347,6 +366,39 @@ const EditCandidateModal: React.FC<EditCandidateModalProps> = ({
                     { value: 'ouvriers', label: 'Exécution' }
                   ]}
                 />
+
+                {/* Numéro d'ordre */}
+                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                  <div className="flex-1">
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Numéro d'ordre de la liste
+                    </label>
+                    {seatsToFill <= 1 ? (
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-200 text-slate-600 font-bold text-sm">#1</span>
+                        <span className="text-xs text-gray-400">Fixé (1 seul siège dans ce collège)</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 font-bold text-sm">#</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={seatsToFill}
+                          value={formData.orderNum ?? ''}
+                          placeholder="—"
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            orderNum: e.target.value === '' ? null : parseInt(e.target.value, 10) || null,
+                          }))}
+                          className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center font-bold focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        />
+                        <span className="text-xs text-gray-400">sur {seatsToFill} sièges</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <FloatingInput
                   label="Établissement"
                   value={formData.teteDeListeEtablissement}

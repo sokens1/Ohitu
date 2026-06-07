@@ -103,6 +103,7 @@ interface Candidate {
   unionLogo?: string | null;
   unionId?: string | null;
   seatsToFill?: number;
+  orderNum?: number | null;
 }
 
 interface ElectionDetailViewProps {
@@ -233,32 +234,76 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     if (electionType === 'Élection Professionnelle') {
       let rawData: any[] | null = null;
       let hasLogo = true;
+      let hasOrderNum = true;
 
       const { data: dataWithLogo, error: errWithLogo } = await supabase
         .from('union_lists')
-        .select(`id, college, titulaires, suppleants, unions(id, name, acronym, logo)`)
+        .select(`id, college, order_num, titulaires, suppleants, unions(id, name, acronym, logo)`)
         .eq('election_id', electionId);
 
-      if (errWithLogo) {
+      if (!errWithLogo) {
+        rawData = dataWithLogo;
+      } else {
         hasLogo = false;
         const { data: dataNoLogo, error: errNoLogo } = await supabase
           .from('union_lists')
-          .select(`id, college, titulaires, suppleants, unions(id, name, acronym)`)
+          .select(`id, college, order_num, titulaires, suppleants, unions(id, name, acronym)`)
           .eq('election_id', electionId);
-        if (errNoLogo) throw errNoLogo;
-        rawData = dataNoLogo;
-      } else {
-        rawData = dataWithLogo;
+
+        if (!errNoLogo) {
+          rawData = dataNoLogo;
+        } else {
+          hasOrderNum = false;
+          const { data: dataMinimal, error: errMinimal } = await supabase
+            .from('union_lists')
+            .select(`id, college, titulaires, suppleants, unions(id, name, acronym)`)
+            .eq('election_id', electionId);
+          if (errMinimal) throw errMinimal;
+          rawData = dataMinimal;
+        }
       }
 
-      const { data: electoralColleges } = await supabase
-        .from('electoral_colleges')
-        .select('college_type, seats_to_fill')
+      const collegeKeyAliases: Record<string, string> = {
+        'encadrement': 'general', 'cadre': 'cadres',
+        'maîtrise': 'employes', 'maitrise': 'employes',
+        'exécution': 'ouvriers', 'execution': 'ouvriers',
+      };
+      const normalizeCollegeKey = (k: string) => {
+        const lower = String(k).toLowerCase().trim();
+        return collegeKeyAliases[lower] || lower;
+      };
+
+      // Récupérer les sièges PAR ÉTABLISSEMENT via les pseudo-bureaux (plus précis que electoral_colleges qui contient le total élection)
+      const { data: centersLinks } = await supabase
+        .from('election_centers')
+        .select(`voting_centers(voting_bureaux!center_id(college, college_type, seats_to_fill, election_id))`)
         .eq('election_id', electionId);
 
-      const seatsMap = new Map<string, number>(
-        (electoralColleges || []).map((ec: any) => [String(ec.college_type), Number(ec.seats_to_fill) || 1])
-      );
+      const seatsPerEstab = new Map<string, number>();
+      (centersLinks || []).forEach((link: any) => {
+        const bureaux: any[] = link.voting_centers?.voting_bureaux || [];
+        bureaux.forEach((b: any) => {
+          if (b.election_id && String(b.election_id) !== String(electionId)) return;
+          const bSeats = Number(b.seats_to_fill) || 0;
+          if (bSeats <= 0) return;
+          const colKey = normalizeCollegeKey(b.college || b.college_type || '');
+          if (!colKey) return;
+          const existing = seatsPerEstab.get(colKey) || 0;
+          if (bSeats > existing) seatsPerEstab.set(colKey, bSeats);
+        });
+      });
+
+      // Fallback sur electoral_colleges si aucun pseudo-bureau trouvé
+      let seatsMap = seatsPerEstab;
+      if (seatsMap.size === 0) {
+        const { data: electoralColleges } = await supabase
+          .from('electoral_colleges')
+          .select('college_type, seats_to_fill')
+          .eq('election_id', electionId);
+        seatsMap = new Map<string, number>(
+          (electoralColleges || []).map((ec: any) => [normalizeCollegeKey(ec.college_type), Number(ec.seats_to_fill) || 1])
+        );
+      }
 
       const transformed: Candidate[] = (rawData ?? []).map((list: any) => ({
         id: list.id,
@@ -270,7 +315,8 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
         suppleants: list.suppleants || [],
         unionLogo: hasLogo ? (list.unions?.logo || null) : null,
         unionId: list.unions?.id || null,
-        seatsToFill: seatsMap.get(list.college) || 1,
+        seatsToFill: seatsMap.get(normalizeCollegeKey(list.college)) ?? 1,
+        orderNum: hasOrderNum ? (list.order_num ?? null) : null,
       }));
 
       console.log(`📋 ${transformed.length} listes syndicales chargées pour l'élection`);
@@ -917,6 +963,7 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
     (candidatesGridPage - 1) * CANDIDATES_GRID_PAGE_SIZE,
     candidatesGridPage * CANDIDATES_GRID_PAGE_SIZE
   );
+
 
   const allPageSelected =
     pagedCandidates.length > 0 &&
@@ -1841,19 +1888,24 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                   >
                     <CardContent className="p-3 sm:p-4">
                       <div className="flex flex-col items-center text-center space-y-4 pt-2">
-                        {/* Badge collège en haut à gauche */}
+                        {/* Badge collège + numéro d'ordre en haut à gauche */}
                         {election.type === 'Élection Professionnelle' && candidate.college && (
-                          <Badge variant="outline" className={`self-start text-[10px] font-bold px-2.5 py-0.5 -mb-2 ${
-                            candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                            candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                            candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
-                            'bg-purple-50 text-purple-700 border-purple-200'
-                          }`}>
-                            {candidate.college === 'general' ? 'Encadrement' :
-                             candidate.college === 'cadres' ? 'Cadre' :
-                             candidate.college === 'employes' ? 'Maîtrise' :
-                             candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
-                          </Badge>
+                          <div className="self-start flex items-center gap-1.5 -mb-2">
+                            <Badge variant="outline" className={`text-[10px] font-bold px-2.5 py-0.5 ${
+                              candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                              candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                              candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                              'bg-purple-50 text-purple-700 border-purple-200'
+                            }`}>
+                              {candidate.college === 'general' ? 'Encadrement' :
+                               candidate.college === 'cadres' ? 'Cadre' :
+                               candidate.college === 'employes' ? 'Maîtrise' :
+                               candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 bg-slate-50 text-slate-600 border-slate-300">
+                              #{candidate.orderNum ?? 1}
+                            </Badge>
+                          </div>
                         )}
                         <div className="relative">
                           {election.type === 'Élection Professionnelle' ? (
@@ -2157,17 +2209,22 @@ const ElectionDetailView: React.FC<ElectionDetailViewProps> = ({ election, onBac
                           </p>
                         </div>
                         {election.type === 'Élection Professionnelle' && candidate.college && (
-                          <Badge variant="outline" className={`hidden sm:flex text-[10px] font-bold px-2 py-0.5 w-28 justify-center flex-shrink-0 ${
-                            candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                            candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                            candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
-                            'bg-purple-50 text-purple-700 border-purple-200'
-                          }`}>
-                            {candidate.college === 'general' ? 'Encadrement' :
-                             candidate.college === 'cadres' ? 'Cadre' :
-                             candidate.college === 'employes' ? 'Maîtrise' :
-                             candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
-                          </Badge>
+                          <div className="hidden sm:flex items-center gap-1 flex-shrink-0">
+                            <Badge variant="outline" className={`text-[10px] font-bold px-2 py-0.5 w-28 justify-center ${
+                              candidate.college === 'cadres' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                              candidate.college === 'employes' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                              candidate.college === 'ouvriers' ? 'bg-green-50 text-green-700 border-green-200' :
+                              'bg-purple-50 text-purple-700 border-purple-200'
+                            }`}>
+                              {candidate.college === 'general' ? 'Encadrement' :
+                               candidate.college === 'cadres' ? 'Cadre' :
+                               candidate.college === 'employes' ? 'Maîtrise' :
+                               candidate.college === 'ouvriers' ? 'Exécution' : candidate.college}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 bg-slate-50 text-slate-600 border-slate-300">
+                              #{candidate.orderNum ?? 1}
+                            </Badge>
+                          </div>
                         )}
                         {election.type === 'Élection Professionnelle' && (
                           <span className="hidden md:block text-xs text-gray-400 w-40 truncate flex-shrink-0">
