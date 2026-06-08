@@ -270,29 +270,44 @@ async function fetchDashboardData({
   }, []);
 
 
-  // g. Load candidates and their parties for selected elections
-  const { data: ecCandidates } = await supabase
-    .from('election_candidates')
-    .select(`
-      candidates (
-        id,
-        name,
-        party
-      )
-    `)
-    .in('election_id', selectedElectionIds);
+  // g. Load syndicats (pro) or candidates/parties (politique) for selected elections
+  let partiesChart: { name: string; value: number }[] = [];
 
-  const partyMap: Record<string, number> = {};
-  if (ecCandidates) {
-    ecCandidates.forEach((item: any) => {
+  if (isProLocal) {
+    // Pro : compter le nombre de listes par syndicat (global, sans distinction de collège)
+    const { data: unionListsData } = await supabase
+      .from('union_lists')
+      .select('id, unions(id, name, acronym)')
+      .in('election_id', selectedElectionIds);
+
+    const syndicatMap: Record<string, number> = {};
+    (unionListsData || []).forEach((ul: any) => {
+      const acronym = ul.unions?.acronym?.trim();
+      const name = ul.unions?.name?.trim();
+      const key = acronym || name || 'Inconnu';
+      syndicatMap[key] = (syndicatMap[key] || 0) + 1;
+    });
+    partiesChart = Object.entries(syndicatMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  } else {
+    // Politique : compter les candidats par parti
+    const { data: ecCandidates } = await supabase
+      .from('election_candidates')
+      .select('candidates(id, name, party)')
+      .in('election_id', selectedElectionIds);
+
+    const partyMap: Record<string, number> = {};
+    (ecCandidates || []).forEach((item: any) => {
       if (item.candidates) {
         const p = item.candidates.party?.trim() || 'Indépendant';
         partyMap[p] = (partyMap[p] || 0) + 1;
       }
     });
+    partiesChart = Object.entries(partyMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
   }
-
-  const partiesChart = Object.entries(partyMap).map(([name, value]) => ({ name, value }));
 
   // h. Fetch procès_verbaux for the selected elections
   const { data: pvsData } = await supabase
