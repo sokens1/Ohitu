@@ -33,6 +33,8 @@ import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import SimulationResultsSection from './SimulationResultsSection';
 import { resolveCandidatesForElection } from '@/lib/candidateUtils';
+import { useAuth } from '@/contexts/AuthContext';
+import { notifyResultsPublished } from '@/lib/notificationService';
 import {
   getElectionElectorsTotal,
   getRegisteredVotersLabel,
@@ -144,6 +146,7 @@ interface PublishSectionProps {
 }
 
 const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readOnly = false }) => {
+  const { user } = useAuth();
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [showDetailedView, setShowDetailedView] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1139,7 +1142,20 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       setShowPublishConfirm(false);
       const count = updatedPVs?.length || finalResults?.validatedBureaux || 0;
       toast.success(`Résultats publiés : ${count} PV ont été publiés publiquement.`);
-      
+
+      // Notifier les utilisateurs assignés que la vue publique de l'élection est désormais disponible
+      try {
+        const { data: electionRow } = await supabase
+          .from('elections').select('title').eq('id', selectedElection).single();
+        await notifyResultsPublished({
+          electionId:   selectedElection,
+          electionName: electionRow?.title ?? 'l\'élection',
+          actorName:    user?.name ?? 'Un administrateur',
+        });
+      } catch (notifErr) {
+        console.warn('notifyResultsPublished:', notifErr);
+      }
+
       // Recharger les données pour afficher les PV publiés
       console.log('🔄 [Publication] Rechargement des données...');
       await loadFinalResults();

@@ -84,13 +84,13 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   const hasAnyOpinion    = opinions.length > 0;
   const hasNonConforme   = nonConformeCount > 0;
   const aggConformity    = hasAnyOpinion ? (hasNonConforme ? 'non_conforme' : 'conforme') : null;
-  // Libellé sous le point : "2 conformes, 1 réserve" ou nom unique
+  // Libellé sous le point : "2 conformes, 1 réserves" ou nom unique
   const aggSublabel = hasAnyOpinion
     ? (opinions.length === 1
         ? opinions[0].observer_name
-        : `${conformeCount} conforme${conformeCount > 1 ? 's' : ''} · ${nonConformeCount} réserve${nonConformeCount > 1 ? 's' : ''}`)
+        : `${conformeCount} conforme${conformeCount > 1 ? 's' : ''} · ${nonConformeCount} réserves${nonConformeCount > 1 ? 's' : ''}`)
     : null;
-  const conformityLabel  = aggConformity === 'conforme' ? 'Conforme' : aggConformity === 'non_conforme' ? 'Réserve' : null;
+  const conformityLabel  = aggConformity === 'conforme' ? 'Conforme' : aggConformity === 'non_conforme' ? 'Réserves' : null;
 
   const steps = [
     {
@@ -175,7 +175,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const { user } = useAuth();
   // Rôles pouvant soumettre un avis observateur sur un PV
   const isObserver = role === 'observateur' || role === 'president-etablissement';
-  // Rôles pouvant réagir à un avis existant (approuver / annuler réserve)
+  // Rôles pouvant réagir à un avis existant (approuver / annuler réserves)
   const canReact = role === 'super-admin' || role === 'admin';
 
   const [selectedPV, setSelectedPV] = useState<string | null>(null);
@@ -184,6 +184,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [comment, setComment] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'entered' | 'validated' | 'anomaly' | 'published'>('all');
+  // Filtre d'annotation : permet de se focaliser sur les PV validés/publiés non encore commentés par un observateur
+  const [annotationFilter, setAnnotationFilter] = useState<'all' | 'annotated' | 'unannotated'>('all');
   const [loading, setLoading] = useState(false);
   const [pvs, setPvs] = useState<any[]>([]);
   const [bureauxMap, setBureauxMap] = useState<Map<string, { id: string; name: string; center_id: string }>>(new Map());
@@ -275,7 +277,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
   const submitReaction = async (opinionId: string, type: 'approved' | 'overridden', comment: string) => {
     if (type === 'overridden' && !comment.trim()) {
-      toast.error('Un commentaire est obligatoire pour annuler une réserve.');
+      toast.error('Un commentaire est obligatoire pour annuler une réserves.');
       return;
     }
     setSubmittingReaction(true);
@@ -311,7 +313,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         toast.error('Mise à jour bloquée — appliquez la migration 20260529_opinion_reactions.sql dans Supabase.');
         return;
       }
-      toast.success(type === 'approved' ? 'Réserve approuvée' : 'Réserve rejetée — avis mis à jour en conforme');
+      toast.success(type === 'approved' ? 'Réserves approuvée' : 'Réserves rejetée — avis mis à jour en conforme');
       // Audit + Notification observateur
       const pvOpinions = observerOpinions.get(selectedPV ?? '') ?? [];
       const opinion    = pvOpinions.find(op => op.id === opinionId);
@@ -321,7 +323,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         action: type === 'approved' ? 'APPROVE' : 'UPDATE',
         resource_type: 'pv_opinion',
         resource_id: opinionId,
-        description: `Réaction sur réserve (${type}) — ${bureau?.name ?? ''}${pvData?.college_type ? ` · Collège ${pvData.college_type}` : ''}`,
+        description: `Réaction sur réserves (${type}) — ${bureau?.name ?? ''}${pvData?.college_type ? ` · Collège ${pvData.college_type}` : ''}`,
         user_id: (await supabase.auth.getUser()).data.user?.id,
       }).catch(() => {});
       if (opinion && pvData) {
@@ -425,6 +427,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           const filteredPvRows = (pvRows || []).filter(r => {
             const bureau = filteredBureaus.find(b => b.id === r.bureau_id);
             if (!bureau) return false;
+
+            // Observateur : uniquement les PV validés ou publiés
+            if (user?.role === 'observateur' && !['validated', 'published'].includes(r.status)) return false;
 
             if (roleColleges) {
               // Filtre collège : vide = tous autorisés
@@ -542,6 +547,11 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     return enriched.filter(e => {
       if (e.status === 'en_cours') return false; // PV réinitialisé — retirer de la validation
       if (filter !== 'all' && e.status !== filter) return false;
+      if (annotationFilter !== 'all' && ['validated', 'published'].includes(e.status)) {
+        const isAnnotated = e.opinions.length > 0;
+        if (annotationFilter === 'annotated' && !isAnnotated) return false;
+        if (annotationFilter === 'unannotated' && isAnnotated) return false;
+      }
       if (centerFilter && e.centerId !== centerFilter) return false;
       if (searchFilter.trim()) {
         const q = searchFilter.trim().toLowerCase();
@@ -551,7 +561,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
       return true;
     });
-  }, [pvs, bureauxMap, centersMap, filter, centerFilter, searchFilter, observerOpinions]);
+  }, [pvs, bureauxMap, centersMap, filter, annotationFilter, centerFilter, searchFilter, observerOpinions]);
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -568,6 +578,23 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       default:
         return status;
     }
+  };
+
+  /** PV validé/publié déjà annoté par un observateur — distingue les PV à examiner des PV déjà traités */
+  const getOpinionBadge = (pv: any) => {
+    const opinions = pv.opinions ?? [];
+    if (opinions.length === 0) return null;
+    const hasReserve = opinions.some((o: any) => o.conformity === 'non_conforme');
+    return (
+      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+        hasReserve
+          ? 'bg-amber-50 text-amber-700 border-amber-300'
+          : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+      }`}>
+        <PenLine className="w-3 h-3" />
+        {hasReserve ? 'Avis : Réserves' : 'Avis : Conforme'}
+      </span>
+    );
   };
 
   const getPriorityBadge = (status: string) => (
@@ -643,7 +670,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         return next;
       });
 
-      toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Réserve');
+      toast.success(conformity === 'conforme' ? 'Avis enregistré : Conforme' : 'Avis enregistré : Réserves');
       // Audit + Notification admins + président du centre
       const pvData = pvs.find(p => p.id === selectedPV);
       const bureau = pvData ? bureauxMap.get(pvData.bureau_id) : null;
@@ -652,7 +679,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         action: 'OPINION',
         resource_type: 'pv_opinion',
         resource_id: selectedPV,
-        description: `Avis ${conformity === 'conforme' ? 'conforme' : 'de réserve'} — ${bureau?.name ?? ''}${pvData?.college_type ? ` · Collège ${pvData.college_type}` : ''} — ${center?.name ?? ''}`,
+        description: `Avis ${conformity === 'conforme' ? 'conforme' : 'de réserves'} — ${bureau?.name ?? ''}${pvData?.college_type ? ` · Collège ${pvData.college_type}` : ''} — ${center?.name ?? ''}`,
         user_id: user.id,
       }).catch(() => {});
       if (pvData && bureau) {
@@ -867,7 +894,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               <span>File d'Attente de Validation</span>
             </div>
             <div className="flex items-center gap-2">
-              {!readOnly && (
+              {!readOnly && (role === 'super-admin' || role === 'admin') && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -917,14 +944,21 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           {/* Filtres statut */}
           <div className="flex flex-wrap gap-2 items-center">
             <div className="flex flex-wrap gap-1.5">
-              {([
-                { value: 'all',       label: 'Tous' },
-                { value: 'pending',   label: 'En attente' },
-                { value: 'entered',   label: 'Saisis' },
-                { value: 'validated', label: 'Validés' },
-                { value: 'anomaly',   label: 'Rejeté' },
-                { value: 'published', label: 'Publiés' },
-              ] as const).map(s => (
+              {(role === 'observateur'
+                ? ([
+                    { value: 'all',       label: 'Tous' },
+                    { value: 'validated', label: 'Validés' },
+                    { value: 'published', label: 'Publiés' },
+                  ] as const)
+                : ([
+                    { value: 'all',       label: 'Tous' },
+                    { value: 'pending',   label: 'En attente' },
+                    { value: 'entered',   label: 'Saisis' },
+                    { value: 'validated', label: 'Validés' },
+                    { value: 'anomaly',   label: 'Rejeté' },
+                    { value: 'published', label: 'Publiés' },
+                  ] as const)
+              ).map(s => (
                 <Button
                   key={s.value}
                   variant={filter === s.value ? 'default' : 'outline'}
@@ -941,6 +975,34 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 </Button>
               ))}
             </div>
+
+            {/* Filtre d'annotation — se focaliser sur les PV validés/publiés sans avis observateur */}
+            {(() => {
+              const annotatable   = pvs.filter(p => ['validated', 'published'].includes(p.status));
+              const annotatedN    = annotatable.filter(p => (observerOpinions.get(p.id)?.length ?? 0) > 0).length;
+              const unannotatedN  = annotatable.length - annotatedN;
+              if (annotatable.length === 0) return null;
+              return (
+                <div className="flex flex-wrap gap-1.5 items-center pl-1.5 ml-1.5 border-l border-gray-200">
+                  {([
+                    { value: 'all',         label: 'Avis : tous',     count: annotatable.length },
+                    { value: 'unannotated', label: 'Sans avis',       count: unannotatedN },
+                    { value: 'annotated',   label: 'Avec avis',       count: annotatedN },
+                  ] as const).map(a => (
+                    <Button
+                      key={a.value}
+                      variant={annotationFilter === a.value ? 'default' : 'outline'}
+                      onClick={() => setAnnotationFilter(a.value)}
+                      size="sm"
+                      className="h-7 px-2.5 text-xs"
+                    >
+                      {a.label}
+                      <span className="ml-1 opacity-60 text-[10px]">{a.count}</span>
+                    </Button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Reset filtre statut */}
             {filter !== 'all' && (
@@ -1004,6 +1066,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           Quorum non atteint
                         </span>
                       )}
+                      {['validated', 'published'].includes(pv.status) && getOpinionBadge(pv)}
                     </div>
                     {getPriorityBadge(pv.status)}
                   </div>
@@ -1292,8 +1355,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
                 </div>
 
-                {/* Commentaire de validation — masqué pour l'observateur */}
-                {!isObserver && (
+                {/* Commentaire de validation — masqué pour l'observateur et l'employeur */}
+                {!isObserver && role !== 'employeur' && (
                   <div>
                     <Label htmlFor="comment">Commentaire de validation</Label>
                     <Textarea id="comment" placeholder="Ajouter un commentaire..." value={comment} onChange={(e) => setComment(e.target.value)} rows={3} />
@@ -1338,7 +1401,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           type="button"
                           disabled={savingAnnotation || observerAnnotation.trim().length === 0}
                           onClick={() => submitObserverConformity('non_conforme')}
-                          title={observerAnnotation.trim().length === 0 ? 'Veuillez saisir un motif avant de signaler une réserve' : ''}
+                          title={observerAnnotation.trim().length === 0 ? 'Veuillez saisir un motif avant de signaler une réserves' : ''}
                           className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border-2 text-sm font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
                             observerConformity === 'non_conforme'
                               ? 'border-amber-600 bg-amber-600 text-white shadow-sm'
@@ -1346,14 +1409,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           }`}
                         >
                           <XCircle className="w-4 h-4" />
-                          Réserve
+                          Réserves
                         </button>
                       </div>
-                      {/* Message d'aide pour signaler une réserve */}
+                      {/* Message d'aide pour signaler une réserves */}
                       {observerAnnotation.trim().length === 0 && (
                         <p className="text-[11px] text-amber-600 px-1 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                          Un motif est requis pour signaler une réserve.
+                          Un motif est requis pour signaler une réserves.
                         </p>
                       )}
                     </div>
@@ -1371,7 +1434,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                             <span className="text-slate-400 whitespace-nowrap">{op.annotated_at_str}</span>
                             {op.conformity && (
                               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ${op.conformity === 'conforme' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {op.conformity === 'conforme' ? <><CheckCircle className="w-3 h-3" /> Conforme</> : <><AlertTriangle className="w-3 h-3" /> Réserve</>}
+                                {op.conformity === 'conforme' ? <><CheckCircle className="w-3 h-3" /> Conforme</> : <><AlertTriangle className="w-3 h-3" /> Réserves</>}
                               </span>
                             )}
                             {op.annotation && <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>}
@@ -1381,7 +1444,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                   <span key={r.id} className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                                     r.type === 'overridden' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
                                   }`}>
-                                    {r.type === 'overridden' ? 'Réserve rejetée' : 'Approuvé'} — {r.reactor_name}
+                                    {r.type === 'overridden' ? 'Réserves rejetée' : 'Approuvé'} — {r.reactor_name}
                                   </span>
                                 ))}
                               </div>
@@ -1414,13 +1477,13 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                 }`}>
                                   {op.conformity === 'conforme'
                                     ? <><CheckCircle className="w-3 h-3" /> Conforme</>
-                                    : <><AlertTriangle className="w-3 h-3" /> Réserve</>}
+                                    : <><AlertTriangle className="w-3 h-3" /> Réserves</>}
                                 </span>
                               )}
                               {op.annotation && (
                                 <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>
                               )}
-                              {/* React button — only when opinion is réserve */}
+                              {/* React button — only when opinion is réserves */}
                               {canReact && op.conformity === 'non_conforme' && !isTargeted && (
                                 <button
                                   type="button"
@@ -1441,7 +1504,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                     <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full font-semibold ${
                                       r.type === 'overridden' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
                                     }`}>
-                                      {r.type === 'overridden' ? <><CheckCircle className="w-2.5 h-2.5" /> Réserve rejetée</> : <><CheckCircle className="w-2.5 h-2.5" /> Approuvé</>}
+                                      {r.type === 'overridden' ? <><CheckCircle className="w-2.5 h-2.5" /> Réserves rejetée</> : <><CheckCircle className="w-2.5 h-2.5" /> Approuvé</>}
                                     </span>
                                     {r.comment && <span className="italic">"{r.comment}"</span>}
                                     <span className="text-slate-400">{new Date(r.reacted_at).toLocaleDateString('fr-FR')} à {new Date(r.reacted_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
@@ -1454,7 +1517,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                               <div className="pl-5 space-y-2 border-t border-slate-100 pt-2">
                                 <textarea
                                   rows={2}
-                                  placeholder="Commentaire (obligatoire pour annuler la réserve)"
+                                  placeholder="Commentaire (obligatoire pour annuler la réserves)"
                                   value={reactionTarget!.comment}
                                   onChange={e => setReactionTarget(prev => prev ? { ...prev, comment: e.target.value } : null)}
                                   className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
@@ -1467,7 +1530,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                     className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
                                   >
                                     <CheckCircle className="w-3.5 h-3.5" />
-                                    Approuver la réserve
+                                    Approuver la réserves
                                   </button>
                                   <button
                                     type="button"
@@ -1477,7 +1540,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                     title={!reactionTarget!.comment.trim() ? 'Commentaire obligatoire' : ''}
                                   >
                                     <XCircle className="w-3.5 h-3.5" />
-                                    Rejeter la réserve (→ Conforme)
+                                    Rejeter la réserves (→ Conforme)
                                   </button>
                                   <button
                                     type="button"

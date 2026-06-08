@@ -178,7 +178,7 @@ export async function notifyDocumentReviewed(opts: {
 
   const docLabel  = opts.documentType === 'pv' ? 'PV' : 'Liste de participation';
   const cLabel    = collegeLabel(opts.collegeType);
-  const statusMap = { validated: 'validé', reserved: 'validé avec réserve', rejected: 'rejeté' };
+  const statusMap = { validated: 'validé', reserved: 'validé avec réserves', rejected: 'rejeté' };
   const severity  = opts.status === 'validated' ? 'success' : opts.status === 'reserved' ? 'warning' : 'error';
 
   await insertNotifications([opts.recipientId], actorId, {
@@ -208,7 +208,7 @@ export async function notifyPVSubmitted(opts: {
 
   const collegeLabel = opts.collegeType ? ` (${opts.collegeType})` : '';
   const recipients = await findRecipients(
-    ['super-admin', 'admin', 'validateur'],
+    ['super-admin', 'admin', 'validateur', 'employeur'],
     opts.electionId, opts.centerId, opts.collegeType,
   );
 
@@ -242,8 +242,12 @@ export async function notifyPVValidated(opts: {
 
   const cLabel = collegeLabel(opts.collegeType);
   const adminRecipients = await findRecipients(['super-admin', 'admin']);
+  const employeurRecipients = await findRecipients(
+    ['employeur'], opts.electionId, opts.centerId, opts.collegeType,
+  );
   const recipients = [...new Set([
     ...adminRecipients,
+    ...employeurRecipients,
     ...(opts.submittedById ? [opts.submittedById] : []),
   ])].filter(id => id !== actorId);
 
@@ -295,7 +299,7 @@ export async function notifyPVRejected(opts: {
 }
 
 /**
- * Observateur émet un avis (réserve ou conforme).
+ * Observateur émet un avis (réserves ou conforme).
  * → Notifie : admins + président du centre
  */
 export async function notifyObserverOpinion(opts: {
@@ -314,14 +318,14 @@ export async function notifyObserverOpinion(opts: {
   const isReserve = opts.conformity === 'non_conforme';
   const cLabel    = collegeLabel(opts.collegeType);
   const recipients = await findRecipients(
-    ['super-admin', 'admin', 'president-etablissement'],
+    ['super-admin', 'admin', 'president-etablissement', 'suppleant-president'],
     opts.electionId, opts.centerId,
   );
 
   await insertNotifications(recipients, actorId, {
     type:       'observer_opinion',
-    title:      `${isReserve ? 'Réserve émise' : 'Avis conforme'} — ${opts.centerName}${cLabel}`,
-    message:    `${opts.actorName} a émis un avis ${isReserve ? 'de réserve' : 'conforme'} sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
+    title:      `${isReserve ? 'Réserves émise' : 'Avis conforme'} — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a émis un avis ${isReserve ? 'de réserves' : 'conforme'} sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
     severity:   isReserve ? 'warning' : 'success',
     election_id: opts.electionId,
     center_id:   opts.centerId,
@@ -330,7 +334,7 @@ export async function notifyObserverOpinion(opts: {
 }
 
 /**
- * Admin/président réagit à un avis observateur (approuve ou annule réserve).
+ * Admin/président réagit à un avis observateur (approuve ou annule réserves).
  * → Notifie : l'observateur concerné
  */
 export async function notifyOpinionReaction(opts: {
@@ -351,8 +355,8 @@ export async function notifyOpinionReaction(opts: {
   const cLabel     = collegeLabel(opts.collegeType);
   await insertNotifications([opts.recipientId], actorId, {
     type:       'opinion_reaction',
-    title:      `${isApproved ? 'Réserve approuvée' : 'Réserve annulée'} — ${opts.centerName}${cLabel}`,
-    message:    `${opts.actorName} a ${isApproved ? 'approuvé' : 'annulé (marqué conforme)'} votre réserve sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
+    title:      `${isApproved ? 'Réserves approuvée' : 'Réserves annulée'} — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a ${isApproved ? 'approuvé' : 'annulé (marqué conforme)'} votre réserves sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
     severity:   isApproved ? 'success' : 'info',
     election_id: opts.electionId,
     center_id:   opts.centerId,
@@ -387,7 +391,7 @@ export async function notifyElectionStatusChanged(opts: {
     opts.newStatus === 'published' ? 'success' : 'info';
 
   const recipients = await findRecipients(
-    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau'],
+    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau', 'suppleant-president', 'employeur'],
     opts.electionId,
   );
 
@@ -413,7 +417,7 @@ export async function notifyResultsPublished(opts: {
   if (!actorId) return;
 
   const recipients = await findRecipients(
-    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau'],
+    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau', 'suppleant-president', 'employeur'],
     opts.electionId,
   );
 
