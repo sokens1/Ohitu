@@ -306,6 +306,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedEstablishmentId, setSelectedEstablishmentId] = useState<string>('');
   const [titulairesMap, setTitulairesMap] = useState<Map<string, string[]>>(new Map());
+  const [orderNumMap, setOrderNumMap] = useState<Map<string, number>>(new Map());
   const [modalEtabId, setModalEtabId] = useState<string>('');
 
   // États de tri pour les modales des candidats
@@ -975,7 +976,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             .eq('election_id', id),
           supabase
             .from('union_lists')
-            .select('id, college, titulaires, suppleants, unions(id, name, acronym, logo)')
+            .select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym, logo)')
             .eq('election_id', id)
         ]);
         electoralCollegesForPro = ecRowsResult.data || [];
@@ -1371,6 +1372,19 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         }
       });
       setTitulairesMap(tMap);
+
+      // Map syndicatKey_collegeKey → order_num pour affichage #N dans le tableau
+      const oMap = new Map<string, number>();
+      (unionLists || []).forEach((ul: any) => {
+        if (ul.order_num == null) return;
+        const acronym = ul.unions?.acronym?.trim() || '';
+        const uName = ul.unions?.name?.trim() || '';
+        const collegeLabel = getNormalizedCollegeLabel(ul.college).toLowerCase();
+        [acronym, uName].filter(Boolean).forEach(key => {
+          oMap.set(`${key.toLowerCase()}_${collegeLabel}`, ul.order_num);
+        });
+      });
+      setOrderNumMap(oMap);
 
       setResults({
         election,
@@ -3355,9 +3369,17 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     const score = row.total_expressed_votes > 0
                                       ? `${(s.votes / row.total_expressed_votes * 100).toFixed(1)} %`
                                       : '—';
+                                    const orderNum = orderNumMap.get(mapKey);
                                     return (
                                       <tr key={si} className="hover:bg-white transition-colors">
-                                        <td className="py-2 font-medium text-gray-800">{s.syndicat}</td>
+                                        <td className="py-2 font-medium text-gray-800">
+                                          <span className="flex items-center gap-1.5">
+                                            {orderNum != null && (
+                                              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold flex-shrink-0">#{orderNum}</span>
+                                            )}
+                                            {s.syndicat}
+                                          </span>
+                                        </td>
                                         <td className="py-2 text-center font-bold text-blue-600">{s.seats}</td>
                                         <td className="py-2 text-right text-gray-600">{s.votes?.toLocaleString() || '0'}</td>
                                         <td className="py-2 text-right text-gray-500 pr-1">{score}</td>
