@@ -1293,7 +1293,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         // Déduplication par syndicat (clé = party avant " — ") pour éviter les doublons
         // quand plusieurs sièges existent pour le même syndicat+collège (cas multi-sièges).
         // Les union_lists sont triées par id ASC (ordre d'import) : le siège 1 arrive en premier.
-        // On conserve le order_num du PREMIER enregistrement (tête de liste), identique à ElectionDetailView.
+        // order_num = numéro d'ordre de la LISTE, renseigné depuis l'onglet Listes de l'élection.
+        // L'utilisateur peut l'avoir renseigné sur n'importe quel siège → on prend le premier non-null.
         const visibleCandidates = isPro ? (() => {
           const syndicatMap = new Map<string, any>();
           rawVisibleCandidates.forEach(c => {
@@ -1304,7 +1305,10 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               const existing = syndicatMap.get(key);
               existing.allNames.push(c.name);
               existing.allSuppleants.push(c.suppleant || null);
-              // Ne pas toucher à order_num : on garde celui du premier enregistrement (siège 1)
+              // Prendre le premier order_num non-null parmi tous les rangs du syndicat
+              if (existing.order_num == null && c.order_num != null) {
+                existing.order_num = c.order_num;
+              }
             }
           });
           return Array.from(syndicatMap.values());
