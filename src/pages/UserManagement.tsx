@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -427,6 +427,53 @@ const UserManagement = () => {
     return availableColleges;
   };
 
+  /**
+   * Map bureauId → titulaire actuel par rôle (président d'établissement / suppléant).
+   * Un bureau ne doit être détenu que par UNE seule personne par rôle ; on exclut
+   * l'utilisateur en cours d'édition pour ne pas se bloquer soi-même.
+   */
+  const bureauHolders = useMemo(() => {
+    const map: Record<string, { president?: { id: string; name: string }; suppleant?: { id: string; name: string } }> = {};
+    users.forEach(u => {
+      if (editingUser && u.id === editingUser.id) return;
+      if (u.role !== 'president-etablissement' && u.role !== 'suppleant-president') return;
+      const slot = u.role === 'president-etablissement' ? 'president' : 'suppleant';
+      Object.values(u.assigned_center_bureaux ?? {}).forEach(ids => {
+        (ids ?? []).forEach(bureauId => {
+          if (!map[bureauId]) map[bureauId] = {};
+          if (!map[bureauId][slot]) map[bureauId][slot] = { id: u.id, name: u.name };
+        });
+      });
+    });
+    return map;
+  }, [users, editingUser]);
+
+  /** Titulaire actuel d'un bureau pour le rôle en cours de saisie (s'il y en a un autre que l'utilisateur édité) */
+  const bureauHolderForCurrentRole = (bureauId: string): { id: string; name: string } | undefined => {
+    if (fRole !== 'president-etablissement' && fRole !== 'suppleant-president') return undefined;
+    const slot = fRole === 'president-etablissement' ? 'president' : 'suppleant';
+    return bureauHolders[bureauId]?.[slot];
+  };
+
+  /** Bloque la sauvegarde si un bureau sélectionné est déjà détenu par quelqu'un d'autre pour ce même rôle */
+  const findBureauConflicts = (): string[] => {
+    if (fRole !== 'president-etablissement' && fRole !== 'suppleant-president') return [];
+    const seen = new Set<string>();
+    const conflicts: string[] = [];
+    Object.values(fCenterBureaux).forEach(ids => {
+      (ids ?? []).forEach(bureauId => {
+        if (seen.has(bureauId)) return;
+        seen.add(bureauId);
+        const holder = bureauHolderForCurrentRole(bureauId);
+        if (holder) {
+          const label = availableBureaux.find(b => b.id === bureauId)?.name ?? bureauId;
+          conflicts.push(`${label} (déjà assigné à ${holder.name})`);
+        }
+      });
+    });
+    return conflicts;
+  };
+
   // ── Création via l'endpoint serveur (évite la limite de taux de auth.signUp) ─
   const handleCreate = async () => {
     if (!fName.trim() || !fPassword.trim()) {
@@ -440,6 +487,11 @@ const UserManagement = () => {
     }
     if (isAdmin && fElectionIds.length === 0) {
       toast.error('Vous devez assigner au moins une élection à cet utilisateur'); return;
+    }
+    const bureauConflicts = findBureauConflicts();
+    if (bureauConflicts.length > 0) {
+      toast.error(`Bureau déjà attribué — un seul ${fRole === 'president-etablissement' ? 'président' : 'suppléant'} par bureau : ${bureauConflicts.join(', ')}`);
+      return;
     }
     setCreating(true);
     try {
@@ -523,6 +575,11 @@ const UserManagement = () => {
     }
     if (!fEmail.trim() && !fPhone.trim()) {
       toast.error('Au moins un identifiant est requis : email ou numéro de téléphone'); return;
+    }
+    const bureauConflicts = findBureauConflicts();
+    if (bureauConflicts.length > 0) {
+      toast.error(`Bureau déjà attribué — un seul ${fRole === 'president-etablissement' ? 'président' : 'suppléant'} par bureau : ${bureauConflicts.join(', ')}`);
+      return;
     }
     setUpdating(true);
     try {
@@ -791,7 +848,10 @@ const UserManagement = () => {
                 const centerItems  = isBureaux
                   ? availableBureaux.filter(b => b.centerId === c.id).map(b => ({ val: b.id,    lbl: b.name }))
                   : collegesForCenter(c.id).map(col => ({ val: col.value, lbl: col.label }));
-                const allItemsSel  = centerItems.length > 0 && centerItems.every(i => selectedVals.includes(i.val));
+                // Bureaux déjà détenus par quelqu'un d'autre pour ce même rôle (président OU suppléant) : non sélectionnables
+                const isItemTaken  = (val: string) => isBureaux && !selectedVals.includes(val) && !!bureauHolderForCurrentRole(val);
+                const selectable   = centerItems.filter(i => !isItemTaken(i.val));
+                const allItemsSel  = selectable.length > 0 && selectable.every(i => selectedVals.includes(i.val));
 
                 const toggleCenter = () =>
                   setCurrentMap(prev => {
@@ -800,16 +860,18 @@ const UserManagement = () => {
                     return next;
                   });
 
-                const toggleItem = (val: string) =>
+                const toggleItem = (val: string) => {
+                  if (isItemTaken(val)) return;
                   setCurrentMap(prev => {
                     const list = prev[c.id] ?? [];
                     return { ...prev, [c.id]: list.includes(val) ? list.filter(v => v !== val) : [...list, val] };
                   });
+                };
 
                 const toggleAllItems = () =>
                   setCurrentMap(prev => ({
                     ...prev,
-                    [c.id]: allItemsSel ? [] : centerItems.map(i => i.val),
+                    [c.id]: allItemsSel ? [] : selectable.map(i => i.val),
                   }));
 
                 return (
@@ -843,17 +905,25 @@ const UserManagement = () => {
                           </button>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {centerItems.map(({ val, lbl }) => (
-                            <label
-                              key={val}
-                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-xs font-medium transition-all ${
-                                selectedVals.includes(val) ? `${cfg.chip} text-white` : cfg.chipOff
-                              }`}
-                            >
-                              <input type="checkbox" checked={selectedVals.includes(val)} onChange={() => toggleItem(val)} className="sr-only" />
-                              {lbl}
-                            </label>
-                          ))}
+                          {centerItems.map(({ val, lbl }) => {
+                            const taken = isItemTaken(val);
+                            const holderName = isBureaux ? bureauHolderForCurrentRole(val)?.name : undefined;
+                            return (
+                              <label
+                                key={val}
+                                title={taken ? `Déjà assigné à ${holderName}` : undefined}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                                  selectedVals.includes(val) ? `${cfg.chip} text-white cursor-pointer`
+                                  : taken ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed line-through'
+                                  : `${cfg.chipOff} cursor-pointer`
+                                }`}
+                              >
+                                <input type="checkbox" checked={selectedVals.includes(val)} disabled={taken} onChange={() => toggleItem(val)} className="sr-only" />
+                                {lbl}
+                                {taken && <span className="text-[9px] italic">· {holderName}</span>}
+                              </label>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
