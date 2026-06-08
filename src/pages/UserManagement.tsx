@@ -529,7 +529,9 @@ const UserManagement = () => {
       // Payload de base (colonnes toujours présentes)
       const updatePayload: Record<string, unknown> = {
         name: fName.trim(),
-        email: fEmail.trim(),
+        // Email optionnel : envoyer null (et non '') pour ne pas violer la contrainte unique
+        // users_email_key — plusieurs comptes avec une chaîne vide seraient considérés en conflit
+        email: fEmail.trim() || null,
         phone: fPhone.trim() || null,
         role: fRole,
         is_active: fActive,
@@ -560,8 +562,14 @@ const UserManagement = () => {
 
       if (error) {
         console.error('Erreur mise à jour utilisateur:', error);
-        const msg = (error as any)?.message ?? '';
-        if (msg.includes('column') && msg.includes('does not exist')) {
+        const msg  = (error as any)?.message ?? '';
+        const code = (error as any)?.code ?? '';
+        if (code === '23505' && msg.includes('users_email_key')) {
+          const emailRef = fEmail.trim() ? ` (${fEmail.trim()})` : '';
+          toast.error(`Cet email${emailRef} est déjà utilisé par un autre compte.`);
+        } else if (code === '23505') {
+          toast.error('Un compte avec ces informations existe déjà.');
+        } else if (msg.includes('column') && msg.includes('does not exist')) {
           toast.error('Colonnes manquantes en base — appliquez les migrations SQL dans Supabase.');
         } else {
           toast.error(`Échec de la mise à jour : ${msg || 'erreur inconnue'}`);
