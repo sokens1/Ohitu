@@ -207,8 +207,10 @@ export async function notifyPVSubmitted(opts: {
   if (!actorId) return;
 
   const collegeLabel = opts.collegeType ? ` (${opts.collegeType})` : '';
+  // L'employeur ne reçoit de notification qu'à la publication des résultats
+  // (voir notifyResultsPublished) — pas à la soumission d'un PV
   const recipients = await findRecipients(
-    ['super-admin', 'admin', 'validateur', 'employeur'],
+    ['super-admin', 'admin', 'validateur'],
     opts.electionId, opts.centerId, opts.collegeType,
   );
 
@@ -242,10 +244,11 @@ export async function notifyPVValidated(opts: {
 
   const cLabel = collegeLabel(opts.collegeType);
   const adminRecipients = await findRecipients(['super-admin', 'admin']);
-  // Rôles qui ne voient que les PV validés/publiés : à notifier dès la validation,
-  // dans la limite de leurs établissements/bureaux/collèges assignés
+  // Rôles à notifier dès la validation d'un PV (l'employeur ne reçoit de notification
+  // qu'à la publication des résultats — voir notifyResultsPublished), dans la limite
+  // de leurs établissements/bureaux/collèges assignés
   const scopedRecipients = await findRecipients(
-    ['employeur', 'observateur', 'president-etablissement', 'president-bureau', 'suppleant-president'],
+    ['observateur', 'president-etablissement', 'president-bureau', 'suppleant-president'],
     opts.electionId, opts.centerId, opts.collegeType,
   );
   const recipients = [...new Set([
