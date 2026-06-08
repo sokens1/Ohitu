@@ -184,6 +184,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [comment, setComment] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'entered' | 'validated' | 'anomaly' | 'published'>('all');
+  // Filtre d'annotation : permet de se focaliser sur les PV validés/publiés non encore commentés par un observateur
+  const [annotationFilter, setAnnotationFilter] = useState<'all' | 'annotated' | 'unannotated'>('all');
   const [loading, setLoading] = useState(false);
   const [pvs, setPvs] = useState<any[]>([]);
   const [bureauxMap, setBureauxMap] = useState<Map<string, { id: string; name: string; center_id: string }>>(new Map());
@@ -426,6 +428,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             const bureau = filteredBureaus.find(b => b.id === r.bureau_id);
             if (!bureau) return false;
 
+            // Observateur : uniquement les PV validés ou publiés
+            if (user?.role === 'observateur' && !['validated', 'published'].includes(r.status)) return false;
+
             if (roleColleges) {
               // Filtre collège : vide = tous autorisés
               const allowedColleges = centerCollegesFilter[bureau.center_id];
@@ -542,6 +547,11 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     return enriched.filter(e => {
       if (e.status === 'en_cours') return false; // PV réinitialisé — retirer de la validation
       if (filter !== 'all' && e.status !== filter) return false;
+      if (annotationFilter !== 'all' && ['validated', 'published'].includes(e.status)) {
+        const isAnnotated = e.opinions.length > 0;
+        if (annotationFilter === 'annotated' && !isAnnotated) return false;
+        if (annotationFilter === 'unannotated' && isAnnotated) return false;
+      }
       if (centerFilter && e.centerId !== centerFilter) return false;
       if (searchFilter.trim()) {
         const q = searchFilter.trim().toLowerCase();
@@ -551,7 +561,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       }
       return true;
     });
-  }, [pvs, bureauxMap, centersMap, filter, centerFilter, searchFilter, observerOpinions]);
+  }, [pvs, bureauxMap, centersMap, filter, annotationFilter, centerFilter, searchFilter, observerOpinions]);
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -568,6 +578,23 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       default:
         return status;
     }
+  };
+
+  /** PV validé/publié déjà annoté par un observateur — distingue les PV à examiner des PV déjà traités */
+  const getOpinionBadge = (pv: any) => {
+    const opinions = pv.opinions ?? [];
+    if (opinions.length === 0) return null;
+    const hasReserve = opinions.some((o: any) => o.conformity === 'non_conforme');
+    return (
+      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+        hasReserve
+          ? 'bg-amber-50 text-amber-700 border-amber-300'
+          : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+      }`}>
+        <PenLine className="w-3 h-3" />
+        {hasReserve ? 'Avis : Réserves' : 'Avis : Conforme'}
+      </span>
+    );
   };
 
   const getPriorityBadge = (status: string) => (
@@ -867,7 +894,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               <span>File d'Attente de Validation</span>
             </div>
             <div className="flex items-center gap-2">
-              {!readOnly && (
+              {!readOnly && (role === 'super-admin' || role === 'admin') && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -917,14 +944,21 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           {/* Filtres statut */}
           <div className="flex flex-wrap gap-2 items-center">
             <div className="flex flex-wrap gap-1.5">
-              {([
-                { value: 'all',       label: 'Tous' },
-                { value: 'pending',   label: 'En attente' },
-                { value: 'entered',   label: 'Saisis' },
-                { value: 'validated', label: 'Validés' },
-                { value: 'anomaly',   label: 'Rejeté' },
-                { value: 'published', label: 'Publiés' },
-              ] as const).map(s => (
+              {(role === 'observateur'
+                ? ([
+                    { value: 'all',       label: 'Tous' },
+                    { value: 'validated', label: 'Validés' },
+                    { value: 'published', label: 'Publiés' },
+                  ] as const)
+                : ([
+                    { value: 'all',       label: 'Tous' },
+                    { value: 'pending',   label: 'En attente' },
+                    { value: 'entered',   label: 'Saisis' },
+                    { value: 'validated', label: 'Validés' },
+                    { value: 'anomaly',   label: 'Rejeté' },
+                    { value: 'published', label: 'Publiés' },
+                  ] as const)
+              ).map(s => (
                 <Button
                   key={s.value}
                   variant={filter === s.value ? 'default' : 'outline'}
@@ -941,6 +975,34 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 </Button>
               ))}
             </div>
+
+            {/* Filtre d'annotation — se focaliser sur les PV validés/publiés sans avis observateur */}
+            {(() => {
+              const annotatable   = pvs.filter(p => ['validated', 'published'].includes(p.status));
+              const annotatedN    = annotatable.filter(p => (observerOpinions.get(p.id)?.length ?? 0) > 0).length;
+              const unannotatedN  = annotatable.length - annotatedN;
+              if (annotatable.length === 0) return null;
+              return (
+                <div className="flex flex-wrap gap-1.5 items-center pl-1.5 ml-1.5 border-l border-gray-200">
+                  {([
+                    { value: 'all',         label: 'Avis : tous',     count: annotatable.length },
+                    { value: 'unannotated', label: 'Sans avis',       count: unannotatedN },
+                    { value: 'annotated',   label: 'Avec avis',       count: annotatedN },
+                  ] as const).map(a => (
+                    <Button
+                      key={a.value}
+                      variant={annotationFilter === a.value ? 'default' : 'outline'}
+                      onClick={() => setAnnotationFilter(a.value)}
+                      size="sm"
+                      className="h-7 px-2.5 text-xs"
+                    >
+                      {a.label}
+                      <span className="ml-1 opacity-60 text-[10px]">{a.count}</span>
+                    </Button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Reset filtre statut */}
             {filter !== 'all' && (
@@ -1004,6 +1066,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           Quorum non atteint
                         </span>
                       )}
+                      {['validated', 'published'].includes(pv.status) && getOpinionBadge(pv)}
                     </div>
                     {getPriorityBadge(pv.status)}
                   </div>
@@ -1292,8 +1355,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
                 </div>
 
-                {/* Commentaire de validation — masqué pour l'observateur */}
-                {!isObserver && (
+                {/* Commentaire de validation — masqué pour l'observateur et l'employeur */}
+                {!isObserver && role !== 'employeur' && (
                   <div>
                     <Label htmlFor="comment">Commentaire de validation</Label>
                     <Textarea id="comment" placeholder="Ajouter un commentaire..." value={comment} onChange={(e) => setComment(e.target.value)} rows={3} />

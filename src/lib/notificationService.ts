@@ -208,7 +208,7 @@ export async function notifyPVSubmitted(opts: {
 
   const collegeLabel = opts.collegeType ? ` (${opts.collegeType})` : '';
   const recipients = await findRecipients(
-    ['super-admin', 'admin', 'validateur'],
+    ['super-admin', 'admin', 'validateur', 'employeur'],
     opts.electionId, opts.centerId, opts.collegeType,
   );
 
@@ -242,8 +242,12 @@ export async function notifyPVValidated(opts: {
 
   const cLabel = collegeLabel(opts.collegeType);
   const adminRecipients = await findRecipients(['super-admin', 'admin']);
+  const employeurRecipients = await findRecipients(
+    ['employeur'], opts.electionId, opts.centerId, opts.collegeType,
+  );
   const recipients = [...new Set([
     ...adminRecipients,
+    ...employeurRecipients,
     ...(opts.submittedById ? [opts.submittedById] : []),
   ])].filter(id => id !== actorId);
 
@@ -314,7 +318,7 @@ export async function notifyObserverOpinion(opts: {
   const isReserve = opts.conformity === 'non_conforme';
   const cLabel    = collegeLabel(opts.collegeType);
   const recipients = await findRecipients(
-    ['super-admin', 'admin', 'president-etablissement'],
+    ['super-admin', 'admin', 'president-etablissement', 'suppleant-president'],
     opts.electionId, opts.centerId,
   );
 
@@ -387,7 +391,7 @@ export async function notifyElectionStatusChanged(opts: {
     opts.newStatus === 'published' ? 'success' : 'info';
 
   const recipients = await findRecipients(
-    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau'],
+    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau', 'suppleant-president', 'employeur'],
     opts.electionId,
   );
 
@@ -413,7 +417,7 @@ export async function notifyResultsPublished(opts: {
   if (!actorId) return;
 
   const recipients = await findRecipients(
-    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau'],
+    ['validateur', 'agent-saisie', 'observateur', 'president-etablissement', 'president-bureau', 'suppleant-president', 'employeur'],
     opts.electionId,
   );
 

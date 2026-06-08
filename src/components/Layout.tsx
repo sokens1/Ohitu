@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import type { UserRole } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
   Home,
@@ -50,6 +51,10 @@ const getNotificationIcon = (severity: string) => {
   }
 };
 
+// Présidents de bureau/établissement et suppléants : navigation allégée
+// (pas d'Élections ni de Tableau de bord, "Résultats" devient "Documents")
+const PRESIDENT_ROLES: UserRole[] = ['president-bureau', 'president-etablissement', 'suppleant-president'];
+
 const ALL_MENU_ITEMS = [
   { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard',     permission: 'view:dashboard'  as const },
   { icon: Calendar, label: 'Élections',             path: '/elections',     permission: 'view:elections'  as const },
@@ -75,7 +80,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     removeNotification,
   } = useNotifications();
 
-  const menuItems = ALL_MENU_ITEMS.filter(item => can(item.permission));
+  const isPresidentRole = !!user && PRESIDENT_ROLES.includes(user.role);
+
+  const menuItems = ALL_MENU_ITEMS
+    .filter(item => can(item.permission))
+    .filter(item => !isPresidentRole || (item.path !== '/dashboard' && item.path !== '/elections'))
+    .map(item => (isPresidentRole && item.path === '/results') ? { ...item, label: 'Documents' } : item);
 
   const handleLogout = () => {
     logout();

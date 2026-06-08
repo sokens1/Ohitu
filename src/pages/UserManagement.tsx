@@ -209,6 +209,8 @@ const UserManagement = () => {
   const [availableCenters,  setAvailableCenters]  = useState<{ id: string; name: string }[]>([]);
   const [availableBureaux,  setAvailableBureaux]  = useState<{ id: string; name: string; centerId: string }[]>([]);
   const [availableColleges, setAvailableColleges] = useState<{ value: string; label: string }[]>([]);
+  /** map centerId → college_types ayant au moins un siège dans cet établissement */
+  const [centerCollegeTypes, setCenterCollegeTypes] = useState<Record<string, string[]>>({});
 
   // États d'opération
   const [creating, setCreating] = useState(false);
@@ -336,67 +338,78 @@ const UserManagement = () => {
   useEffect(() => {
     const loadCentersAndAssignables = async () => {
       if (!ROLES_WITH_CENTERS.includes(fRole) || fElectionIds.length === 0) {
-        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); return;
+        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); setCenterCollegeTypes({}); return;
       }
       try {
         const { data: ecRows } = await supabase
           .from('election_centers').select('center_id').in('election_id', fElectionIds);
         const centerIds = Array.from(new Set((ecRows || []).map((r: any) => r.center_id).filter(Boolean)));
-        if (centerIds.length === 0) { setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); return; }
+        if (centerIds.length === 0) { setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); setCenterCollegeTypes({}); return; }
         const { data: centersData } = await supabase
           .from('voting_centers').select('id, name').in('id', centerIds).order('name');
         setAvailableCenters(centersData || []);
 
+        const COLLEGE_LABELS: Record<string, string> = {
+          cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+        };
+
+        // Sièges par collège et par établissement (voting_bureaux = source de vérité par établissement)
+        const { data: bureauxFull } = await supabase
+          .from('voting_bureaux')
+          .select('id, name, center_id, college_type, seats_to_fill')
+          .in('center_id', centerIds)
+          .order('name');
+
+        const collegeMap: Record<string, string[]> = {};
+        (bureauxFull || []).forEach((b: any) => {
+          const seats = Number(b.seats_to_fill) || 0;
+          const type  = b.college_type;
+          if (seats > 0 && type) {
+            if (!collegeMap[b.center_id]) collegeMap[b.center_id] = [];
+            if (!collegeMap[b.center_id].includes(type)) collegeMap[b.center_id].push(type);
+          }
+        });
+        setCenterCollegeTypes(collegeMap);
+
         if (ROLES_WITH_BUREAUX.includes(fRole)) {
-          const { data: bureauxData } = await supabase
-            .from('voting_bureaux').select('id, name, center_id').in('center_id', centerIds).order('name');
           setAvailableBureaux(
-            (bureauxData || [])
-              .filter(b => !/^college/i.test(b.name.trim()))
+            (bureauxFull || [])
+              .filter(b => !/^college/i.test(String(b.name).trim()))
               .map(b => ({ id: b.id, name: b.name, centerId: b.center_id }))
           );
-          // Charger aussi les collèges pour le président (assigned_center_colleges)
-          const { data: collegesData } = await supabase
-            .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
-          const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
-          const COLLEGE_LABELS: Record<string, string> = {
-            cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-          };
-          setAvailableColleges(
-            distinctTypes.length > 0
-              ? distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }))
-              : [
-                  { value: 'cadres',   label: 'Cadres' },
-                  { value: 'employes', label: 'Maîtrise' },
-                  { value: 'ouvriers', label: 'Exécution' },
-                  { value: 'general',  label: 'Encadrement' },
-                ]
-          );
         } else {
-          const { data: collegesData } = await supabase
-            .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
-          const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
-          const COLLEGE_LABELS: Record<string, string> = {
-            cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-          };
-          setAvailableColleges(
-            distinctTypes.length > 0
-              ? distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }))
-              : [
-                  { value: 'cadres',   label: 'Cadres' },
-                  { value: 'employes', label: 'Maîtrise' },
-                  { value: 'ouvriers', label: 'Exécution' },
-                  { value: 'general',  label: 'Encadrement' },
-                ]
-          );
           setAvailableBureaux([]);
         }
+
+        // Liste de référence des collèges existants pour l'élection (structure globale)
+        const { data: collegesData } = await supabase
+          .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
+        const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
+        setAvailableColleges(
+          distinctTypes.length > 0
+            ? distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }))
+            : [
+                { value: 'cadres',   label: 'Cadres' },
+                { value: 'employes', label: 'Maîtrise' },
+                { value: 'ouvriers', label: 'Exécution' },
+                { value: 'general',  label: 'Encadrement' },
+              ]
+        );
       } catch {
-        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]);
+        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); setCenterCollegeTypes({});
       }
     };
     loadCentersAndAssignables();
   }, [fRole, fElectionIds]);
+
+  /** Collèges à proposer pour un établissement donné : uniquement ceux ayant au moins un siège, avec repli sur la liste globale si l'info n'est pas disponible */
+  const collegesForCenter = (centerId: string): { value: string; label: string }[] => {
+    const allowedTypes = centerCollegeTypes[centerId];
+    if (allowedTypes && allowedTypes.length > 0) {
+      return availableColleges.filter(col => allowedTypes.includes(col.value));
+    }
+    return availableColleges;
+  };
 
   // ── Création via l'endpoint serveur (évite la limite de taux de auth.signUp) ─
   const handleCreate = async () => {
@@ -753,7 +766,7 @@ const UserManagement = () => {
                 const selectedVals = currentMap[c.id] ?? [];
                 const centerItems  = isBureaux
                   ? availableBureaux.filter(b => b.centerId === c.id).map(b => ({ val: b.id,    lbl: b.name }))
-                  : availableColleges.map(col => ({ val: col.value, lbl: col.label }));
+                  : collegesForCenter(c.id).map(col => ({ val: col.value, lbl: col.label }));
                 const allItemsSel  = centerItems.length > 0 && centerItems.every(i => selectedVals.includes(i.val));
 
                 const toggleCenter = () =>
@@ -827,9 +840,11 @@ const UserManagement = () => {
                     )}
 
                     {/* Collèges assignés — uniquement pour president-etablissement */}
-                    {isBureaux && isSelected && availableColleges.length > 0 && (() => {
+                    {isBureaux && isSelected && (() => {
+                      const establishmentColleges = collegesForCenter(c.id);
+                      if (establishmentColleges.length === 0) return null;
                       const selColleges   = fCenterColleges[c.id] ?? [];
-                      const allColSel     = availableColleges.length > 0 && availableColleges.every(col => selColleges.includes(col.value));
+                      const allColSel     = establishmentColleges.every(col => selColleges.includes(col.value));
                       const toggleCollege = (val: string) =>
                         setFCenterColleges(prev => {
                           const list = prev[c.id] ?? [];
@@ -838,7 +853,7 @@ const UserManagement = () => {
                       const toggleAllCol = () =>
                         setFCenterColleges(prev => ({
                           ...prev,
-                          [c.id]: allColSel ? [] : availableColleges.map(col => col.value),
+                          [c.id]: allColSel ? [] : establishmentColleges.map(col => col.value),
                         }));
                       return (
                         <div className="px-3 pb-2 pt-1.5 bg-teal-50/70 border-t border-teal-100 space-y-1.5">
@@ -849,7 +864,7 @@ const UserManagement = () => {
                             </button>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
-                            {availableColleges.map(col => (
+                            {establishmentColleges.map(col => (
                               <label
                                 key={col.value}
                                 className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-xs font-medium transition-all ${
