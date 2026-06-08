@@ -978,6 +978,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             .from('union_lists')
             .select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym, logo)')
             .eq('election_id', id)
+            .order('order_num', { ascending: true, nullsFirst: true })
+            .order('id', { ascending: true })
         ]);
         electoralCollegesForPro = ecRowsResult.data || [];
         unionLists = unionListsResult.data || [];
@@ -1352,23 +1354,32 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       setBureauRows(filteredBureaux);
       setCollegeDetailRows(collegeRowsBuilt);
 
-      // Map syndicatKey_collegeKey → [titulaire tête de liste] pour la vue détaillée
+      // Map syndicatKey_collegeKey[_etablissement] → titulaires pour la vue détaillée
+      // Clé avec établissement : lookup précis par établissement (multi-établissements)
+      // Clé sans établissement  : fallback global (élection mono-établissement ou données sans étab.)
       const tMap = new Map<string, string[]>();
       (unionLists || []).forEach((ul: any) => {
         const acronym = ul.unions?.acronym?.trim() || '';
         const uName = ul.unions?.name?.trim() || '';
         const collegeLabel = getNormalizedCollegeLabel(ul.college).toLowerCase();
-        const tits = Array.isArray(ul.titulaires) ? ul.titulaires
+        const tits: any[] = Array.isArray(ul.titulaires) ? ul.titulaires
           : (typeof ul.titulaires === 'string' ? JSON.parse(ul.titulaires || '[]') : []);
-        // On prend uniquement le premier titulaire (tête de liste) de chaque ligne
-        const firstName: string | undefined = tits[0]?.name;
-        if (firstName) {
+        for (const tit of tits) {
+          const tName: string = tit?.name || '';
+          if (!tName) continue;
+          const etabl = (tit.etablissement || '').toLowerCase().trim();
           [acronym, uName].filter(Boolean).forEach(key => {
-            const mk = `${key.toLowerCase()}_${collegeLabel}`;
-            const prev = tMap.get(mk) || [];
-            if (!prev.includes(firstName)) {
-              tMap.set(mk, [...prev, firstName]);
+            const keyLc = key.toLowerCase();
+            // Clé spécifique à l'établissement
+            if (etabl) {
+              const mkEtab = `${keyLc}_${collegeLabel}_${etabl}`;
+              const prevE = tMap.get(mkEtab) || [];
+              if (!prevE.includes(tName)) tMap.set(mkEtab, [...prevE, tName]);
             }
+            // Clé globale (fallback)
+            const mk = `${keyLc}_${collegeLabel}`;
+            const prev = tMap.get(mk) || [];
+            if (!prev.includes(tName)) tMap.set(mk, [...prev, tName]);
           });
         }
       });
@@ -2968,8 +2979,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                   {filteredRows.map((r, i) => {
-                                    const mapKey = `${c.candidate_id.toLowerCase()}_${r.collegeName.toLowerCase()}`;
-                                    const titulaires = titulairesMap.get(mapKey) || [];
+                                    const centerKey = (group.center.center_name || '').toLowerCase().trim();
+                                    const mapKeyEtab = `${c.candidate_id.toLowerCase()}_${r.collegeName.toLowerCase()}_${centerKey}`;
+                                    const mapKeyBase = `${c.candidate_id.toLowerCase()}_${r.collegeName.toLowerCase()}`;
+                                    const titulaires = titulairesMap.get(mapKeyEtab) || titulairesMap.get(mapKeyBase) || [];
                                     const count = r.syndicat.seats > 0 ? r.syndicat.seats : 1;
                                     const delegueDisplay = titulaires.length > 0
                                       ? titulaires.slice(0, count).map(abbreviateName).join(', ')
@@ -3229,26 +3242,28 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                           <p className="text-gray-500 text-xs sm:text-sm">Établissement</p>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
+                      <div className={`grid grid-cols-2 gap-2 sm:gap-3 ${centerTotalSeats > 0 ? 'sm:[grid-template-columns:0.4fr_repeat(5,1fr)]' : 'sm:[grid-template-columns:0.4fr_repeat(4,1fr)]'}`}>
+                        {/* Spacer réduit pour décaler légèrement les cartes vers la gauche */}
+                        <div className="hidden sm:block" />
                         {centerTotalSeats > 0 && (
-                          <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                          <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
                             <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Sièges en lice</div>
                             <div className="font-bold text-gray-800 text-sm sm:text-base">{centerTotalSeats}</div>
                           </div>
                         )}
-                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_registered === 'number' ? c.total_registered.toLocaleString('fr-FR') : (c.total_registered || '-')}</div>
                         </div>
-                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Votants</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_voters === 'number' ? c.total_voters.toLocaleString('fr-FR') : (c.total_voters || '-')}</div>
                         </div>
-                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Exprimés</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_expressed_votes === 'number' ? c.total_expressed_votes.toLocaleString('fr-FR') : (c.total_expressed_votes || '-')}</div>
                         </div>
-                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-center">
+                        <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
                           <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Abstention</div>
                           <div className={`font-bold text-sm sm:text-base ${typeof c.participation_pct === 'number'
                             ? ((100 - c.participation_pct) >= 49.51 ? 'text-red-600' : ((100 - c.participation_pct) > 20.5 ? 'text-yellow-600' : 'text-green-600'))
@@ -3262,11 +3277,11 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     {/* En-tête de tableau (desktop) */}
                     <div className={`hidden sm:grid ${centerTotalSeats > 0 ? 'grid-cols-6' : 'grid-cols-5'} px-4 sm:px-6 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase tracking-wide`}>
                       <div className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-blue-400" />Collège</div>
-                      {centerTotalSeats > 0 && <div className="text-right">Sièges en lice</div>}
-                      <div className="text-right">{electorsLabel}</div>
-                      <div className="text-right">Votants</div>
-                      <div className="text-right">Exprimés</div>
-                      <div className="text-right">Abstention</div>
+                      {centerTotalSeats > 0 && <div className="text-left">Sièges en lice</div>}
+                      <div className="text-left">{electorsLabel}</div>
+                      <div className="text-left">Votants</div>
+                      <div className="text-left">Exprimés</div>
+                      <div className="text-left">Abstention</div>
                     </div>
 
                     {/* Lignes par collège avec accordéon syndicats */}
@@ -3302,12 +3317,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   </span>
                                 </div>
                                 {centerTotalSeats > 0 && (
-                                  <div className={`text-right font-semibold text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{rowSeats > 0 ? rowSeats : '-'}</div>
+                                  <div className={`text-left font-semibold text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{rowSeats > 0 ? rowSeats : '-'}</div>
                                 )}
-                                <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_registered?.toLocaleString() || '-'}</div>
-                                <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_voters?.toLocaleString() || '-'}</div>
-                                <div className={`text-right text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_expressed_votes?.toLocaleString() || '-'}</div>
-                                <div className="text-right">
+                                <div className={`text-left text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_registered?.toLocaleString() || '-'}</div>
+                                <div className={`text-left text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_voters?.toLocaleString() || '-'}</div>
+                                <div className={`text-left text-sm ${qFailed ? 'text-red-700' : 'text-gray-700'}`}>{row.total_expressed_votes?.toLocaleString() || '-'}</div>
+                                <div className="text-left">
                                   <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>{abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
                                 </div>
                               </div>
@@ -3361,8 +3376,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                   {row.syndicats.length > 0 ? row.syndicats.map((s, si) => {
-                                    const mapKey = `${s.syndicat.toLowerCase()}_${row.collegeName.toLowerCase()}`;
-                                    const titulaires = titulairesMap.get(mapKey) || [];
+                                    const centerKey = (c.center_name || '').toLowerCase().trim();
+                                    const mapKeyEtab = `${s.syndicat.toLowerCase()}_${row.collegeName.toLowerCase()}_${centerKey}`;
+                                    const mapKeyBase = `${s.syndicat.toLowerCase()}_${row.collegeName.toLowerCase()}`;
+                                    const titulaires = titulairesMap.get(mapKeyEtab) || titulairesMap.get(mapKeyBase) || [];
                                     const count = s.seats > 0 ? s.seats : 1;
                                     const delegueDisplay = titulaires.length > 0
                                       ? titulaires.slice(0, count).map(abbreviateName).join(', ')
@@ -3370,16 +3387,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     const score = row.total_expressed_votes > 0
                                       ? `${(s.votes / row.total_expressed_votes * 100).toFixed(1)} %`
                                       : '—';
-                                    const orderNum = orderNumMap.get(mapKey);
                                     return (
                                       <tr key={si} className="hover:bg-white transition-colors">
                                         <td className="py-2 font-medium text-gray-800">
-                                          <span className="flex items-center gap-1.5">
-                                            {orderNum != null && (
-                                              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold flex-shrink-0">#{orderNum}</span>
-                                            )}
-                                            {s.syndicat}
-                                          </span>
+                                          {s.syndicat}
                                         </td>
                                         <td className="py-2 text-center font-bold text-blue-600">{s.seats}</td>
                                         <td className="py-2 text-right text-gray-600">{s.votes?.toLocaleString() || '0'}</td>
