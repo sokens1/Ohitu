@@ -353,19 +353,33 @@ const UserManagement = () => {
           cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
         };
 
+        // Les imports Excel stockent des libellés bruts ('Encadrement', 'Cadre'…) tandis que
+        // la création manuelle (AddCenterModal) stocke déjà les clés canoniques ('general', 'cadres'…) :
+        // on normalise pour que les deux formats soient reconnus (même logique que ElectionDetailView)
+        const collegeKeyAliases: Record<string, string> = {
+          encadrement: 'general', cadre: 'cadres',
+          maîtrise: 'employes', maitrise: 'employes',
+          exécution: 'ouvriers', execution: 'ouvriers',
+        };
+        const normalizeCollegeKey = (raw: unknown): string => {
+          const lower = String(raw ?? '').toLowerCase().trim();
+          return collegeKeyAliases[lower] || lower;
+        };
+
         // Sièges par collège et par établissement (voting_bureaux = source de vérité par établissement)
         const { data: bureauxFull } = await supabase
           .from('voting_bureaux')
-          .select('id, name, center_id, college, college_type, seats_to_fill')
+          .select('id, name, center_id, college, college_type, seats_to_fill, election_id')
           .in('center_id', centerIds)
+          .in('election_id', fElectionIds)
           .order('name');
 
         const collegeMap: Record<string, string[]> = {};
         (bureauxFull || []).forEach((b: any) => {
           const seats = Number(b.seats_to_fill) || 0;
           // `college` est le champ canonique (pseudo-bureaux des élections professionnelles) ;
-          // `college_type` sert de repli pour les anciennes données
-          const type  = b.college || b.college_type;
+          // `college_type` sert de repli pour les anciennes données / imports
+          const type = normalizeCollegeKey(b.college || b.college_type);
           if (seats > 0 && type) {
             if (!collegeMap[b.center_id]) collegeMap[b.center_id] = [];
             if (!collegeMap[b.center_id].includes(type)) collegeMap[b.center_id].push(type);
