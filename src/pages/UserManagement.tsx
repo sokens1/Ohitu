@@ -356,14 +356,16 @@ const UserManagement = () => {
         // Sièges par collège et par établissement (voting_bureaux = source de vérité par établissement)
         const { data: bureauxFull } = await supabase
           .from('voting_bureaux')
-          .select('id, name, center_id, college_type, seats_to_fill')
+          .select('id, name, center_id, college, college_type, seats_to_fill')
           .in('center_id', centerIds)
           .order('name');
 
         const collegeMap: Record<string, string[]> = {};
         (bureauxFull || []).forEach((b: any) => {
           const seats = Number(b.seats_to_fill) || 0;
-          const type  = b.college_type;
+          // `college` est le champ canonique (pseudo-bureaux des élections professionnelles) ;
+          // `college_type` sert de repli pour les anciennes données
+          const type  = b.college || b.college_type;
           if (seats > 0 && type) {
             if (!collegeMap[b.center_id]) collegeMap[b.center_id] = [];
             if (!collegeMap[b.center_id].includes(type)) collegeMap[b.center_id].push(type);
