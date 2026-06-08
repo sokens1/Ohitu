@@ -52,7 +52,7 @@ const getNotificationIcon = (severity: string) => {
 };
 
 // Présidents de bureau/établissement et suppléants : navigation allégée
-// (pas d'Élections ni de Tableau de bord, "Résultats" devient "Documents")
+// (pas d'Élections ni de Tableau de bord)
 const PRESIDENT_ROLES: UserRole[] = ['president-bureau', 'president-etablissement', 'suppleant-president'];
 
 const ALL_MENU_ITEMS = [
@@ -84,8 +84,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const menuItems = ALL_MENU_ITEMS
     .filter(item => can(item.permission))
-    .filter(item => !isPresidentRole || (item.path !== '/dashboard' && item.path !== '/elections'))
-    .map(item => (isPresidentRole && item.path === '/results') ? { ...item, label: 'Documents' } : item);
+    .filter(item => !isPresidentRole || (item.path !== '/dashboard' && item.path !== '/elections'));
 
   const handleLogout = () => {
     logout();
@@ -172,7 +171,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   : user?.role === 'employeur'              ? 'Employeur'
                   : user?.role === 'president-bureau'        ? 'Président de Bureau'
                   : user?.role === 'president-etablissement' ? 'Président de Bureau'
-                  : user?.role === 'suppleant-president'    ? 'Suppléant Président'
+                  : user?.role === 'suppleant-president'    ? 'Suppléant Président de Bureau'
                   : user?.role}
               </p>
             </div>
@@ -327,7 +326,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                  : user?.role === 'employeur'              ? 'Employeur'
                  : user?.role === 'president-bureau'       ? 'Président de Bureau'
                  : user?.role === 'president-etablissement'? 'Président de Bureau'
-                 : user?.role === 'suppleant-president'   ? 'Suppléant Président'
+                 : user?.role === 'suppleant-president'   ? 'Suppléant Président de Bureau'
                  : user?.role}
                 </p>
               </div>
