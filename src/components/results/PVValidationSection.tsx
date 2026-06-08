@@ -175,6 +175,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const { user } = useAuth();
   // Rôles pouvant soumettre un avis observateur sur un PV
   const isObserver = role === 'observateur' || role === 'president-etablissement';
+  // Rôles n'ayant accès qu'aux PV Validés/Publiés (filtres de statut allégés)
+  const hasReducedStatusFilters = role === 'observateur' || role === 'president-etablissement'
+    || role === 'president-bureau' || role === 'suppleant-president';
   // Rôles pouvant réagir à un avis existant (approuver / annuler réserves)
   const canReact = role === 'super-admin' || role === 'admin';
 
@@ -944,7 +947,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           {/* Filtres statut */}
           <div className="flex flex-wrap gap-2 items-center">
             <div className="flex flex-wrap gap-1.5">
-              {(role === 'observateur'
+              {(hasReducedStatusFilters
                 ? ([
                     { value: 'all',       label: 'Tous' },
                     { value: 'validated', label: 'Validés' },

@@ -156,6 +156,9 @@ async function fetchGlobalStatsFn(selectedElection: string): Promise<GlobalStats
 const Results = () => {
   const { can, assignedElectionId, assignedElectionIds, role, isGlobalAdmin } = useRBAC();
   const hasMultipleElections = assignedElectionIds.length > 1;
+  // Rôles pour qui l'onglet "Valider les résultats" s'affiche simplement comme "Résultats"
+  const usesResultsLabel = role === 'observateur' || role === 'employeur'
+    || role === 'president-etablissement' || role === 'president-bureau' || role === 'suppleant-president';
 
   const allowedTabs = TAB_DEFS.filter(t => can(t.permission));
 
@@ -331,8 +334,8 @@ const Results = () => {
                   style={{ gridTemplateColumns: `repeat(${allowedTabs.length}, 1fr)` }}
                 >
                   {allowedTabs.map(tab => {
-                    const label      = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.label;
-                    const labelShort = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.labelShort;
+                    const label      = tab.value === 'validation' && usesResultsLabel ? 'Résultats'  : tab.label;
+                    const labelShort = tab.value === 'validation' && usesResultsLabel ? 'Résultats'  : tab.labelShort;
                     return (
                       <TabsTrigger
                         key={tab.value}
@@ -342,7 +345,7 @@ const Results = () => {
                         <tab.icon className="w-4 h-4 sm:w-5 sm:h-5" />
                         <span className="hidden sm:inline">{label}</span>
                         <span className="sm:hidden">{labelShort}</span>
-                        {tab.value === 'validation' && role !== 'observateur' && globalStats.pvsEnAttente > 0 && (
+                        {tab.value === 'validation' && !usesResultsLabel && globalStats.pvsEnAttente > 0 && (
                           <Badge className="bg-red-500 text-white text-xs ml-1">
                             {globalStats.pvsEnAttente}
                           </Badge>
