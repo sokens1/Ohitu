@@ -242,12 +242,15 @@ export async function notifyPVValidated(opts: {
 
   const cLabel = collegeLabel(opts.collegeType);
   const adminRecipients = await findRecipients(['super-admin', 'admin']);
-  const employeurRecipients = await findRecipients(
-    ['employeur'], opts.electionId, opts.centerId, opts.collegeType,
+  // Rôles qui ne voient que les PV validés/publiés : à notifier dès la validation,
+  // dans la limite de leurs établissements/bureaux/collèges assignés
+  const scopedRecipients = await findRecipients(
+    ['employeur', 'observateur', 'president-etablissement', 'president-bureau', 'suppleant-president'],
+    opts.electionId, opts.centerId, opts.collegeType,
   );
   const recipients = [...new Set([
     ...adminRecipients,
-    ...employeurRecipients,
+    ...scopedRecipients,
     ...(opts.submittedById ? [opts.submittedById] : []),
   ])].filter(id => id !== actorId);
 

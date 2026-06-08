@@ -176,8 +176,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   // Rôles pouvant soumettre un avis observateur sur un PV
   const isObserver = role === 'observateur' || role === 'president-etablissement';
   // Rôles n'ayant accès qu'aux PV Validés/Publiés (filtres de statut allégés)
-  const hasReducedStatusFilters = role === 'observateur' || role === 'president-etablissement'
-    || role === 'president-bureau' || role === 'suppleant-president';
+  const hasReducedStatusFilters = role === 'observateur' || role === 'employeur'
+    || role === 'president-etablissement' || role === 'president-bureau' || role === 'suppleant-president';
   // Rôles pouvant réagir à un avis existant (approuver / annuler réserves)
   const canReact = role === 'super-admin' || role === 'admin';
 
@@ -380,9 +380,21 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           .limit(500);
         if (pvErr) throw pvErr;
         
-        // Charger les utilisateurs
-        const { data: usersData } = await supabase.from('users').select('id, name, assigned_center_ids');
-        setUsersMap(new Map(usersData?.map(u => [u.id, u.name]) || []));
+        // Résoudre les noms des auteurs (saisie / validation / observation) via RPC :
+        // le RLS sur `users` limite la lecture à sa propre ligne pour les rôles non-admin,
+        // ce qui ferait sinon apparaître l'UUID brut à la place du nom.
+        const pvAuthorIds = new Set<string>();
+        (pvRows || []).forEach(r => {
+          if (r.entered_by)   pvAuthorIds.add(r.entered_by);
+          if (r.validated_by) pvAuthorIds.add(r.validated_by);
+          if (r.observer_id)  pvAuthorIds.add(r.observer_id);
+        });
+        if (user?.id) pvAuthorIds.add(user.id);
+        const { data: pvAuthors } = pvAuthorIds.size
+          ? await supabase.rpc('get_user_names', { p_ids: Array.from(pvAuthorIds) })
+          : { data: [] as { id: string; name: string }[] };
+        const namesMap = new Map<string, string>((pvAuthors || []).map((u: any) => [u.id, u.name]));
+        setUsersMap(namesMap);
 
         // Filtrer les PV aux centres liés à l'élection via election_centers
         const bureauIds = Array.from(new Set((pvRows || []).map(r => r.bureau_id).filter(Boolean)));
@@ -406,6 +418,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           // president-etablissement               → centres + bureaux assignés
           const roleColleges  = user?.role === 'validateur' || user?.role === 'agent-saisie' || user?.role === 'observateur' || user?.role === 'employeur';
           const roleBureaux   = user?.role === 'president-etablissement' || user?.role === 'suppleant-president';
+          // Observateur, employeur, président (établissement/bureau) et suppléant : uniquement les PV validés ou publiés
+          const seesOnlyValidatedPublished = user?.role === 'observateur' || user?.role === 'employeur'
+            || user?.role === 'president-etablissement' || user?.role === 'president-bureau' || user?.role === 'suppleant-president';
 
           if (roleColleges) {
             // Restreindre allowedCenterIds aux centres présents dans assigned_center_colleges
@@ -431,8 +446,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
             const bureau = filteredBureaus.find(b => b.id === r.bureau_id);
             if (!bureau) return false;
 
-            // Observateur : uniquement les PV validés ou publiés
-            if (user?.role === 'observateur' && !['validated', 'published'].includes(r.status)) return false;
+            if (seesOnlyValidatedPublished && !['validated', 'published'].includes(r.status)) return false;
 
             if (roleColleges) {
               // Filtre collège : vide = tous autorisés
@@ -470,13 +484,24 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
               .select('id, pv_id, observer_id, annotation, conformity, annotated_at, reactions')
               .in('pv_id', pvIds)
               .order('annotated_at', { ascending: true });
+            // Compléter la résolution des noms pour les observateurs absents des PV (avis multiples)
+            const missingObserverIds = Array.from(new Set(
+              (opinions || [])
+                .map(op => op.observer_id as string | null)
+                .filter((id): id is string => !!id && !namesMap.has(id))
+            ));
+            if (missingObserverIds.length > 0) {
+              const { data: extraAuthors } = await supabase.rpc('get_user_names', { p_ids: missingObserverIds });
+              (extraAuthors || []).forEach((u: any) => namesMap.set(u.id, u.name));
+              setUsersMap(new Map(namesMap));
+            }
             const opinionsMap = new Map<string, any[]>();
             (opinions || []).forEach(op => {
               const list = opinionsMap.get(op.pv_id) || [];
               list.push({
                 id: op.id,
                 observer_id: op.observer_id,
-                observer_name: usersData?.find(u => u.id === op.observer_id)?.name || op.observer_id,
+                observer_name: (op.observer_id && namesMap.get(op.observer_id)) || op.observer_id,
                 annotation: op.annotation ?? null,
                 conformity: op.conformity ?? null,
                 annotated_at_str: op.annotated_at

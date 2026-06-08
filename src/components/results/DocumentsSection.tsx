@@ -232,10 +232,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
       if (error) { toast.error('Erreur chargement documents'); return; }
 
-      // 4. Enrichir avec noms uploader
-      const uploaderIds = [...new Set((docRows ?? []).map((d: any) => d.uploaded_by))];
+      // 4. Enrichir avec noms uploader — RPC pour contourner le RLS sur `users`
+      // (qui limite la lecture à sa propre ligne pour les rôles non-admin)
+      const uploaderIds = [...new Set((docRows ?? []).map((d: any) => d.uploaded_by).filter(Boolean))];
       const { data: uploaderRows } = uploaderIds.length
-        ? await supabase.from('users').select('id, name').in('id', uploaderIds)
+        ? await supabase.rpc('get_user_names', { p_ids: uploaderIds })
         : { data: [] };
       const uploaderMap = new Map((uploaderRows ?? []).map((u: any) => [u.id, u.name]));
 

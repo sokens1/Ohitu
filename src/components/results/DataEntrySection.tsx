@@ -103,7 +103,6 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         }
 
         // Étape 2 : requêtes indépendantes — sérialisées pour éviter ERR_HTTP2_PING_FAILED
-        const usersResult = await sbQuery<any[]>(() => supabase.from('users').select('id, name'));
         const bureauxResult = await sbQuery<any[]>(() =>
           supabase.from('voting_bureaux')
             .select('id, name, center_id, registered_voters, college_type, election_id, college, seats_to_fill')
@@ -116,7 +115,6 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
             .order('name', { ascending: true })
         );
 
-        const usersMap = new Map((usersResult.data || []).map((u: any) => [u.id, u.name]));
         const bureauxData = bureauxResult.data;
         const { data, error } = centersResult;
 
@@ -147,6 +145,9 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         const pvMap = new Map<string, any>();
         // pvByCollegeType : "${centerId}_${rawCollegeType}" → PV  (rétro-compat PV saisis via pseudo-entrée)
         const pvByCollegeType = new Map<string, any>();
+        // usersMap : userId → name — résolu via RPC (le RLS sur `users` limite la lecture
+        // à sa propre ligne pour les rôles non-admin, ce qui ferait sinon apparaître l'UUID brut)
+        let usersMap = new Map<string, string>();
         if (allBureauIds.length > 0) {
           const { data: pvRows } = await sbQuery<any[]>(() =>
             supabase.from('procès_verbaux')
@@ -164,6 +165,11 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
               if (ct) pvByCollegeType.set(`${String(srcBureau.center_id)}_${ct}`, pv);
             }
           });
+          const enteredByIds = Array.from(new Set((pvRows || []).map((pv: any) => pv.entered_by).filter(Boolean)));
+          if (enteredByIds.length > 0) {
+            const { data: namedUsers } = await supabase.rpc('get_user_names', { p_ids: enteredByIds });
+            usersMap = new Map((namedUsers || []).map((u: any) => [u.id, u.name]));
+          }
         }
 
         // Transformer les données
