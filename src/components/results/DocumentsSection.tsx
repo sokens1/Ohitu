@@ -19,6 +19,7 @@ import {
   List, RefreshCw, Filter, BadgeCheck, EyeOff, Scale,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { auditService } from '@/services/auditService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface EstablishmentDocument {
@@ -328,8 +329,15 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
       }
 
       toast.success('Document joint avec succès');
-      // Notifier les agents + admins concernés
+      // Audit
       const centerObj = centers.find(c => c.id === centerId);
+      auditService.log({
+        action: 'UPLOAD',
+        resource_type: 'document',
+        description: `Dépôt ${docType === 'pv' ? 'PV' : 'liste de participation'} — ${centerObj?.name ?? centerId}${collegeType ? ` · Collège ${collegeType}` : ''}`,
+        user_id: user.id,
+      }).catch(() => {});
+      // Notifier les agents + admins concernés
       if (centerObj) {
         notifyDocumentUploaded({
           electionId:   selectedElection,
@@ -383,6 +391,15 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
       if (error) { toast.error('Erreur lors de la rétractation'); return; }
       setDocs(prev => prev.map(d => d.id === docId ? { ...d, status: 'pending', review_comment: null } : d));
       toast.success('Validation rétractée — document repassé en attente');
+      const retDoc = docs.find(d => d.id === docId);
+      const retCenter = retDoc ? centers.find(c => c.id === retDoc.center_id) : null;
+      auditService.log({
+        action: 'RETRACT',
+        resource_type: 'document',
+        resource_id: docId,
+        description: `Rétractation validation — ${retCenter?.name ?? ''}${retDoc?.college_type ? ` · Collège ${retDoc.college_type}` : ''}`,
+        user_id: user?.id,
+      }).catch(() => {});
     } catch { toast.error('Erreur réseau'); }
   };
 
@@ -411,8 +428,18 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
       if (error) { toast.error('Erreur lors de la mise à jour'); return; }
       toast.success('Avis enregistré');
-      // Notifier le président qui a uploadé
+      // Audit
       const doc = docs.find(d => d.id === docId);
+      const reviewCenter = doc ? centers.find(c => c.id === doc.center_id) : null;
+      const actionMap = { validated: 'VALIDATE', reserved: 'REVIEW', rejected: 'REJECT' } as const;
+      auditService.log({
+        action: actionMap[status],
+        resource_type: 'document',
+        resource_id: docId,
+        description: `Avis ${status} — ${doc?.document_type === 'pv' ? 'PV' : 'Liste participation'} — ${reviewCenter?.name ?? ''}${doc?.college_type ? ` · Collège ${doc.college_type}` : ''}${comment ? ` : ${comment}` : ''}`,
+        user_id: authUser.user?.id,
+      }).catch(() => {});
+      // Notifier le président qui a uploadé
       if (doc && user) {
         const center = centers.find(c => c.id === doc.center_id);
         notifyDocumentReviewed({
@@ -581,6 +608,14 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         }
       }
 
+      const delCenter = docToDelete ? centers.find(c => c.id === docToDelete.center_id) : null;
+      auditService.log({
+        action: 'DELETE',
+        resource_type: 'document',
+        resource_id: docId,
+        description: `Suppression ${docToDelete?.document_type === 'pv' ? 'PV' : 'liste participation'} — ${delCenter?.name ?? ''}${docToDelete?.college_type ? ` · Collège ${docToDelete.college_type}` : ''}`,
+        user_id: user?.id,
+      }).catch(() => {});
       setDocs(prev => prev.filter(d => d.id !== docId));
       toast.success('Document supprimé');
     } finally {

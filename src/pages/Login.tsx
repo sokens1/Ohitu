@@ -83,6 +83,7 @@ function getElectionCardStyle(election: Election) {
 
 const Login = () => {
   const [email, setEmail] = useState('');
+  const [inputMode, setInputMode] = useState<'email' | 'phone' | 'unknown'>('unknown');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -410,37 +411,70 @@ const Login = () => {
             <CardContent className="px-4 sm:px-6">
               <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-                  Email ou numéro de téléphone
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                    Email ou numéro de téléphone
+                  </Label>
+                  {inputMode !== 'unknown' && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      inputMode === 'phone'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-green-100 text-green-700'
+                    }`}>
+                      {inputMode === 'phone' ? 'Téléphone' : 'Email'}
+                    </span>
+                  )}
+                </div>
                 <Input
                   id="email"
                   type="text"
-                  placeholder="email@exemple.com ou 077-00-00-00"
+                  inputMode={inputMode === 'phone' ? 'numeric' : 'text'}
+                  autoComplete="username"
+                  placeholder={
+                    inputMode === 'phone' ? '077-00-00-00' :
+                    inputMode === 'email' ? 'email@exemple.com' :
+                    'email@exemple.com ou 077-00-00-00'
+                  }
                   value={email}
                   onChange={(e) => {
                     const raw = e.target.value;
                     setLoginError(null);
-                    // Si ça ressemble à un numéro de téléphone, formater en 077-00-00-00
-                    if (!raw.includes('@')) {
+
+                    // Détection : commence par un chiffre → téléphone ; sinon → email
+                    const startsWithDigit = /^[0-9]/.test(raw);
+                    const hasAt = raw.includes('@');
+
+                    if (!raw) {
+                      setInputMode('unknown');
+                      setEmail('');
+                      return;
+                    }
+
+                    if (hasAt || (!startsWithDigit)) {
+                      // Email : laisser passer tel quel
+                      setInputMode(hasAt || raw.length > 1 ? 'email' : 'unknown');
+                      setEmail(raw);
+                    } else {
+                      // Téléphone : formater en 077-00-00-00
+                      setInputMode('phone');
                       const digits = raw.replace(/[^0-9]/g, '').slice(0, 9);
                       let formatted = digits;
-                      if (digits.length > 3 && digits.length <= 5) {
-                        formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
-                      } else if (digits.length > 5 && digits.length <= 7) {
-                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
-                      } else if (digits.length > 7) {
-                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5, 7)}-${digits.slice(7)}`;
-                      }
+                      if (digits.length > 7)      formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5, 7)}-${digits.slice(7)}`;
+                      else if (digits.length > 5) formatted = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+                      else if (digits.length > 3) formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
                       setEmail(formatted);
-                    } else {
-                      setEmail(raw);
                     }
                   }}
                   required
                   className="h-10 sm:h-12 border-gray-200 focus:ring-gov-blue focus:border-gov-blue transition-colors text-sm sm:text-base"
                 />
-                <p className="text-xs text-gray-400">Format téléphone : 077-00-00-00</p>
+                <p className="text-xs text-gray-400">
+                  {inputMode === 'phone'
+                    ? 'Format : 077-00-00-00'
+                    : inputMode === 'email'
+                    ? 'Saisie email détectée'
+                    : 'Commencez par un chiffre pour saisir un numéro, par une lettre pour un email'}
+                </p>
               </div>
               
               <div className="space-y-2">

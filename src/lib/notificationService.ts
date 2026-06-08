@@ -41,6 +41,17 @@ interface NotifyPayload {
   document_id?: string | null;
 }
 
+// ── Constantes partagées ─────────────────────────────────────────────────────
+
+const COLLEGE_FR: Record<string, string> = {
+  cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+};
+
+function collegeLabel(collegeType: string | null | undefined): string {
+  if (!collegeType) return '';
+  return ` · Collège ${COLLEGE_FR[collegeType] ?? collegeType}`;
+}
+
 // ── Helpers internes ──────────────────────────────────────────────────────────
 
 async function getActorId(): Promise<string | null> {
@@ -130,13 +141,8 @@ export async function notifyDocumentUploaded(opts: {
   const actorId = await getActorId();
   if (!actorId) return;
 
-  const COLLEGE_FR: Record<string, string> = {
-    cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-  };
-  const docLabel     = opts.documentType === 'pv' ? 'Procès-verbal' : 'Liste de participation';
-  const collegeLabel = opts.collegeType
-    ? ` · Collège ${COLLEGE_FR[opts.collegeType] ?? opts.collegeType}`
-    : '';
+  const docLabel = opts.documentType === 'pv' ? 'Procès-verbal' : 'Liste de participation';
+  const cLabel   = collegeLabel(opts.collegeType);
 
   const recipients = await findRecipients(
     ['super-admin', 'admin', 'agent-saisie'],
@@ -145,8 +151,8 @@ export async function notifyDocumentUploaded(opts: {
 
   await insertNotifications(recipients, actorId, {
     type:       'document_uploaded',
-    title:      `${docLabel} joint — ${opts.centerName}${collegeLabel}`,
-    message:    `${opts.actorName} a déposé un ${docLabel.toLowerCase()} pour ${opts.centerName}${collegeLabel}.`,
+    title:      `${docLabel} joint — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a déposé un ${docLabel.toLowerCase()} pour ${opts.centerName}${cLabel}.`,
     severity:   'info',
     election_id: opts.electionId,
     center_id:   opts.centerId,
@@ -170,20 +176,15 @@ export async function notifyDocumentReviewed(opts: {
   const actorId = await getActorId();
   if (!actorId) return;
 
-  const COLLEGE_FR: Record<string, string> = {
-    cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-  };
-  const docLabel     = opts.documentType === 'pv' ? 'PV' : 'Liste de participation';
-  const collegeLabel = opts.collegeType
-    ? ` · Collège ${COLLEGE_FR[opts.collegeType] ?? opts.collegeType}`
-    : '';
-  const statusMap    = { validated: 'validé', reserved: 'validé avec réserve', rejected: 'rejeté' };
-  const severity     = opts.status === 'validated' ? 'success' : opts.status === 'reserved' ? 'warning' : 'error';
+  const docLabel  = opts.documentType === 'pv' ? 'PV' : 'Liste de participation';
+  const cLabel    = collegeLabel(opts.collegeType);
+  const statusMap = { validated: 'validé', reserved: 'validé avec réserve', rejected: 'rejeté' };
+  const severity  = opts.status === 'validated' ? 'success' : opts.status === 'reserved' ? 'warning' : 'error';
 
   await insertNotifications([opts.recipientId], actorId, {
     type:       'document_reviewed',
-    title:      `${docLabel} ${statusMap[opts.status]} — ${opts.centerName}${collegeLabel}`,
-    message:    `${opts.actorName} a ${statusMap[opts.status]} votre ${docLabel.toLowerCase()} pour ${opts.centerName}${collegeLabel}${opts.comment ? ` : "${opts.comment}"` : ''}.`,
+    title:      `${docLabel} ${statusMap[opts.status]} — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a ${statusMap[opts.status]} votre ${docLabel.toLowerCase()} pour ${opts.centerName}${cLabel}${opts.comment ? ` : "${opts.comment}"` : ''}.`,
     severity,
     election_id: opts.electionId ?? null,
   });
@@ -232,12 +233,14 @@ export async function notifyPVValidated(opts: {
   centerId: string;
   centerName: string;
   bureauName: string;
+  collegeType: string | null;
   submittedById: string | null;
   actorName: string;
 }): Promise<void> {
   const actorId = await getActorId();
   if (!actorId) return;
 
+  const cLabel = collegeLabel(opts.collegeType);
   const adminRecipients = await findRecipients(['super-admin', 'admin']);
   const recipients = [...new Set([
     ...adminRecipients,
@@ -246,8 +249,8 @@ export async function notifyPVValidated(opts: {
 
   await insertNotifications(recipients, actorId, {
     type:       'pv_validated',
-    title:      '✅ PV validé',
-    message:    `${opts.actorName} a validé le PV de ${opts.bureauName} — ${opts.centerName}.`,
+    title:      `PV validé — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a validé le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
     severity:   'success',
     election_id: opts.electionId,
     center_id:   opts.centerId,
@@ -265,6 +268,7 @@ export async function notifyPVRejected(opts: {
   centerId: string;
   centerName: string;
   bureauName: string;
+  collegeType: string | null;
   submittedById: string | null;
   comment: string;
   actorName: string;
@@ -272,6 +276,7 @@ export async function notifyPVRejected(opts: {
   const actorId = await getActorId();
   if (!actorId) return;
 
+  const cLabel = collegeLabel(opts.collegeType);
   const adminRecipients = await findRecipients(['super-admin', 'admin']);
   const recipients = [...new Set([
     ...adminRecipients,
@@ -280,8 +285,8 @@ export async function notifyPVRejected(opts: {
 
   await insertNotifications(recipients, actorId, {
     type:       'pv_rejected',
-    title:      '❌ PV rejeté',
-    message:    `${opts.actorName} a rejeté le PV de ${opts.bureauName} — ${opts.centerName}${opts.comment ? ` : "${opts.comment}"` : ''}.`,
+    title:      `PV rejeté — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a rejeté le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}${opts.comment ? ` : "${opts.comment}"` : ''}.`,
     severity:   'error',
     election_id: opts.electionId,
     center_id:   opts.centerId,
@@ -299,6 +304,7 @@ export async function notifyObserverOpinion(opts: {
   centerId: string;
   centerName: string;
   bureauName: string;
+  collegeType: string | null;
   conformity: 'conforme' | 'non_conforme';
   actorName: string;
 }): Promise<void> {
@@ -306,6 +312,7 @@ export async function notifyObserverOpinion(opts: {
   if (!actorId) return;
 
   const isReserve = opts.conformity === 'non_conforme';
+  const cLabel    = collegeLabel(opts.collegeType);
   const recipients = await findRecipients(
     ['super-admin', 'admin', 'president-etablissement'],
     opts.electionId, opts.centerId,
@@ -313,8 +320,8 @@ export async function notifyObserverOpinion(opts: {
 
   await insertNotifications(recipients, actorId, {
     type:       'observer_opinion',
-    title:      isReserve ? '⚠️ Réserve émise' : '✅ Avis conforme',
-    message:    `${opts.actorName} a émis un avis ${isReserve ? 'de réserve' : 'conforme'} sur le PV de ${opts.bureauName} — ${opts.centerName}.`,
+    title:      `${isReserve ? 'Réserve émise' : 'Avis conforme'} — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a émis un avis ${isReserve ? 'de réserve' : 'conforme'} sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
     severity:   isReserve ? 'warning' : 'success',
     election_id: opts.electionId,
     center_id:   opts.centerId,
@@ -330,7 +337,10 @@ export async function notifyOpinionReaction(opts: {
   recipientId: string;
   pvId: string;
   electionId: string;
+  centerId: string;
+  centerName: string;
   bureauName: string;
+  collegeType: string | null;
   reactionType: 'approved' | 'overridden';
   actorName: string;
 }): Promise<void> {
@@ -338,12 +348,14 @@ export async function notifyOpinionReaction(opts: {
   if (!actorId) return;
 
   const isApproved = opts.reactionType === 'approved';
+  const cLabel     = collegeLabel(opts.collegeType);
   await insertNotifications([opts.recipientId], actorId, {
     type:       'opinion_reaction',
-    title:      isApproved ? '✅ Réserve approuvée' : '↩️ Réserve annulée',
-    message:    `${opts.actorName} a ${isApproved ? 'approuvé' : 'annulé (marqué conforme)'} votre réserve sur le PV de ${opts.bureauName}.`,
+    title:      `${isApproved ? 'Réserve approuvée' : 'Réserve annulée'} — ${opts.centerName}${cLabel}`,
+    message:    `${opts.actorName} a ${isApproved ? 'approuvé' : 'annulé (marqué conforme)'} votre réserve sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
     severity:   isApproved ? 'success' : 'info',
     election_id: opts.electionId,
+    center_id:   opts.centerId,
     pv_id:       opts.pvId,
   });
 }
