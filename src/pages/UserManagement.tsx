@@ -1185,9 +1185,9 @@ const UserManagement = () => {
       {/* Modal Ajout */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
         <DialogContent
-          className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto"
+          className="w-[95vw] max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
         >
-          <DialogHeader className="pb-2 border-b">
+          <DialogHeader className="pb-2 border-b flex-shrink-0">
             <DialogTitle className="text-lg font-semibold text-[#1B2E5A]">
               Nouvel utilisateur
             </DialogTitle>
@@ -1196,7 +1196,7 @@ const UserManagement = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-4 space-y-5">
+          <div className="py-4 space-y-5 overflow-y-auto flex-1 min-h-0">
             {formFields}
 
             {/* Mot de passe */}
@@ -1219,7 +1219,7 @@ const UserManagement = () => {
             </div>
           </div>
 
-          <div className="pt-3 border-t flex flex-col-reverse sm:flex-row justify-end gap-2">
+          <div className="pt-3 border-t flex flex-col-reverse sm:flex-row justify-end gap-2 flex-shrink-0">
             <Button variant="outline" onClick={() => setShowAddModal(false)} className="w-full sm:w-auto">
               Annuler
             </Button>
@@ -1238,9 +1238,9 @@ const UserManagement = () => {
       {/* Modal Modification */}
       <Dialog open={showEditModal} onOpenChange={v => { setShowEditModal(v); if (!v) setEditingUser(null); }}>
         <DialogContent
-          className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto"
+          className="w-[95vw] max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
         >
-          <DialogHeader className="pb-2 border-b">
+          <DialogHeader className="pb-2 border-b flex-shrink-0">
             <DialogTitle className="text-lg font-semibold text-[#1B2E5A]">
               Modifier l'utilisateur
             </DialogTitle>
@@ -1249,7 +1249,7 @@ const UserManagement = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-4 space-y-5">
+          <div className="py-4 space-y-5 overflow-y-auto flex-1 min-h-0">
             {formFields}
 
             {/* Nouveau mot de passe */}
@@ -1273,7 +1273,7 @@ const UserManagement = () => {
             </div>
           </div>
 
-          <div className="pt-3 border-t flex flex-col-reverse sm:flex-row justify-end gap-2">
+          <div className="pt-3 border-t flex flex-col-reverse sm:flex-row justify-end gap-2 flex-shrink-0">
             <Button variant="outline" onClick={() => { setShowEditModal(false); setEditingUser(null); }} className="w-full sm:w-auto">
               Annuler
             </Button>
