@@ -132,7 +132,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
       .from('union_lists')
       .select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym)')
       .eq('election_id', electionId)
-      .order('id', { ascending: true }),
+      .order('order_num', { ascending: true, nullsFirst: true }),
     supabase
       .from('election_candidates')
       .select('candidate_id, candidates(id, name, party)')
