@@ -3,11 +3,12 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
+import { isProfessionalElection } from '@/utils/electionCalculations';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Calendar,
   Users,
@@ -16,22 +17,17 @@ import {
   TrendingUp,
   Target,
   Activity,
-  Zap,
-  Star,
-  Shield,
-  CheckCircle,
   ChevronDown,
   Clock,
-  Plus,
   FileText,
   UserPlus,
   Settings,
-  ChevronRight,
-  TrendingDown,
+  CheckCircle,
+  Shield,
+  Map,
   Building2,
-  Lock,
-  Layers,
-  Map
+  Star,
+  Layers
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '@/contexts/NotificationContext';
@@ -122,6 +118,7 @@ async function fetchDashboardData({
   chartData: { timeline: any[]; colleges: any[]; provinces: any[]; parties: any[] };
   recentActivities: any[];
   nextElection: any;
+  isPro: boolean;
 }> {
   // a. Load election details
   const { data: electionsData, error: electionsError } = await supabase
@@ -198,29 +195,50 @@ async function fetchDashboardData({
   let provincesCount = 0;
   let communesCount = 0;
   let provincesList: any[] = [];
+
+  // Déterminer si toutes les élections sélectionnées sont professionnelles
+  const isProLocal = (electionsData || []).length > 0
+    && (electionsData || []).every(e => isProfessionalElection(e.type));
+
   if (centerIds.length > 0) {
     const { data: centersData } = await supabase
       .from('voting_centers')
-      .select('province_id, commune_id')
+      .select('province_id, commune_id, address, provinces(name)')
       .in('id', centerIds);
 
-    const activeProvinceIds = Array.from(
-      new Set((centersData || []).map((c: any) => c.province_id).filter(Boolean))
-    );
-    provincesCount = activeProvinceIds.length;
+    const regionMap: Record<string, number> = {};
+
+    (centersData || []).forEach((c: any) => {
+      let regionName: string | null = null;
+
+      if (isProLocal) {
+        // Pro : la région vient de l'import Excel, stockée dans voting_centers.address
+        // Format : "lieu_vote, région"  →  on prend la dernière partie après la virgule
+        const addr = (c.address || '').trim();
+        if (addr) {
+          const parts = addr.split(',').map((s: string) => s.trim()).filter(Boolean);
+          regionName = parts[parts.length - 1] || null;
+        }
+      } else {
+        // Politique : via FK province_id → provinces.name
+        regionName = (c.provinces as any)?.name || null;
+      }
+
+      if (regionName) {
+        regionMap[regionName] = (regionMap[regionName] || 0) + 1;
+      }
+    });
+
+    provincesList = Object.entries(regionMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    provincesCount = provincesList.length;
 
     const activeCommuneIds = Array.from(
       new Set((centersData || []).map((c: any) => c.commune_id).filter(Boolean))
     );
     communesCount = activeCommuneIds.length;
-
-    const provMap: Record<string, number> = {};
-    (centersData || []).forEach((c: any) => {
-      if (c.province_id) {
-        provMap[c.province_id] = (provMap[c.province_id] || 0) + 1;
-      }
-    });
-    provincesList = Object.entries(provMap).map(([name, value]) => ({ name, value }));
   }
 
   // If no centers or provinces, query directly
@@ -231,10 +249,7 @@ async function fetchDashboardData({
     const { data: allCommunes } = await supabase.from('communes').select('id');
     communesCount = allCommunes?.length || 0;
 
-    provincesList = (allProvinces || []).slice(0, 5).map((p) => ({
-      name: p.name,
-      value: Math.floor(Math.random() * 8) + 2,
-    }));
+    provincesList = [];
   }
 
   // f. Load electoral colleges
@@ -254,14 +269,6 @@ async function fetchDashboardData({
     return acc;
   }, []);
 
-  const hasProfessional = (electionsData || []).some((e) => e.type === 'Élection Professionnelle');
-  if (hasProfessional && collegesChart.length === 0) {
-    collegesChart.push(
-      { name: 'Collège Ouvriers', value: Math.round(totalVoters * 0.55) },
-      { name: 'Collège Employés', value: Math.round(totalVoters * 0.30) },
-      { name: 'Collège Cadres', value: Math.round(totalVoters * 0.15) }
-    );
-  }
 
   // g. Load candidates and their parties for selected elections
   const { data: ecCandidates } = await supabase
@@ -305,14 +312,11 @@ async function fetchDashboardData({
   const timelineChart = (electionsData || [])
     .map((e) => {
       const pvsStats = electionVotesMap[e.id] || { voters: 0, registered: 0 };
-      const inscrits = pvsStats.registered > 0 ? pvsStats.registered : e.nb_electeurs || 1500;
+      const inscrits = pvsStats.registered > 0 ? pvsStats.registered : e.nb_electeurs || 0;
       return {
         name: e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
         inscrits,
-        votants:
-          pvsStats.voters > 0
-            ? pvsStats.voters
-            : Math.round(inscrits * (0.6 + Math.random() * 0.25)),
+        votants: pvsStats.voters,
       };
     })
     .reverse();
@@ -373,28 +377,6 @@ async function fetchDashboardData({
     });
   }
 
-  // Fallbacks for activities
-  if (activities.length === 0) {
-    activities.push(
-      {
-        id: 'a1',
-        type: 'system',
-        action: 'Importation globale',
-        description: 'Liste électorale de Moanda importée avec succès',
-        timestamp: 'Hier, 15:40',
-        iconType: 'system',
-      },
-      {
-        id: 'a2',
-        type: 'election',
-        action: 'Nouvelle Élection',
-        description: 'Création du scrutin professionel CNSS Gabon',
-        timestamp: 'Le 15 mai, 09:12',
-        iconType: 'election',
-      }
-    );
-  }
-
   return {
     stats: {
       elections: {
@@ -420,10 +402,11 @@ async function fetchDashboardData({
       timeline: timelineChart,
       colleges: collegesChart,
       provinces: provincesList,
-      parties: partiesChart.length > 0 ? partiesChart : [{ name: 'Sans étiquette', value: 12 }],
+      parties: partiesChart,
     },
     recentActivities: activities.slice(0, 5),
     nextElection,
+    isPro: (electionsData || []).length > 0 && (electionsData || []).every(e => isProfessionalElection(e.type)),
   };
 }
 
@@ -464,7 +447,12 @@ const DashboardModernSimple = () => {
   useEffect(() => {
     if (!electionsListData) return;
     setElectionsList(electionsListData);
-    setSelectedElectionIds(electionsListData.map((e) => e.id));
+    // Par défaut : dernière élection uniquement (triée par date DESC, donc index 0)
+    if (electionsListData.length > 0) {
+      setSelectedElectionIds([electionsListData[0].id]);
+    } else {
+      setSelectedElectionIds([]);
+    }
 
     // Find nearest upcoming election
     const upcoming = electionsListData
@@ -511,6 +499,8 @@ const DashboardModernSimple = () => {
     provinces: [],
     parties: [],
   };
+
+  const isPro = dashboardData?.isPro ?? false;
 
   // Map iconType strings back to JSX icons inside the component render
   const recentActivities = (dashboardData?.recentActivities ?? []).map((a) => ({
@@ -706,9 +696,11 @@ const DashboardModernSimple = () => {
                   <Layers className="w-4 h-4 text-indigo-500" />
                   {selectedElectionIds.length === 0
                     ? "Aucune élection"
-                    : selectedElectionIds.length === electionsList.length
+                    : selectedElectionIds.length === electionsList.length && electionsList.length > 1
                       ? "Toutes les élections"
-                      : `${selectedElectionIds.length} élection(s) sélectionnée(s)`}
+                      : selectedElectionIds.length === 1
+                        ? (electionsList.find(e => e.id === selectedElectionIds[0])?.title || "1 élection")
+                        : `${selectedElectionIds.length} élections sélectionnées`}
                 </span>
                 <ChevronDown className="w-4 h-4 ml-2 text-slate-400 transition-transform duration-300" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
               </button>
@@ -774,42 +766,30 @@ const DashboardModernSimple = () => {
           )}
         </div>
 
-        {/* INTERACTIVE TABS */}
+        {/* TABS */}
         <Tabs defaultValue="overview" className="w-full space-y-6">
           <div className="flex border-b border-slate-100 pb-2 overflow-x-auto scrollbar-none justify-center sm:justify-start">
             <TabsList className="bg-slate-100/80 backdrop-blur p-1 rounded-2xl flex gap-1 border border-slate-200/30 w-full sm:w-auto h-auto">
-              <TabsTrigger
-                value="overview"
-                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
-              >
-                <Activity className="w-4.5 h-4.5 text-indigo-500" />
+              <TabsTrigger value="overview" className="flex-1 sm:flex-none px-4 py-2.5 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2 text-slate-600 hover:text-slate-900">
+                <Activity className="w-4 h-4 text-indigo-500" />
                 <span>Vue d'ensemble</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="politics"
-                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-violet-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
-              >
-                <Target className="w-4.5 h-4.5 text-violet-500" />
-                <span>Partis & Syndicats</span>
+              <TabsTrigger value="politics" className="flex-1 sm:flex-none px-4 py-2.5 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-violet-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2 text-slate-600 hover:text-slate-900">
+                <Target className="w-4 h-4 text-violet-500" />
+                <span>{isPro ? 'Syndicats' : 'Partis & Syndicats'}</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="geo"
-                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
-              >
-                <Map className="w-4.5 h-4.5 text-emerald-500" />
-                <span>Analyse Géographique</span>
+              <TabsTrigger value="geo" className="flex-1 sm:flex-none px-4 py-2.5 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2 text-slate-600 hover:text-slate-900">
+                <Map className="w-4 h-4 text-emerald-500" />
+                <span>Géographie</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="live"
-                className="flex-1 sm:flex-none px-5 py-3 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-amber-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2.5 text-slate-600 hover:text-slate-900 data-[state=active]:scale-[1.02]"
-              >
-                <Clock className="w-4.5 h-4.5 text-amber-500" />
-                <span>Suivi & Activités</span>
+              <TabsTrigger value="live" className="flex-1 sm:flex-none px-4 py-2.5 text-xs sm:text-sm font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:text-amber-600 data-[state=active]:shadow-md transition-all duration-300 flex items-center justify-center gap-2 text-slate-600 hover:text-slate-900">
+                <Clock className="w-4 h-4 text-amber-500" />
+                <span>Suivi</span>
               </TabsTrigger>
             </TabsList>
           </div>
 
-          {/* TAB 1: OVERVIEW */}
+          {/* TAB 1: VUE D'ENSEMBLE */}
           <TabsContent value="overview" className="space-y-6 focus:outline-none animate-fade-in">
             {/* METRICS ROW (4 Cards) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -818,7 +798,9 @@ const DashboardModernSimple = () => {
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-500 to-indigo-500"></div>
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Électeurs Inscrits</p>
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">
+                      {isPro ? 'Salariés Inscrits' : 'Électeurs Inscrits'}
+                    </p>
                     <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
                       {stats.voters.total.toLocaleString()}
                     </p>
@@ -839,11 +821,17 @@ const DashboardModernSimple = () => {
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Centres de Vote</p>
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">
+                      {isPro ? 'Établissements' : 'Centres de Vote'}
+                    </p>
                     <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
                       {stats.infrastructure.centers.toLocaleString()}
                     </p>
-                    <p className="text-[11px] font-semibold text-emerald-600">{stats.infrastructure.provinces} provinces actives</p>
+                    {isPro ? (
+                      <p className="text-[11px] font-semibold text-emerald-600">{stats.infrastructure.centers} établissement{stats.infrastructure.centers > 1 ? 's' : ''}</p>
+                    ) : (
+                      <p className="text-[11px] font-semibold text-emerald-600">{stats.infrastructure.provinces} province{stats.infrastructure.provinces > 1 ? 's' : ''} active{stats.infrastructure.provinces > 1 ? 's' : ''}</p>
+                    )}
                   </div>
                   <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-600 group-hover:scale-110 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300 shadow-inner">
                     <Building className="w-6 h-6" />
@@ -856,11 +844,15 @@ const DashboardModernSimple = () => {
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-purple-500 to-violet-500"></div>
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Bureaux de Vote</p>
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">
+                      {isPro ? 'Collèges / Bureaux' : 'Bureaux de Vote'}
+                    </p>
                     <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
                       {stats.infrastructure.bureaux.toLocaleString()}
                     </p>
-                    <p className="text-[11px] font-semibold text-purple-600">Ratio: {avgBureauxPerCenter} / centre</p>
+                    <p className="text-[11px] font-semibold text-purple-600">
+                      Ratio: {avgBureauxPerCenter} / {isPro ? 'établissement' : 'centre'}
+                    </p>
                   </div>
                   <div className="p-3.5 rounded-2xl bg-purple-50 text-purple-600 group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all duration-300 shadow-inner">
                     <Vote className="w-6 h-6" />
@@ -873,11 +865,15 @@ const DashboardModernSimple = () => {
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pink-500 to-rose-500"></div>
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">Candidatures</p>
+                    <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-wider">
+                      {isPro ? 'Listes Syndicales' : 'Candidatures'}
+                    </p>
                     <p className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
                       {stats.infrastructure.candidates.toLocaleString()}
                     </p>
-                    <p className="text-[11px] font-semibold text-pink-600">{chartData.parties.length} partis représentés</p>
+                    <p className="text-[11px] font-semibold text-pink-600">
+                      {chartData.parties.length} {isPro ? 'syndicat' : 'parti'}{chartData.parties.length > 1 ? 's' : ''} représenté{chartData.parties.length > 1 ? 's' : ''}
+                    </p>
                   </div>
                   <div className="p-3.5 rounded-2xl bg-pink-50 text-pink-600 group-hover:scale-110 group-hover:bg-pink-600 group-hover:text-white transition-all duration-300 shadow-inner">
                     <Target className="w-6 h-6" />
@@ -920,8 +916,8 @@ const DashboardModernSimple = () => {
                       <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#64748b', fontWeight: 600}} />
                       <Tooltip content={<CustomTooltip />} />
                       <Legend verticalAlign="top" height={36} iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, fontWeight: 600, color: '#475569' }} />
-                      <Area name="Électeurs Inscrits" type="monotone" dataKey="inscrits" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorInscrits)" />
-                      <Area name="Suffrages Exprimés" type="monotone" dataKey="votants" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorVotants)" />
+                      <Area name={isPro ? 'Salariés Inscrits' : 'Électeurs Inscrits'} type="monotone" dataKey="inscrits" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorInscrits)" />
+                      <Area name={isPro ? 'Votes Exprimés' : 'Suffrages Exprimés'} type="monotone" dataKey="votants" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorVotants)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -932,10 +928,10 @@ const DashboardModernSimple = () => {
                 <CardHeader className="border-b border-slate-50 pb-4">
                   <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                     <Layers className="w-5 h-5 text-purple-500" />
-                    Collèges Électoraux
+                    {isPro ? 'Collèges Professionnels' : 'Collèges Électoraux'}
                   </CardTitle>
                   <CardDescription className="text-xs text-slate-500">
-                    Répartition des électeurs par catégorie professionnelle
+                    {isPro ? 'Répartition des salariés par collège professionnel' : 'Répartition des électeurs par catégorie'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="h-[270px] flex flex-col justify-center pb-2 pt-6">
@@ -989,18 +985,19 @@ const DashboardModernSimple = () => {
             </div>
           </TabsContent>
 
-          {/* TAB 2: POLITICS & SYNDICATS */}
+          {/* TAB 2: PARTIS & SYNDICATS */}
           <TabsContent value="politics" className="space-y-6 focus:outline-none animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Party/Syndicat Candidate Chart */}
               <Card className="lg:col-span-2 border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
                 <CardHeader className="border-b border-slate-50 pb-4">
                   <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                     <Target className="w-5 h-5 text-violet-500" />
-                    Représentation Politique & Syndicale
+                    {isPro ? 'Représentation Syndicale' : 'Représentation Politique & Syndicale'}
                   </CardTitle>
                   <CardDescription className="text-xs text-slate-500">
-                    Nombre de candidats ou listes représentés par étiquette syndicale
+                    {isPro
+                      ? 'Nombre de listes déposées par organisation syndicale'
+                      : 'Nombre de candidats représentés par étiquette politique'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="h-[320px] pt-6 pb-4">
@@ -1019,66 +1016,69 @@ const DashboardModernSimple = () => {
                         <XAxis dataKey="name" tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} angle={-15} textAnchor="end" height={50} axisLine={false} tickLine={false} />
                         <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} />
                         <Tooltip content={<CustomTooltip />} />
-                        <Bar dataKey="value" fill="#8b5cf6" radius={[10, 10, 0, 0]} barSize={32}>
-                          {chartData.parties.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={`url(#barGradient-${index})`} className="transition-all duration-300 hover:opacity-85" />
+                        <Bar dataKey="value" radius={[10, 10, 0, 0]} barSize={32}>
+                          {chartData.parties.map((_entry, index) => (
+                            <Cell key={`cell-${index}`} fill={`url(#barGradient-${index})`} />
                           ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-                      Aucune donnée syndicale ou politique disponible.
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
+                      <Target className="w-8 h-8 opacity-30" />
+                      <p className="text-sm font-medium">Aucune donnée {isPro ? 'syndicale' : 'politique'} disponible.</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Stats Summary & Starred organization */}
               <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
                 <CardHeader className="border-b border-slate-50 pb-4">
                   <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                     <Star className="w-5 h-5 text-violet-500 fill-violet-100" />
-                    Force Syndicale
+                    {isPro ? 'Force Syndicale' : 'Force Partisane'}
                   </CardTitle>
                   <CardDescription className="text-xs text-slate-500">
-                    Détails et répartition des listes candidates
+                    {isPro ? 'Répartition des listes syndicales' : 'Répartition des candidatures par parti'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5 pt-6">
-                  <div className="p-4.5 bg-gradient-to-br from-violet-50 to-indigo-50 rounded-2xl border border-violet-100/50 space-y-2.5">
+                  <div className="p-4 bg-gradient-to-br from-violet-50 to-indigo-50 rounded-2xl border border-violet-100/50 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-black text-violet-800 uppercase tracking-wider">Total Organisations</span>
-                      <Badge className="bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs px-2.5 py-0.5 rounded-full">{chartData.parties.length}</Badge>
+                      <span className="text-xs font-black text-violet-800 uppercase tracking-wider">
+                        Total {isPro ? 'syndicats' : 'organisations'}
+                      </span>
+                      <Badge className="bg-violet-600 text-white font-bold text-xs px-2.5 py-0.5 rounded-full">{chartData.parties.length}</Badge>
                     </div>
-                    <p className="text-xs text-violet-900 leading-relaxed font-medium">
-                      Les candidatures sont présentées sous étiquette ou en listes autonomes pour les scrutins en cours de consolidation.
-                    </p>
                   </div>
-
-                  <div className="border border-slate-100 rounded-2xl p-4.5 space-y-3 bg-white shadow-inner">
-                    <span className="text-xs font-black text-slate-400 uppercase tracking-wider block">Répartition Détaillée</span>
-                    <div className="space-y-2.5 max-h-[160px] overflow-y-auto scrollbar-thin pr-1">
-                      {chartData.parties.slice(0, 5).map((p, idx) => (
-                        <div key={idx} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                            <span className="text-xs font-bold text-slate-700 truncate">{p.name}</span>
+                  <div className="border border-slate-100 rounded-2xl p-4 space-y-3 bg-white shadow-inner">
+                    <span className="text-xs font-black text-slate-400 uppercase tracking-wider block">Répartition détaillée</span>
+                    {chartData.parties.length > 0 ? (
+                      <div className="space-y-2.5 max-h-[180px] overflow-y-auto scrollbar-thin pr-1">
+                        {chartData.parties.slice(0, 8).map((p, idx) => (
+                          <div key={idx} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                              <span className="text-xs font-bold text-slate-700 truncate">{p.name}</span>
+                            </div>
+                            <span className="text-xs font-extrabold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md flex-shrink-0">
+                              {p.value} {isPro ? 'liste(s)' : 'candidat(s)'}
+                            </span>
                           </div>
-                          <span className="text-xs font-extrabold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md flex-shrink-0">{p.value} candidat(s)</span>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 text-center py-4">Aucune donnée</p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
 
-          {/* TAB 3: GEOGRAPHIC ANALYSIS */}
+          {/* TAB 3: GÉOGRAPHIE */}
           <TabsContent value="geo" className="space-y-6 focus:outline-none animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Horizontal Bar Chart: Provinces */}
               <Card className="lg:col-span-2 border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
                 <CardHeader className="border-b border-slate-50 pb-4">
                   <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
@@ -1086,7 +1086,7 @@ const DashboardModernSimple = () => {
                     Distribution Territoriale
                   </CardTitle>
                   <CardDescription className="text-xs text-slate-500">
-                    Nombre d'infrastructures électorales et bureaux de vote actifs par province
+                    {isPro ? 'Nombre d\'établissements par région / localisation' : 'Centres de vote actifs par province'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="h-[320px] pt-6 pb-4">
@@ -1101,127 +1101,110 @@ const DashboardModernSimple = () => {
                             </linearGradient>
                           ))}
                         </defs>
-                        <CartesianGrid strokeDasharray="4 4" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                        <CartesianGrid strokeDasharray="4 4" horizontal={false} vertical={true} stroke="#f1f5f9" />
                         <XAxis type="number" axisLine={false} tickLine={false} tick={{fontSize: 9, fontWeight: 600, fill: '#64748b'}} />
-                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#475569'}} width={100} />
+                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#475569'}} width={110} />
                         <Tooltip content={<CustomTooltip />} />
                         <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={16}>
-                          {chartData.provinces.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={`url(#barGeoGradient-${index})`} className="transition-all duration-300 hover:opacity-85" />
+                          {chartData.provinces.map((_entry, index) => (
+                            <Cell key={`cell-${index}`} fill={`url(#barGeoGradient-${index})`} />
                           ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-                      Aucune donnée de distribution géographique disponible.
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
+                      <Map className="w-8 h-8 opacity-30" />
+                      <p className="text-sm font-medium">Aucune donnée géographique disponible.</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Geographic Cards */}
               <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
                 <CardHeader className="border-b border-slate-50 pb-4">
                   <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                     <Building2 className="w-5 h-5 text-emerald-500" />
-                    Densité Électorale
+                    {isPro ? 'Densité des Établissements' : 'Densité Électorale'}
                   </CardTitle>
-                  <CardDescription className="text-xs text-slate-500">
-                    Moyennes et indicateurs de répartition territoriale
-                  </CardDescription>
+                  <CardDescription className="text-xs text-slate-500">Indicateurs de répartition territoriale</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6">
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl shadow-inner border border-slate-100">
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Moyenne Électeurs</span>
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                        Moy. {isPro ? 'salariés' : 'électeurs'}
+                      </span>
                       <p className="text-xl font-black text-slate-800">{avgVotersPerBureau.toLocaleString()}</p>
                     </div>
                     <span className="text-xs text-slate-500 font-semibold bg-white border border-slate-100 px-2.5 py-1 rounded-xl">Par bureau</span>
                   </div>
-
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl shadow-inner border border-slate-100">
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Moyenne Bureaux</span>
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                        Moy. {isPro ? 'collèges' : 'bureaux'}
+                      </span>
                       <p className="text-xl font-black text-slate-800">{avgBureauxPerCenter}</p>
                     </div>
-                    <span className="text-xs text-slate-500 font-semibold bg-white border border-slate-100 px-2.5 py-1 rounded-xl">Par centre</span>
+                    <span className="text-xs text-slate-500 font-semibold bg-white border border-slate-100 px-2.5 py-1 rounded-xl">
+                      Par {isPro ? 'établissement' : 'centre'}
+                    </span>
                   </div>
-
-                  <div className="p-4.5 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-100 space-y-2">
-                    <span className="text-xs font-black text-emerald-800 uppercase tracking-wider block">Concentration Électorale</span>
-                    <p className="text-xs text-emerald-900 leading-relaxed font-medium">
-                      {chartData.provinces.length > 0
-                        ? `La province de "${chartData.provinces[0]?.name || 'Gabon'}" regroupe la plus grande concentration de centres de vote dans cette consolidation.`
-                        : 'Aucune donnée géographique active.'
-                      }
-                    </p>
-                  </div>
+                  {chartData.provinces.length > 0 && (
+                    <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-100">
+                      <span className="text-xs font-black text-emerald-800 uppercase tracking-wider block mb-1">
+                        {isPro ? 'Région la plus représentée' : 'Concentration électorale'}
+                      </span>
+                      <p className="text-xs text-emerald-900 font-medium">
+                        {isPro ? "L'établissement" : "La province"} « {chartData.provinces[0]?.name} » regroupe
+                        la plus grande concentration de {isPro ? 'salariés inscrits' : 'centres de vote'}.
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
 
-          {/* TAB 4: LIVE MONITORING & LOGS */}
+          {/* TAB 4: SUIVI & ACTIVITÉS */}
           <TabsContent value="live" className="space-y-6 focus:outline-none animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Countdown Timer Widget */}
               <Card className="border border-slate-900 rounded-3xl shadow-xl overflow-hidden bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white relative">
-                {/* Glow effects inside the countdown */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
-                <div className="absolute bottom-0 left-0 w-32 h-32 bg-yellow-500/5 rounded-full blur-2xl pointer-events-none"></div>
-
                 <CardHeader className="pb-2 border-b border-white/5">
                   <CardTitle className="text-base sm:text-lg font-bold flex items-center gap-2 text-white">
                     <Clock className="w-5 h-5 text-yellow-400 animate-pulse-slow" />
                     Prochaine Échéance
                   </CardTitle>
                   <CardDescription className="text-indigo-200/60 text-xs">
-                    Temps restant avant l'ouverture du scrutin
+                    {isPro ? "Temps restant avant le début du vote" : "Temps restant avant l'ouverture du scrutin"}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col justify-between h-[220px] pb-4 pt-5">
                   {nextElection ? (
                     <div className="space-y-4">
-                      <div className="bg-white/5 p-3 rounded-2xl border border-white/10 backdrop-blur-sm">
+                      <div className="bg-white/5 p-3 rounded-2xl border border-white/10">
                         <p className="text-xs text-indigo-100 font-bold truncate">{nextElection.title}</p>
                         <p className="text-[10px] text-yellow-300 mt-1 font-bold tracking-wide uppercase">
-                          Scrutin programmé le {new Date(nextElection.election_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                          Programmé le {new Date(nextElection.election_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
                         </p>
                       </div>
-
-                      <div className="flex items-center justify-center space-x-2.5 text-white mt-2">
-                        <div className="text-center">
-                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
-                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.days.toString().padStart(2, '0')}</div>
-                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Jours</div>
-                          </div>
-                        </div>
-                        <div className="text-lg font-black text-indigo-400 animate-pulse">:</div>
-                        <div className="text-center">
-                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
-                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.hours.toString().padStart(2, '0')}</div>
-                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Heures</div>
-                          </div>
-                        </div>
-                        <div className="text-lg font-black text-indigo-400 animate-pulse">:</div>
-                        <div className="text-center">
-                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
-                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.minutes.toString().padStart(2, '0')}</div>
-                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Min.</div>
-                          </div>
-                        </div>
-                        <div className="text-lg font-black text-indigo-400 animate-pulse">:</div>
-                        <div className="text-center">
-                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[58px] border border-white/10 shadow-lg">
-                            <div className="text-xl sm:text-2xl font-black tracking-tight">{countdown.seconds.toString().padStart(2, '0')}</div>
-                            <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">Sec.</div>
-                          </div>
-                        </div>
+                      <div className="flex items-center justify-center space-x-2 text-white">
+                        {[{ val: countdown.days, label: 'Jours' }, { val: countdown.hours, label: 'Heures' }, { val: countdown.minutes, label: 'Min.' }, { val: countdown.seconds, label: 'Sec.' }].map((item, i) => (
+                          <React.Fragment key={i}>
+                            {i > 0 && <div className="text-lg font-black text-indigo-400 animate-pulse">:</div>}
+                            <div className="text-center">
+                              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 min-w-[52px] border border-white/10">
+                                <div className="text-xl font-black tracking-tight">{item.val.toString().padStart(2, '0')}</div>
+                                <div className="text-[8px] uppercase tracking-widest text-indigo-300 font-bold">{item.label}</div>
+                              </div>
+                            </div>
+                          </React.Fragment>
+                        ))}
                       </div>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-center py-6">
+                    <div className="flex flex-col items-center justify-center h-full text-center">
                       <Shield className="w-10 h-10 text-indigo-300 mb-2 opacity-60" />
                       <p className="text-xs text-indigo-200 font-bold">Aucun scrutin futur programmé</p>
                     </div>
@@ -1229,7 +1212,6 @@ const DashboardModernSimple = () => {
                 </CardContent>
               </Card>
 
-              {/* Status breakdown progress */}
               <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
                 <CardHeader className="border-b border-slate-50 pb-4">
                   <CardTitle className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
@@ -1237,33 +1219,25 @@ const DashboardModernSimple = () => {
                     Statut des Scrutins
                   </CardTitle>
                   <CardDescription className="text-xs text-slate-500">
-                    Progression globale et états des processus électoraux
+                    {isPro ? 'Évolution des élections professionnelles' : 'Progression globale des processus électoraux'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5 pt-6">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                      <span>Élections Terminées</span>
+                      <span>{isPro ? 'Scrutins terminés' : 'Élections terminées'}</span>
                       <span className="text-slate-800">{stats.elections.completed} / {stats.elections.total}</span>
                     </div>
-                    <Progress
-                      value={stats.elections.total > 0 ? (stats.elections.completed / stats.elections.total) * 100 : 0}
-                      className="h-2.5 bg-slate-50 [&>div]:bg-emerald-500 rounded-full"
-                    />
+                    <Progress value={stats.elections.total > 0 ? (stats.elections.completed / stats.elections.total) * 100 : 0} className="h-2.5 bg-slate-50 [&>div]:bg-emerald-500 rounded-full" />
                   </div>
-
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                      <span>Élections Planifiées (À venir)</span>
+                      <span>{isPro ? 'Scrutins à venir' : 'Élections planifiées'}</span>
                       <span className="text-slate-800">{stats.elections.upcoming} / {stats.elections.total}</span>
                     </div>
-                    <Progress
-                      value={stats.elections.total > 0 ? (stats.elections.upcoming / stats.elections.total) * 100 : 0}
-                      className="h-2.5 bg-slate-50 [&>div]:bg-indigo-500 rounded-full"
-                    />
+                    <Progress value={stats.elections.total > 0 ? (stats.elections.upcoming / stats.elections.total) * 100 : 0} className="h-2.5 bg-slate-50 [&>div]:bg-indigo-500 rounded-full" />
                   </div>
-
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-150">
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                     <span className="text-xs text-slate-500 font-bold">Taux d'achèvement global</span>
                     <span className="text-xs font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
                       {stats.elections.total > 0 ? Math.round((stats.elections.completed / stats.elections.total) * 100) : 0}%
@@ -1272,7 +1246,6 @@ const DashboardModernSimple = () => {
                 </CardContent>
               </Card>
 
-              {/* Live Activity Feed */}
               <Card className="border border-slate-100 rounded-3xl shadow-md overflow-hidden bg-white hover:shadow-xl transition-all duration-300">
                 <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-slate-50">
                   <div>
@@ -1280,30 +1253,33 @@ const DashboardModernSimple = () => {
                       <Activity className="w-5 h-5 text-amber-500" />
                       Journal d'Activité
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-500">
-                      Dernières actions et logs système
-                    </CardDescription>
+                    <CardDescription className="text-xs text-slate-500">Dernières actions enregistrées</CardDescription>
                   </div>
                   <Badge className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 font-bold px-2 py-0.5 rounded-full animate-pulse-slow">Live</Badge>
                 </CardHeader>
                 <CardContent className="p-0 pt-3">
                   <div className="max-h-[220px] overflow-y-auto px-4 pb-4 scrollbar-thin">
-                    <div className="space-y-2">
-                      {recentActivities.map((act) => (
-                        <div key={act.id} className="flex items-start space-x-3 p-3 hover:bg-slate-50/80 rounded-2xl transition-all group cursor-pointer border border-transparent hover:border-slate-100">
-                          <div className="flex-shrink-0 mt-0.5 p-2 bg-slate-50 rounded-xl group-hover:bg-white group-hover:scale-105 transition-all border border-slate-100">
-                            {act.icon}
+                    {recentActivities.length > 0 ? (
+                      <div className="space-y-2">
+                        {recentActivities.map((act) => (
+                          <div key={act.id} className="flex items-start space-x-3 p-3 hover:bg-slate-50/80 rounded-2xl transition-all group border border-transparent hover:border-slate-100">
+                            <div className="flex-shrink-0 mt-0.5 p-2 bg-slate-50 rounded-xl group-hover:bg-white group-hover:scale-105 transition-all border border-slate-100">
+                              {act.icon}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{act.action}</p>
+                              <p className="text-[11px] text-slate-500 truncate mt-0.5 font-medium">{act.description}</p>
+                            </div>
+                            <div className="flex-shrink-0 text-[10px] text-slate-400 font-semibold">{act.timestamp}</div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{act.action}</p>
-                            <p className="text-[11px] text-slate-500 truncate mt-0.5 font-medium">{act.description}</p>
-                          </div>
-                          <div className="flex-shrink-0 text-[10px] text-slate-400 font-semibold">
-                            {act.timestamp}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2">
+                        <Activity className="w-7 h-7 opacity-30" />
+                        <p className="text-xs font-medium">Aucune activité récente</p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
