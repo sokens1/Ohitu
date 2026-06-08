@@ -67,7 +67,7 @@ const DOC_TYPE_LABEL: Record<string, string> = {
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<any> }> = {
   pending:   { label: 'En attente',          color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Clock },
   validated: { label: 'Validé',              color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle },
-  reserved:  { label: 'Validé avec réserve', color: 'bg-orange-100 text-orange-700 border-orange-200', icon: AlertTriangle },
+  reserved:  { label: 'Validé avec réserves', color: 'bg-orange-100 text-orange-700 border-orange-200', icon: AlertTriangle },
   rejected:  { label: 'Rejeté',              color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
 };
 
@@ -497,7 +497,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                   'bg-yellow-50 text-yellow-700 border-yellow-200'
                 }`}>
                   {previewDoc.status === 'validated' ? '✅ Validé' :
-                   previewDoc.status === 'reserved'  ? '⚠️ Réserve' :
+                   previewDoc.status === 'reserved'  ? '⚠️ Réserves' :
                    previewDoc.status === 'rejected'  ? '❌ Rejeté' : '⏳ En attente'}
                 </span>
               </div>
@@ -661,7 +661,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const CONFIRM_CFG = {
     delete:   { label: 'Supprimer ce document ?',        color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',          icon: Trash2 },
     validate: { label: 'Valider ce document ?',          color: 'text-emerald-700', confirmCls: 'bg-emerald-600 hover:bg-emerald-700 text-white',   icon: CheckCircle   },
-    reserve:  { label: 'Valider avec réserve ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: AlertTriangle       },
+    reserve:  { label: 'Valider avec réserves ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: AlertTriangle       },
     reject:   { label: 'Rejeter ce document ?',          color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',           icon: XCircle        },
     retract:  { label: 'Rétracter la validation ?',      color: 'text-amber-700',   confirmCls: 'bg-amber-500 hover:bg-amber-600 text-white',       icon: RefreshCw     },
   };
@@ -894,7 +894,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const STATUS_MD: Record<string, { icon: React.ComponentType<any>; color: string; label: string }> = {
     pending:   { icon: Clock,     color: 'text-amber-500',   label: 'En attente'  },
     validated: { icon: BadgeCheck,    color: 'text-emerald-500', label: 'Validé'      },
-    reserved:  { icon: AlertTriangle,     color: 'text-orange-500',  label: 'Réserve'     },
+    reserved:  { icon: AlertTriangle,     color: 'text-orange-500',  label: 'Réserves'     },
     rejected:  { icon: EyeOff, color: 'text-red-500',     label: 'Rejeté'      },
   };
 
@@ -902,7 +902,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     { label: 'Tous',       count: docs.length,   bg: adminStatusFilter === 'all'       ? 'bg-[#1B2E5A] text-white border-[#1B2E5A]'        : 'bg-white text-gray-600 border-gray-200',       key: 'all'       },
     { label: 'En attente', count: statPending,   bg: adminStatusFilter === 'pending'   ? 'bg-amber-500 text-white border-amber-500'         : 'bg-white text-amber-600 border-amber-200',     key: 'pending'   },
     { label: 'Validés',    count: statValidated, bg: adminStatusFilter === 'validated' ? 'bg-emerald-600 text-white border-emerald-600'     : 'bg-white text-emerald-600 border-emerald-200', key: 'validated' },
-    { label: 'Réserve',    count: statReserved,  bg: adminStatusFilter === 'reserved'  ? 'bg-orange-500 text-white border-orange-500'       : 'bg-white text-orange-500 border-orange-200',  key: 'reserved'  },
+    { label: 'Réserves',    count: statReserved,  bg: adminStatusFilter === 'reserved'  ? 'bg-orange-500 text-white border-orange-500'       : 'bg-white text-orange-500 border-orange-200',  key: 'reserved'  },
     { label: 'Rejetés',    count: statRejected,  bg: adminStatusFilter === 'rejected'  ? 'bg-red-600 text-white border-red-600'             : 'bg-white text-red-500 border-red-200',         key: 'rejected'  },
   ];
 
@@ -1114,7 +1114,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                   ) : (
                     /* ── Formulaire de validation ── */
                     <div className="space-y-1.5">
-                      <Textarea rows={2} placeholder="Commentaire (requis pour Réserve/Rejet)…"
+                      <Textarea rows={2} placeholder="Commentaire (requis pour Réserves/Rejet)…"
                         value={review?.comment ?? ''}
                         onChange={e => setReview(prev => prev ? { ...prev, comment: e.target.value } : null)}
                         className="text-xs resize-none rounded-lg border-gray-200 focus:border-[#1B2E5A]" />
@@ -1127,7 +1127,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                         <button disabled={review?.submitting || commentReq}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'reserve', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 hover:bg-orange-100 disabled:opacity-40">
-                          <AlertTriangle size={12} /> Réserve
+                          <AlertTriangle size={12} /> Réserves
                         </button>
                         <button disabled={review?.submitting || commentReq}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'reject', comment: review?.comment })}
