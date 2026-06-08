@@ -22,6 +22,7 @@ export interface CandidateInfo {
   suppleant?: string;
   college_type?: string | null; // cadres | employes | ouvriers | general — pour élections pro
   etablissement?: string | null; // nom de l'établissement — pour filtrage UI
+  order_num?: number | null; // numéro d'ordre de la liste syndicale
 }
 
 const PRO_ELECTION_TYPE = 'Élection Professionnelle';
@@ -129,8 +130,9 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
   const [ulResult, ecResult] = await Promise.all([
     supabase
       .from('union_lists')
-      .select('id, college, titulaires, suppleants, unions(id, name, acronym)')
-      .eq('election_id', electionId),
+      .select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym)')
+      .eq('election_id', electionId)
+      .order('id', { ascending: true }),
     supabase
       .from('election_candidates')
       .select('candidate_id, candidates(id, name, party)')
@@ -174,7 +176,8 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
     const oldDisplayParty = unionAcronym
       ? `${unionAcronym} — ${collegeRaw}`
       : `${unionName} — ${collegeRaw}`;
-    return { ul, ...info, collegeRaw, oldDisplayParty };
+    const orderNum: number | null = ul.order_num ?? null;
+    return { ul, ...info, collegeRaw, oldDisplayParty, orderNum };
   });
 
   // Batch-fetch les candidats DB par nom pour ceux non encore dans byName
@@ -198,7 +201,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
   const fastResult: CandidateInfo[] = [];
   let canFastPath = true;
 
-  for (const { ul, displayName, displayParty, suppleantName, etablissementName, collegeRaw, oldDisplayParty } of ulInfos) {
+  for (const { ul, displayName, displayParty, suppleantName, etablissementName, collegeRaw, oldDisplayParty, orderNum } of ulInfos) {
     const cand = byName.get(displayName)
               ?? byParty.get(displayParty)
               ?? byParty.get(oldDisplayParty)
@@ -215,6 +218,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
       suppleant: suppleantName,
       college_type: collegeRaw,
       etablissement: etablissementName || null,
+      order_num: orderNum,
     });
   }
 
@@ -223,7 +227,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
   // ─── CHEMIN LENT : synchronisation des candidats shadow ───────────────────
   const result: CandidateInfo[] = [];
 
-  for (const { ul, displayName, displayParty, suppleantName, etablissementName, collegeRaw, oldDisplayParty } of ulInfos) {
+  for (const { ul, displayName, displayParty, suppleantName, etablissementName, collegeRaw, oldDisplayParty, orderNum } of ulInfos) {
     let existingCand = byName.get(displayName)
                     ?? byParty.get(displayParty)
                     ?? byParty.get(oldDisplayParty)
@@ -251,6 +255,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
         suppleant: suppleantName,
         college_type: collegeRaw,
         etablissement: etablissementName || null,
+        order_num: orderNum,
       });
     } else {
       // Nouveau candidat absent de la DB
@@ -272,7 +277,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
             await supabase
               .from('election_candidates')
               .insert({ election_id: electionId, candidate_id: foundCand.id, is_our_candidate: false });
-            result.push({ id: foundCand.id, name: displayName, party: displayParty, suppleant: suppleantName, college_type: collegeRaw, etablissement: etablissementName || null });
+            result.push({ id: foundCand.id, name: displayName, party: displayParty, suppleant: suppleantName, college_type: collegeRaw, etablissement: etablissementName || null, order_num: orderNum });
           }
         } else {
           console.error('[candidateUtils] Erreur création candidat shadow:', insertCandErr);
@@ -291,7 +296,7 @@ async function resolveUnionListsAsCandidates(electionId: string): Promise<Candid
       }
 
       linkedCandidateIds.add(newCand.id);
-      result.push({ id: newCand.id, name: displayName, party: displayParty, suppleant: suppleantName, college_type: collegeRaw, etablissement: etablissementName || null });
+      result.push({ id: newCand.id, name: displayName, party: displayParty, suppleant: suppleantName, college_type: collegeRaw, etablissement: etablissementName || null, order_num: orderNum });
     }
   }
 

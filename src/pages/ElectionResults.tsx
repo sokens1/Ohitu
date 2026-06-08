@@ -187,7 +187,7 @@ const CandidateCard: React.FC<{
     return 'bg-gradient-to-br from-gray-400 to-gray-600 border-gray-300';
   };
 
-  const percentage = totalVotes > 0 ? (candidate.total_votes / totalVotes) * 100 : 0;
+  const percentage = candidate.percentage ?? (totalVotes > 0 ? (candidate.total_votes / totalVotes) * 100 : 0);
 
   return (
     <Card
@@ -1264,13 +1264,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       }
 
       // Format final des candidats
+      const totalCandidateVotesForPct = filteredSummaryData.reduce((sum, c) => sum + (c.total_votes || 0), 0);
       const finalCandidates: CandidateResult[] = filteredSummaryData
           .map(c => ({
             candidate_id: c.candidate_id,
             candidate_name: c.candidate_name,
             party_name: c.party || '',
             total_votes: c.total_votes || 0,
-            percentage: expressedSum > 0 ? (100 * (c.total_votes || 0)) / expressedSum : 0,
+            percentage: totalCandidateVotesForPct > 0 ? (100 * (c.total_votes || 0)) / totalCandidateVotesForPct : 0,
             rank: 0,
             seats: c.seats,
             colleges: Array.from(c.colleges),

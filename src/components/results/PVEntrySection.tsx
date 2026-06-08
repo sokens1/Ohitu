@@ -1291,8 +1291,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
           : candidatesData;
 
         // Déduplication par syndicat (clé = party avant " — ") pour éviter les doublons
-        // quand plusieurs titulaires existent pour le même syndicat+collège (cas multi-sièges).
-        // On conserve le premier id (vote reference) et on agrège les noms des titulaires.
+        // quand plusieurs sièges existent pour le même syndicat+collège (cas multi-sièges).
+        // Les union_lists sont triées par id ASC (ordre d'import) : le siège 1 arrive en premier.
+        // On conserve le order_num du PREMIER enregistrement (tête de liste), identique à ElectionDetailView.
         const visibleCandidates = isPro ? (() => {
           const syndicatMap = new Map<string, any>();
           rawVisibleCandidates.forEach(c => {
@@ -1303,6 +1304,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               const existing = syndicatMap.get(key);
               existing.allNames.push(c.name);
               existing.allSuppleants.push(c.suppleant || null);
+              // Ne pas toucher à order_num : on garde celui du premier enregistrement (siège 1)
             }
           });
           return Array.from(syndicatMap.values());
@@ -1365,9 +1367,17 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             const names: string[] = Array.isArray(candidate.allNames) ? candidate.allNames : [candidate.name];
                             const suppleants: (string | null)[] = Array.isArray(candidate.allSuppleants) ? candidate.allSuppleants : [candidate.suppleant || null];
                             const hasMultiple = names.length > 1;
+                            const orderNum = candidate.order_num ?? null;
                             return (
                               <div key={candidate.id} className="p-3 border border-gray-200 rounded-xl bg-white space-y-2">
-                                <p className="font-bold text-blue-700 text-sm">{syndicat}</p>
+                                <p className="font-bold text-blue-700 text-sm flex items-center gap-1.5">
+                                  {orderNum != null && (
+                                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold flex-shrink-0">
+                                      #{orderNum}
+                                    </span>
+                                  )}
+                                  {syndicat}
+                                </p>
                                 {hasMultiple ? (
                                   <div className="grid grid-cols-2 gap-2">
                                     {names.map((n, i) => (

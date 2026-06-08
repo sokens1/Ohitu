@@ -432,7 +432,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           });
         }
 
-        setRawResultsData({ crRows, pvMeta, baseVotesByCandidate: { ...votesByCandidate }, availableCenters, availableColleges, bureauSeats, collegeSeatsMap });
+        setRawResultsData({ crRows, pvMeta, baseVotesByCandidate: { ...votesByCandidate }, availableCenters, availableColleges, bureauSeats, collegeSeatsMap, pvQuorumFailed });
 
         if (isPro) {
           try {
@@ -761,7 +761,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
   }>(() => {
     const empty = { seats: {} as Record<string, number>, manualTies: [] as { group: string; parties: string[] }[] };
     if (!rawResultsData || !isProfessionalElection(electionType)) return empty;
-    const { crRows, pvMeta, baseVotesByCandidate, bureauSeats } = rawResultsData;
+    const { crRows, pvMeta, baseVotesByCandidate, bureauSeats, pvQuorumFailed } = rawResultsData;
 
     const activeCenter  = filterCenter;
     const activeCollege = filterCollege ? normalizeCollegeKey(filterCollege) || '' : '';
@@ -811,6 +811,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       const meta = pvMeta.get(pvId);
       if (!meta) return;
       if (meta.status === 'entered' || meta.status === 'saisi') return;
+      if (pvQuorumFailed?.has(pvId)) return; // quorum non atteint → exclu des sièges
       if (activeCenter && meta.centerId !== activeCenter) return;
       if (activeCollege && meta.collegeType !== activeCollege) return;
 
