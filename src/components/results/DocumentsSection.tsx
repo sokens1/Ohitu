@@ -46,6 +46,7 @@ interface Center {
   id: string;
   name: string;
   assignedColleges: string[]; // [] = tous
+  bureauNames?: string[];     // noms des bureaux assignés (president-bureau / suppleant)
 }
 
 interface ReviewState {
@@ -67,7 +68,7 @@ const DOC_TYPE_LABEL: Record<string, string> = {
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<any> }> = {
   pending:   { label: 'En attente',          color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Clock },
   validated: { label: 'Validé',              color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle },
-  reserved:  { label: 'Validé avec réserve', color: 'bg-orange-100 text-orange-700 border-orange-200', icon: AlertTriangle },
+  reserved:  { label: 'Validé avec réserves', color: 'bg-orange-100 text-orange-700 border-orange-200', icon: AlertTriangle },
   rejected:  { label: 'Rejeté',              color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
 };
 
@@ -170,12 +171,22 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
       if (centerIds.length === 0) { setDocs([]); setCenters([]); setAllCollegeTypes([]); return; }
 
-      // 2. Noms des centres
+      // 2. Noms des centres (et bureaux en fallback si center_id référence voting_bureaux)
       const { data: vcRows } = await supabase
         .from('voting_centers')
         .select('id, name')
         .in('id', centerIds);
       const centerMap = new Map((vcRows ?? []).map((v: any) => [v.id, v.name]));
+
+      // Certains center_id peuvent référencer voting_bureaux (élections pro)
+      const unmatchedIds = centerIds.filter(id => !centerMap.has(id));
+      if (unmatchedIds.length > 0) {
+        const { data: vbRows } = await supabase
+          .from('voting_bureaux')
+          .select('id, name')
+          .in('id', unmatchedIds);
+        (vbRows ?? []).forEach((b: any) => centerMap.set(b.id, b.name));
+      }
 
       // 3. Collèges disponibles pour cette élection (référence)
       const { data: ecColleges } = await supabase
@@ -190,7 +201,26 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         : ['cadres', 'employes', 'ouvriers', 'general'];
       setAllCollegeTypes(electionColleges);
 
+      // Noms des bureaux assignés pour president-bureau / suppleant-president
+      const BUREAU_ROLES = ['president-bureau', 'suppleant-president'];
+      let bureauNameMap = new Map<string, string>(); // bureauId → name
+      if (canUpload && user?.role && BUREAU_ROLES.includes(user.role)) {
+        const allBureauIds: string[] = Object.values(user.assigned_center_bureaux ?? {}).flat() as string[];
+        if (allBureauIds.length > 0) {
+          const { data: vbNameRows } = await supabase
+            .from('voting_bureaux')
+            .select('id, name')
+            .in('id', allBureauIds);
+          bureauNameMap = new Map((vbNameRows ?? []).map((b: any) => [b.id, b.name]));
+        }
+      }
+
       const builtCenters: Center[] = centerIds.map(cid => {
+        const assignedBureauIds: string[] = (user?.assigned_center_bureaux ?? {})[cid] ?? [];
+        const bureauNames = assignedBureauIds
+          .map(bid => bureauNameMap.get(bid))
+          .filter((n): n is string => !!n);
+
         if (canUpload) {
           // Président : UNIQUEMENT les collèges assignés pour ce centre
           // Si liste vide → "vide = tous" → tous les collèges de l'élection
@@ -199,6 +229,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
             id: cid,
             name: (centerMap.get(cid) ?? cid) as string,
             assignedColleges: assigned.length > 0 ? assigned : electionColleges,
+            bureauNames: bureauNames.length > 0 ? bureauNames : undefined,
           };
         }
         return {
@@ -232,10 +263,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
       if (error) { toast.error('Erreur chargement documents'); return; }
 
-      // 4. Enrichir avec noms uploader
-      const uploaderIds = [...new Set((docRows ?? []).map((d: any) => d.uploaded_by))];
+      // 4. Enrichir avec noms uploader — RPC pour contourner le RLS sur `users`
+      // (qui limite la lecture à sa propre ligne pour les rôles non-admin)
+      const uploaderIds = [...new Set((docRows ?? []).map((d: any) => d.uploaded_by).filter(Boolean))];
       const { data: uploaderRows } = uploaderIds.length
-        ? await supabase.from('users').select('id, name').in('id', uploaderIds)
+        ? await supabase.rpc('get_user_names', { p_ids: uploaderIds })
         : { data: [] };
       const uploaderMap = new Map((uploaderRows ?? []).map((u: any) => [u.id, u.name]));
 
@@ -497,7 +529,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                   'bg-yellow-50 text-yellow-700 border-yellow-200'
                 }`}>
                   {previewDoc.status === 'validated' ? '✅ Validé' :
-                   previewDoc.status === 'reserved'  ? '⚠️ Réserve' :
+                   previewDoc.status === 'reserved'  ? '⚠️ Réserves' :
                    previewDoc.status === 'rejected'  ? '❌ Rejeté' : '⏳ En attente'}
                 </span>
               </div>
@@ -661,7 +693,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const CONFIRM_CFG = {
     delete:   { label: 'Supprimer ce document ?',        color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',          icon: Trash2 },
     validate: { label: 'Valider ce document ?',          color: 'text-emerald-700', confirmCls: 'bg-emerald-600 hover:bg-emerald-700 text-white',   icon: CheckCircle   },
-    reserve:  { label: 'Valider avec réserve ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: AlertTriangle       },
+    reserve:  { label: 'Valider avec réserves ?',         color: 'text-orange-700',  confirmCls: 'bg-orange-500 hover:bg-orange-600 text-white',     icon: AlertTriangle       },
     reject:   { label: 'Rejeter ce document ?',          color: 'text-red-700',     confirmCls: 'bg-red-600 hover:bg-red-700 text-white',           icon: XCircle        },
     retract:  { label: 'Rétracter la validation ?',      color: 'text-amber-700',   confirmCls: 'bg-amber-500 hover:bg-amber-600 text-white',       icon: RefreshCw     },
   };
@@ -745,6 +777,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-gray-900 text-sm truncate">{center.name}</p>
+                  {center.bureauNames && center.bureauNames.length > 0 && (
+                    <p className="text-[11px] text-teal-600 font-medium truncate">
+                      {center.bureauNames.join(' · ')}
+                    </p>
+                  )}
                   <p className={`text-[11px] ${allDone ? 'text-emerald-600' : 'text-gray-400'}`}>
                     {allDone ? '✓ Tous les documents déposés' : `${centerFilled}/${centerTotal} document${centerTotal > 1 ? 's' : ''}`}
                   </p>
@@ -894,7 +931,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const STATUS_MD: Record<string, { icon: React.ComponentType<any>; color: string; label: string }> = {
     pending:   { icon: Clock,     color: 'text-amber-500',   label: 'En attente'  },
     validated: { icon: BadgeCheck,    color: 'text-emerald-500', label: 'Validé'      },
-    reserved:  { icon: AlertTriangle,     color: 'text-orange-500',  label: 'Réserve'     },
+    reserved:  { icon: AlertTriangle,     color: 'text-orange-500',  label: 'Réserves'     },
     rejected:  { icon: EyeOff, color: 'text-red-500',     label: 'Rejeté'      },
   };
 
@@ -902,7 +939,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     { label: 'Tous',       count: docs.length,   bg: adminStatusFilter === 'all'       ? 'bg-[#1B2E5A] text-white border-[#1B2E5A]'        : 'bg-white text-gray-600 border-gray-200',       key: 'all'       },
     { label: 'En attente', count: statPending,   bg: adminStatusFilter === 'pending'   ? 'bg-amber-500 text-white border-amber-500'         : 'bg-white text-amber-600 border-amber-200',     key: 'pending'   },
     { label: 'Validés',    count: statValidated, bg: adminStatusFilter === 'validated' ? 'bg-emerald-600 text-white border-emerald-600'     : 'bg-white text-emerald-600 border-emerald-200', key: 'validated' },
-    { label: 'Réserve',    count: statReserved,  bg: adminStatusFilter === 'reserved'  ? 'bg-orange-500 text-white border-orange-500'       : 'bg-white text-orange-500 border-orange-200',  key: 'reserved'  },
+    { label: 'Réserves',    count: statReserved,  bg: adminStatusFilter === 'reserved'  ? 'bg-orange-500 text-white border-orange-500'       : 'bg-white text-orange-500 border-orange-200',  key: 'reserved'  },
     { label: 'Rejetés',    count: statRejected,  bg: adminStatusFilter === 'rejected'  ? 'bg-red-600 text-white border-red-600'             : 'bg-white text-red-500 border-red-200',         key: 'rejected'  },
   ];
 
@@ -1114,7 +1151,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                   ) : (
                     /* ── Formulaire de validation ── */
                     <div className="space-y-1.5">
-                      <Textarea rows={2} placeholder="Commentaire (requis pour Réserve/Rejet)…"
+                      <Textarea rows={2} placeholder="Commentaire (requis pour Réserves/Rejet)…"
                         value={review?.comment ?? ''}
                         onChange={e => setReview(prev => prev ? { ...prev, comment: e.target.value } : null)}
                         className="text-xs resize-none rounded-lg border-gray-200 focus:border-[#1B2E5A]" />
@@ -1127,7 +1164,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                         <button disabled={review?.submitting || commentReq}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'reserve', comment: review?.comment })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 hover:bg-orange-100 disabled:opacity-40">
-                          <AlertTriangle size={12} /> Réserve
+                          <AlertTriangle size={12} /> Réserves
                         </button>
                         <button disabled={review?.submitting || commentReq}
                           onClick={() => setConfirmAction({ docId: doc.id, type: 'reject', comment: review?.comment })}

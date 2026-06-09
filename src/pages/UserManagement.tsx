@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -61,7 +61,7 @@ const ADMIN_ASSIGNABLE_ROLES: { value: UserRole; label: string; disabled?: boole
   { value: 'observateur',            label: 'Observateur' },
   { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  { value: 'suppleant-president',    label: "Suppléant Président" },
+  { value: 'suppleant-president',    label: "Suppléant Président de Bureau" },
 ];
 
 // Tous les rôles (super-admin seulement)
@@ -73,7 +73,7 @@ const ALL_ROLES: { value: UserRole; label: string; disabled?: boolean }[] = [
   { value: 'observateur',            label: 'Observateur' },
   { value: 'employeur',              label: 'Employeur' },
   { value: 'president-etablissement', label: "Président de Bureau" },
-  { value: 'suppleant-president',    label: "Suppléant Président" },
+  { value: 'suppleant-president',    label: "Suppléant Président de Bureau" },
 ];
 
 const ROLE_BADGE: Record<UserRole, string> = {
@@ -209,6 +209,8 @@ const UserManagement = () => {
   const [availableCenters,  setAvailableCenters]  = useState<{ id: string; name: string }[]>([]);
   const [availableBureaux,  setAvailableBureaux]  = useState<{ id: string; name: string; centerId: string }[]>([]);
   const [availableColleges, setAvailableColleges] = useState<{ value: string; label: string }[]>([]);
+  /** map centerId → college_types ayant au moins un siège dans cet établissement */
+  const [centerCollegeTypes, setCenterCollegeTypes] = useState<Record<string, string[]>>({});
 
   // États d'opération
   const [creating, setCreating] = useState(false);
@@ -336,67 +338,141 @@ const UserManagement = () => {
   useEffect(() => {
     const loadCentersAndAssignables = async () => {
       if (!ROLES_WITH_CENTERS.includes(fRole) || fElectionIds.length === 0) {
-        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); return;
+        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); setCenterCollegeTypes({}); return;
       }
       try {
         const { data: ecRows } = await supabase
           .from('election_centers').select('center_id').in('election_id', fElectionIds);
         const centerIds = Array.from(new Set((ecRows || []).map((r: any) => r.center_id).filter(Boolean)));
-        if (centerIds.length === 0) { setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); return; }
+        if (centerIds.length === 0) { setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); setCenterCollegeTypes({}); return; }
         const { data: centersData } = await supabase
           .from('voting_centers').select('id, name').in('id', centerIds).order('name');
         setAvailableCenters(centersData || []);
 
+        const COLLEGE_LABELS: Record<string, string> = {
+          cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
+        };
+
+        // Les imports Excel stockent des libellés bruts ('Encadrement', 'Cadre'…) tandis que
+        // la création manuelle (AddCenterModal) stocke déjà les clés canoniques ('general', 'cadres'…) :
+        // on normalise pour que les deux formats soient reconnus (même logique que ElectionDetailView)
+        const collegeKeyAliases: Record<string, string> = {
+          encadrement: 'general', cadre: 'cadres',
+          maîtrise: 'employes', maitrise: 'employes',
+          exécution: 'ouvriers', execution: 'ouvriers',
+        };
+        const normalizeCollegeKey = (raw: unknown): string => {
+          const lower = String(raw ?? '').toLowerCase().trim();
+          return collegeKeyAliases[lower] || lower;
+        };
+
+        // Sièges par collège et par établissement (voting_bureaux = source de vérité par établissement)
+        const { data: bureauxFull } = await supabase
+          .from('voting_bureaux')
+          .select('id, name, center_id, college, college_type, seats_to_fill, election_id')
+          .in('center_id', centerIds)
+          .in('election_id', fElectionIds)
+          .order('name');
+
+        const collegeMap: Record<string, string[]> = {};
+        (bureauxFull || []).forEach((b: any) => {
+          const seats = Number(b.seats_to_fill) || 0;
+          // `college` est le champ canonique (pseudo-bureaux des élections professionnelles) ;
+          // `college_type` sert de repli pour les anciennes données / imports
+          const type = normalizeCollegeKey(b.college || b.college_type);
+          if (seats > 0 && type) {
+            if (!collegeMap[b.center_id]) collegeMap[b.center_id] = [];
+            if (!collegeMap[b.center_id].includes(type)) collegeMap[b.center_id].push(type);
+          }
+        });
+        setCenterCollegeTypes(collegeMap);
+
         if (ROLES_WITH_BUREAUX.includes(fRole)) {
-          const { data: bureauxData } = await supabase
-            .from('voting_bureaux').select('id, name, center_id').in('center_id', centerIds).order('name');
           setAvailableBureaux(
-            (bureauxData || [])
-              .filter(b => !/^college/i.test(b.name.trim()))
+            (bureauxFull || [])
+              .filter(b => !/^college/i.test(String(b.name).trim()))
               .map(b => ({ id: b.id, name: b.name, centerId: b.center_id }))
           );
-          // Charger aussi les collèges pour le président (assigned_center_colleges)
-          const { data: collegesData } = await supabase
-            .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
-          const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
-          const COLLEGE_LABELS: Record<string, string> = {
-            cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-          };
-          setAvailableColleges(
-            distinctTypes.length > 0
-              ? distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }))
-              : [
-                  { value: 'cadres',   label: 'Cadres' },
-                  { value: 'employes', label: 'Maîtrise' },
-                  { value: 'ouvriers', label: 'Exécution' },
-                  { value: 'general',  label: 'Encadrement' },
-                ]
-          );
         } else {
-          const { data: collegesData } = await supabase
-            .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
-          const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
-          const COLLEGE_LABELS: Record<string, string> = {
-            cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
-          };
-          setAvailableColleges(
-            distinctTypes.length > 0
-              ? distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }))
-              : [
-                  { value: 'cadres',   label: 'Cadres' },
-                  { value: 'employes', label: 'Maîtrise' },
-                  { value: 'ouvriers', label: 'Exécution' },
-                  { value: 'general',  label: 'Encadrement' },
-                ]
-          );
           setAvailableBureaux([]);
         }
+
+        // Liste de référence des collèges existants pour l'élection (structure globale)
+        const { data: collegesData } = await supabase
+          .from('electoral_colleges').select('college_type').in('election_id', fElectionIds);
+        const distinctTypes = Array.from(new Set((collegesData || []).map((c: any) => c.college_type).filter(Boolean)));
+        setAvailableColleges(
+          distinctTypes.length > 0
+            ? distinctTypes.map(t => ({ value: t, label: COLLEGE_LABELS[t] ?? t }))
+            : [
+                { value: 'cadres',   label: 'Cadres' },
+                { value: 'employes', label: 'Maîtrise' },
+                { value: 'ouvriers', label: 'Exécution' },
+                { value: 'general',  label: 'Encadrement' },
+              ]
+        );
       } catch {
-        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]);
+        setAvailableCenters([]); setAvailableBureaux([]); setAvailableColleges([]); setCenterCollegeTypes({});
       }
     };
     loadCentersAndAssignables();
   }, [fRole, fElectionIds]);
+
+  /** Collèges à proposer pour un établissement donné : uniquement ceux ayant au moins un siège, avec repli sur la liste globale si l'info n'est pas disponible */
+  const collegesForCenter = (centerId: string): { value: string; label: string }[] => {
+    const allowedTypes = centerCollegeTypes[centerId];
+    if (allowedTypes && allowedTypes.length > 0) {
+      return availableColleges.filter(col => allowedTypes.includes(col.value));
+    }
+    return availableColleges;
+  };
+
+  /**
+   * Map bureauId → titulaire actuel par rôle (président d'établissement / suppléant).
+   * Un bureau ne doit être détenu que par UNE seule personne par rôle ; on exclut
+   * l'utilisateur en cours d'édition pour ne pas se bloquer soi-même.
+   */
+  const bureauHolders = useMemo(() => {
+    const map: Record<string, { president?: { id: string; name: string }; suppleant?: { id: string; name: string } }> = {};
+    users.forEach(u => {
+      if (editingUser && u.id === editingUser.id) return;
+      if (u.role !== 'president-etablissement' && u.role !== 'suppleant-president') return;
+      const slot = u.role === 'president-etablissement' ? 'president' : 'suppleant';
+      Object.values(u.assigned_center_bureaux ?? {}).forEach(ids => {
+        (ids ?? []).forEach(bureauId => {
+          if (!map[bureauId]) map[bureauId] = {};
+          if (!map[bureauId][slot]) map[bureauId][slot] = { id: u.id, name: u.name };
+        });
+      });
+    });
+    return map;
+  }, [users, editingUser]);
+
+  /** Titulaire actuel d'un bureau pour le rôle en cours de saisie (s'il y en a un autre que l'utilisateur édité) */
+  const bureauHolderForCurrentRole = (bureauId: string): { id: string; name: string } | undefined => {
+    if (fRole !== 'president-etablissement' && fRole !== 'suppleant-president') return undefined;
+    const slot = fRole === 'president-etablissement' ? 'president' : 'suppleant';
+    return bureauHolders[bureauId]?.[slot];
+  };
+
+  /** Bloque la sauvegarde si un bureau sélectionné est déjà détenu par quelqu'un d'autre pour ce même rôle */
+  const findBureauConflicts = (): string[] => {
+    if (fRole !== 'president-etablissement' && fRole !== 'suppleant-president') return [];
+    const seen = new Set<string>();
+    const conflicts: string[] = [];
+    Object.values(fCenterBureaux).forEach(ids => {
+      (ids ?? []).forEach(bureauId => {
+        if (seen.has(bureauId)) return;
+        seen.add(bureauId);
+        const holder = bureauHolderForCurrentRole(bureauId);
+        if (holder) {
+          const label = availableBureaux.find(b => b.id === bureauId)?.name ?? bureauId;
+          conflicts.push(`${label} (déjà assigné à ${holder.name})`);
+        }
+      });
+    });
+    return conflicts;
+  };
 
   // ── Création via l'endpoint serveur (évite la limite de taux de auth.signUp) ─
   const handleCreate = async () => {
@@ -411,6 +487,11 @@ const UserManagement = () => {
     }
     if (isAdmin && fElectionIds.length === 0) {
       toast.error('Vous devez assigner au moins une élection à cet utilisateur'); return;
+    }
+    const bureauConflicts = findBureauConflicts();
+    if (bureauConflicts.length > 0) {
+      toast.error(`Bureau déjà attribué — un seul ${fRole === 'president-etablissement' ? 'président' : 'suppléant'} par bureau : ${bureauConflicts.join(', ')}`);
+      return;
     }
     setCreating(true);
     try {
@@ -495,12 +576,19 @@ const UserManagement = () => {
     if (!fEmail.trim() && !fPhone.trim()) {
       toast.error('Au moins un identifiant est requis : email ou numéro de téléphone'); return;
     }
+    const bureauConflicts = findBureauConflicts();
+    if (bureauConflicts.length > 0) {
+      toast.error(`Bureau déjà attribué — un seul ${fRole === 'president-etablissement' ? 'président' : 'suppléant'} par bureau : ${bureauConflicts.join(', ')}`);
+      return;
+    }
     setUpdating(true);
     try {
       // Payload de base (colonnes toujours présentes)
       const updatePayload: Record<string, unknown> = {
         name: fName.trim(),
-        email: fEmail.trim(),
+        // Email optionnel : envoyer null (et non '') pour ne pas violer la contrainte unique
+        // users_email_key — plusieurs comptes avec une chaîne vide seraient considérés en conflit
+        email: fEmail.trim() || null,
         phone: fPhone.trim() || null,
         role: fRole,
         is_active: fActive,
@@ -531,8 +619,14 @@ const UserManagement = () => {
 
       if (error) {
         console.error('Erreur mise à jour utilisateur:', error);
-        const msg = (error as any)?.message ?? '';
-        if (msg.includes('column') && msg.includes('does not exist')) {
+        const msg  = (error as any)?.message ?? '';
+        const code = (error as any)?.code ?? '';
+        if (code === '23505' && msg.includes('users_email_key')) {
+          const emailRef = fEmail.trim() ? ` (${fEmail.trim()})` : '';
+          toast.error(`Cet email${emailRef} est déjà utilisé par un autre compte.`);
+        } else if (code === '23505') {
+          toast.error('Un compte avec ces informations existe déjà.');
+        } else if (msg.includes('column') && msg.includes('does not exist')) {
           toast.error('Colonnes manquantes en base — appliquez les migrations SQL dans Supabase.');
         } else {
           toast.error(`Échec de la mise à jour : ${msg || 'erreur inconnue'}`);
@@ -753,8 +847,11 @@ const UserManagement = () => {
                 const selectedVals = currentMap[c.id] ?? [];
                 const centerItems  = isBureaux
                   ? availableBureaux.filter(b => b.centerId === c.id).map(b => ({ val: b.id,    lbl: b.name }))
-                  : availableColleges.map(col => ({ val: col.value, lbl: col.label }));
-                const allItemsSel  = centerItems.length > 0 && centerItems.every(i => selectedVals.includes(i.val));
+                  : collegesForCenter(c.id).map(col => ({ val: col.value, lbl: col.label }));
+                // Bureaux déjà détenus par quelqu'un d'autre pour ce même rôle (président OU suppléant) : non sélectionnables
+                const isItemTaken  = (val: string) => isBureaux && !selectedVals.includes(val) && !!bureauHolderForCurrentRole(val);
+                const selectable   = centerItems.filter(i => !isItemTaken(i.val));
+                const allItemsSel  = selectable.length > 0 && selectable.every(i => selectedVals.includes(i.val));
 
                 const toggleCenter = () =>
                   setCurrentMap(prev => {
@@ -763,16 +860,18 @@ const UserManagement = () => {
                     return next;
                   });
 
-                const toggleItem = (val: string) =>
+                const toggleItem = (val: string) => {
+                  if (isItemTaken(val)) return;
                   setCurrentMap(prev => {
                     const list = prev[c.id] ?? [];
                     return { ...prev, [c.id]: list.includes(val) ? list.filter(v => v !== val) : [...list, val] };
                   });
+                };
 
                 const toggleAllItems = () =>
                   setCurrentMap(prev => ({
                     ...prev,
-                    [c.id]: allItemsSel ? [] : centerItems.map(i => i.val),
+                    [c.id]: allItemsSel ? [] : selectable.map(i => i.val),
                   }));
 
                 return (
@@ -806,17 +905,25 @@ const UserManagement = () => {
                           </button>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {centerItems.map(({ val, lbl }) => (
-                            <label
-                              key={val}
-                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-xs font-medium transition-all ${
-                                selectedVals.includes(val) ? `${cfg.chip} text-white` : cfg.chipOff
-                              }`}
-                            >
-                              <input type="checkbox" checked={selectedVals.includes(val)} onChange={() => toggleItem(val)} className="sr-only" />
-                              {lbl}
-                            </label>
-                          ))}
+                          {centerItems.map(({ val, lbl }) => {
+                            const taken = isItemTaken(val);
+                            const holderName = isBureaux ? bureauHolderForCurrentRole(val)?.name : undefined;
+                            return (
+                              <label
+                                key={val}
+                                title={taken ? `Déjà assigné à ${holderName}` : undefined}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                                  selectedVals.includes(val) ? `${cfg.chip} text-white cursor-pointer`
+                                  : taken ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed line-through'
+                                  : `${cfg.chipOff} cursor-pointer`
+                                }`}
+                              >
+                                <input type="checkbox" checked={selectedVals.includes(val)} disabled={taken} onChange={() => toggleItem(val)} className="sr-only" />
+                                {lbl}
+                                {taken && <span className="text-[9px] italic">· {holderName}</span>}
+                              </label>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -827,9 +934,11 @@ const UserManagement = () => {
                     )}
 
                     {/* Collèges assignés — uniquement pour president-etablissement */}
-                    {isBureaux && isSelected && availableColleges.length > 0 && (() => {
+                    {isBureaux && isSelected && (() => {
+                      const establishmentColleges = collegesForCenter(c.id);
+                      if (establishmentColleges.length === 0) return null;
                       const selColleges   = fCenterColleges[c.id] ?? [];
-                      const allColSel     = availableColleges.length > 0 && availableColleges.every(col => selColleges.includes(col.value));
+                      const allColSel     = establishmentColleges.every(col => selColleges.includes(col.value));
                       const toggleCollege = (val: string) =>
                         setFCenterColleges(prev => {
                           const list = prev[c.id] ?? [];
@@ -838,7 +947,7 @@ const UserManagement = () => {
                       const toggleAllCol = () =>
                         setFCenterColleges(prev => ({
                           ...prev,
-                          [c.id]: allColSel ? [] : availableColleges.map(col => col.value),
+                          [c.id]: allColSel ? [] : establishmentColleges.map(col => col.value),
                         }));
                       return (
                         <div className="px-3 pb-2 pt-1.5 bg-teal-50/70 border-t border-teal-100 space-y-1.5">
@@ -849,7 +958,7 @@ const UserManagement = () => {
                             </button>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
-                            {availableColleges.map(col => (
+                            {establishmentColleges.map(col => (
                               <label
                                 key={col.value}
                                 className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-xs font-medium transition-all ${

@@ -72,6 +72,7 @@ const PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:dashboard', 'view:elections', 'view:results',
     'results:validate', // voit l'onglet résultats en lecture seule
     'results:observe',
+    'results:documents', 'documents:download', // accès aux documents en lecture seule (pas d'upload ni de revue)
   ],
   'suppleant-president': [
     // Suppléant du président : peut uniquement déposer des documents
@@ -122,7 +123,7 @@ export function useRBAC() {
     // Compatibilité : première élection assignée (ou null)
     assignedElectionId: assignedElectionIds[0] ?? null,
     assignedElectionIds,
-    isGlobalAdmin: user?.role === 'super-admin',
+    isGlobalAdmin: user?.role === 'super-admin' || user?.role === 'admin',
     isAdmin: user?.role === 'admin',
     isOperational: OPERATIONAL_ROLES.includes(user?.role ?? '' as UserRole),
   };

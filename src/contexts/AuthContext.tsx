@@ -1,5 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import auditService from '@/services/auditService';
 
@@ -96,6 +97,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     init();
   }, []);
+
+  // Surveille en temps réel la désactivation du compte pendant une session active
+  // → déconnexion immédiate, sans attendre un rechargement de page
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase
+      .channel(`account-status:${user.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'users',
+        filter: `id=eq.${user.id}`,
+      }, async (payload) => {
+        const updated = payload.new as { is_active?: boolean } | null;
+        if (updated && updated.is_active === false) {
+          toast.error('Votre compte a été désactivé. Vous allez être déconnecté.');
+          setUser(null);
+          localStorage.removeItem('ohitu-user');
+          localStorage.removeItem('results_selected_election');
+          localStorage.removeItem('results_active_tab');
+          await supabase.auth.signOut();
+        }
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   const login = async (emailOrPhone: string, password: string): Promise<boolean> => {
     try {

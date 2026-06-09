@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRBAC } from '@/hooks/useRBAC';
 import { fetchElectionById, fetchElectionBySlug, fetchPublicElections } from '../api/elections';
 import { fetchElectionSummary, fetchCenterSummary, fetchBureauSummary, fetchCenterSummaryByCandidate, fetchBureauSummaryByCandidate } from '../api/results';
 import { toast } from 'sonner';
@@ -288,6 +290,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   // electionId est résolu à partir du slug, ou directement depuis electionIdOverride (mode admin preview)
   const [electionId, setElectionId] = useState<string | undefined>(electionIdOverride);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { isGlobalAdmin, assignedElectionIds } = useRBAC();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [results, setResults] = useState<ElectionResults | null>(null);
   const [loading, setLoading] = useState(true);
@@ -331,9 +335,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   const [totalGroupCount, setTotalGroupCount] = useState<number>(0);
   // Sièges par groupe (centerId_collegeType → seats_to_fill)
   const [bureauSeatsMap, setBureauSeatsMap] = useState<Map<string, number>>(new Map());
-  // Modal politique de confidentialité
-  const [privacyOpen, setPrivacyOpen] = useState(false);
-  
   // État pour stocker les IDs des bureaux avec PV publiés
   const [publishedBureauIds, setPublishedBureauIds] = useState<Set<string>>(new Set());
 
@@ -572,7 +573,16 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       try {
         setElectionsLoading(true);
         const elections = await fetchPublicElections();
-        setAvailableElections(elections || []);
+        const all = elections || [];
+
+        // Utilisateur connecté, rôle restreint (non global-admin) avec élections assignées
+        // → ne montrer que ses élections assignées
+        if (user && !isGlobalAdmin && assignedElectionIds.length > 0) {
+          const assignedSet = new Set(assignedElectionIds.map(String));
+          setAvailableElections(all.filter((e: any) => assignedSet.has(String(e.id))));
+        } else {
+          setAvailableElections(all);
+        }
       } catch (error) {
         console.error('Erreur lors du chargement des élections:', error);
       } finally {
@@ -581,7 +591,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     };
 
     fetchAvailableElections();
-  }, []);
+  }, [user, isGlobalAdmin, assignedElectionIds]);
 
   // Reset couverture quand l'élection change (totalBureaux est désormais défini dans fetchElectionResults)
   useEffect(() => {
@@ -3286,34 +3296,19 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 © {new Date(results.last_updated).getFullYear()} o'Hitu. Tous droits réservés.
               </div>
               <div className="flex items-center justify-center gap-3 text-[10px] sm:text-xs text-white/70">
-                <button
-                  onClick={() => setPrivacyOpen(true)}
+                <Link
+                  to="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="hover:text-white underline underline-offset-2 transition-colors"
                 >
                   Politique de confidentialité
-                </button>
+                </Link>
               </div>
             </div>
           </div>
         </footer>
       </div>
-
-      {/* Modal Politique de confidentialité */}
-      <Dialog open={privacyOpen} onOpenChange={setPrivacyOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Politique de confidentialité
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 text-center text-gray-500 text-sm">
-            <p className="font-medium text-gray-700 mb-2">Contenu à venir</p>
-            <p className="text-xs text-gray-400">
-              La politique de confidentialité de la plateforme o'Hitu sera publiée prochainement.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Chatbot flottant */}
       <FloatingChatbot />

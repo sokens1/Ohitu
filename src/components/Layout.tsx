@@ -1,6 +1,8 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import type { UserRole } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import {
   Home,
@@ -50,6 +52,9 @@ const getNotificationIcon = (severity: string) => {
   }
 };
 
+// Rôles avec navigation allégée : pas d'Élections ni de Tableau de bord
+const LIMITED_NAV_ROLES: UserRole[] = ['president-bureau', 'president-etablissement', 'suppleant-president', 'observateur', 'employeur'];
+
 const ALL_MENU_ITEMS = [
   { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard',     permission: 'view:dashboard'  as const },
   { icon: Calendar, label: 'Élections',             path: '/elections',     permission: 'view:elections'  as const },
@@ -67,6 +72,20 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const isMobile = useIsMobile();
+  const [bureauNames, setBureauNames] = useState<string[]>([]);
+
+  // Charger les noms des bureaux assignés pour president-bureau et suppleant-president
+  useEffect(() => {
+    const BUREAU_ROLES: UserRole[] = ['president-bureau', 'suppleant-president'];
+    if (!user || !BUREAU_ROLES.includes(user.role)) { setBureauNames([]); return; }
+    const ids: string[] = Object.values(user.assigned_center_bureaux ?? {}).flat() as string[];
+    if (ids.length === 0) { setBureauNames([]); return; }
+    supabase
+      .from('voting_bureaux')
+      .select('name')
+      .in('id', ids)
+      .then(({ data }) => setBureauNames((data ?? []).map((b: any) => b.name)));
+  }, [user?.id, user?.role]);
   const {
     notifications,
     unreadCount,
@@ -75,7 +94,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     removeNotification,
   } = useNotifications();
 
-  const menuItems = ALL_MENU_ITEMS.filter(item => can(item.permission));
+  const isLimitedNavRole = !!user && LIMITED_NAV_ROLES.includes(user.role);
+
+  const menuItems = ALL_MENU_ITEMS
+    .filter(item => can(item.permission))
+    .filter(item => !isLimitedNavRole || (item.path !== '/dashboard' && item.path !== '/elections'));
 
   const handleLogout = () => {
     logout();
@@ -162,7 +185,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   : user?.role === 'employeur'              ? 'Employeur'
                   : user?.role === 'president-bureau'        ? 'Président de Bureau'
                   : user?.role === 'president-etablissement' ? 'Président de Bureau'
-                  : user?.role === 'suppleant-president'    ? 'Suppléant Président'
+                  : user?.role === 'suppleant-president'    ? 'Suppléant Président de Bureau'
                   : user?.role}
               </p>
             </div>
@@ -317,7 +340,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                  : user?.role === 'employeur'              ? 'Employeur'
                  : user?.role === 'president-bureau'       ? 'Président de Bureau'
                  : user?.role === 'president-etablissement'? 'Président de Bureau'
-                 : user?.role === 'suppleant-president'   ? 'Suppléant Président'
+                 : user?.role === 'suppleant-president'   ? 'Suppléant Président de Bureau'
                  : user?.role}
                 </p>
               </div>

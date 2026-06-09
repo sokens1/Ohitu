@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Eye, EyeOff, ExternalLink, ChevronDown, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
+import { useRBAC } from '@/hooks/useRBAC';
 import ElectionResults from './ElectionResults';
 
 interface ElectionOption {
@@ -14,21 +15,37 @@ interface ElectionOption {
 
 const AdminPublicPreview: React.FC = () => {
   const navigate = useNavigate();
+  const { isGlobalAdmin, assignedElectionIds } = useRBAC();
   const [elections, setElections] = useState<ElectionOption[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase
-      .from('elections')
-      .select('id, title, status, is_published, is_public_visible')
-      .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        setElections(data || []);
-        if (data && data.length > 0) setSelectedId(data[0].id);
+    const fetch = async () => {
+      let query = supabase
+        .from('elections')
+        .select('id, title, status, is_published, is_public_visible')
+        .order('created_at', { ascending: false });
+
+      // Rôle restreint → limiter aux élections assignées
+      if (!isGlobalAdmin && assignedElectionIds.length > 0) {
+        query = assignedElectionIds.length === 1
+          ? (query as any).eq('id', assignedElectionIds[0])
+          : (query as any).in('id', assignedElectionIds);
+      } else if (!isGlobalAdmin && assignedElectionIds.length === 0) {
+        setElections([]);
         setLoading(false);
-      });
-  }, []);
+        return;
+      }
+
+      const { data } = await query;
+      setElections(data || []);
+      if (data && data.length > 0) setSelectedId(data[0].id);
+      setLoading(false);
+    };
+
+    fetch();
+  }, [isGlobalAdmin, assignedElectionIds]);
 
   const selected = elections.find(e => e.id === selectedId);
   const isVisible = selected?.is_published && selected?.is_public_visible !== false;

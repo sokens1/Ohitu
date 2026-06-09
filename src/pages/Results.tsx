@@ -44,19 +44,25 @@ async function fetchElectionsFn({
   isGlobalAdmin: boolean;
   assignedElectionIds: string[];
 }): Promise<ElectionOption[]> {
-  // Non super-admin sans élection assignée → aucune élection accessible
-  if (!isGlobalAdmin && assignedElectionIds.length === 0) {
-    return [];
+  // super-admin et admin → toutes les élections sans restriction
+  if (isGlobalAdmin) {
+    const { data, error } = await supabase
+      .from('elections')
+      .select('id, title')
+      .order('election_date', { ascending: false });
+    if (error) { console.error('Erreur chargement élections:', error); return []; }
+    return (data ?? []).map((e: { id: string; title: string }) => ({ id: e.id.toString(), name: e.title }));
   }
+
+  // Rôle restreint sans élection assignée → aucun accès
+  if (assignedElectionIds.length === 0) return [];
 
   let query = supabase.from('elections').select('id, title').order('election_date', { ascending: false });
 
-  // Tout rôle non super-admin : restreindre aux élections assignées
-  if (!isGlobalAdmin && assignedElectionIds.length > 0) {
-    query = assignedElectionIds.length === 1
-      ? query.eq('id', assignedElectionIds[0])
-      : query.in('id', assignedElectionIds);
-  }
+  // Restreindre strictement aux élections assignées
+  query = assignedElectionIds.length === 1
+    ? query.eq('id', assignedElectionIds[0])
+    : query.in('id', assignedElectionIds);
 
   const { data, error } = await query;
   if (error) {
@@ -156,6 +162,9 @@ async function fetchGlobalStatsFn(selectedElection: string): Promise<GlobalStats
 const Results = () => {
   const { can, assignedElectionId, assignedElectionIds, role, isGlobalAdmin } = useRBAC();
   const hasMultipleElections = assignedElectionIds.length > 1;
+  // Rôles pour qui l'onglet "Valider les résultats" s'affiche simplement comme "Résultats"
+  const usesResultsLabel = role === 'observateur' || role === 'employeur'
+    || role === 'president-etablissement' || role === 'president-bureau' || role === 'suppleant-president';
 
   const allowedTabs = TAB_DEFS.filter(t => can(t.permission));
 
@@ -331,8 +340,8 @@ const Results = () => {
                   style={{ gridTemplateColumns: `repeat(${allowedTabs.length}, 1fr)` }}
                 >
                   {allowedTabs.map(tab => {
-                    const label      = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.label;
-                    const labelShort = tab.value === 'validation' && role === 'observateur' ? 'Résultats'  : tab.labelShort;
+                    const label      = tab.value === 'validation' && usesResultsLabel ? 'Résultats'  : tab.label;
+                    const labelShort = tab.value === 'validation' && usesResultsLabel ? 'Résultats'  : tab.labelShort;
                     return (
                       <TabsTrigger
                         key={tab.value}
@@ -342,7 +351,7 @@ const Results = () => {
                         <tab.icon className="w-4 h-4 sm:w-5 sm:h-5" />
                         <span className="hidden sm:inline">{label}</span>
                         <span className="sm:hidden">{labelShort}</span>
-                        {tab.value === 'validation' && role !== 'observateur' && globalStats.pvsEnAttente > 0 && (
+                        {tab.value === 'validation' && !usesResultsLabel && globalStats.pvsEnAttente > 0 && (
                           <Badge className="bg-red-500 text-white text-xs ml-1">
                             {globalStats.pvsEnAttente}
                           </Badge>

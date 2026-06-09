@@ -8,7 +8,7 @@ interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
 }
 
-const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau'];
+const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau', 'president-etablissement', 'suppleant-president', 'employeur'];
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
   const { user, authLoading } = useAuth();
