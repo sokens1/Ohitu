@@ -946,25 +946,25 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       {/* Filtres et statistiques */}
       <Card className="gov-card">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between text-gov-gray">
-            <div className="flex items-center space-x-2">
-              <FileCheck className="w-5 h-5" />
-              <span>File d'Attente de Validation</span>
+          <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-gov-gray">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileCheck className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm sm:text-base leading-tight">File d'Attente de Validation</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               {!readOnly && (role === 'super-admin' || role === 'admin') && (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2.5 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                  className="h-7 px-2 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
                   disabled={resettingAll || pvs.filter(p => p.status !== 'published').length === 0}
                   onClick={() => setShowResetAllConfirm(true)}
                 >
-                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                  Réinitialiser tous les PV
+                  <RotateCcw className="w-3.5 h-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">Réinitialiser tous les PV</span>
                 </Button>
               )}
-              <Badge className="bg-orange-100 text-orange-800">
+              <Badge className="bg-orange-100 text-orange-800 whitespace-nowrap">
                 {loading ? '...' : pvs.length} PV
               </Badge>
             </div>

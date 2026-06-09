@@ -435,39 +435,41 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
     <div className="space-y-6">
       {/* Boutons d'action */}
       {!readOnly && (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {/* Télécharger le modèle Excel */}
-          <a href="/modele_saisie_pv.xlsx" download>
-            <Button variant="outline" size="sm" className="flex items-center gap-1.5">
-              <Download className="w-4 h-4" />
-              Modèle Excel
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          {/* Ligne secondaire : Excel + Import */}
+          <div className="flex gap-2">
+            {/* Télécharger le modèle Excel */}
+            <a href="/modele_saisie_pv.xlsx" download className="flex-1 sm:flex-none">
+              <Button variant="outline" size="sm" className="w-full sm:w-auto flex items-center gap-1.5">
+                <Download className="w-4 h-4" />
+                <span>Modèle Excel</span>
+              </Button>
+            </a>
+
+            {/* Importer un fichier rempli */}
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleImportExcel}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={importing}
+              onClick={() => importInputRef.current?.click()}
+              className="flex-1 sm:flex-none flex items-center gap-1.5"
+            >
+              <Upload className="w-4 h-4" />
+              <span>{importing ? 'Import en cours…' : 'Importer résultats'}</span>
             </Button>
-          </a>
+          </div>
 
-          {/* Importer un fichier rempli */}
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleImportExcel}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={importing}
-            onClick={() => importInputRef.current?.click()}
-            className="flex items-center gap-1.5"
-          >
-            <Upload className="w-4 h-4" />
-            {importing ? 'Import en cours…' : 'Importer résultats'}
-          </Button>
-
-          {/* Saisie manuelle */}
+          {/* Saisie manuelle — pleine largeur sur mobile */}
           <Button
             onClick={() => setShowPVEntry(true)}
-            size="lg"
-            className="bg-gov-blue hover:bg-gov-blue-dark text-white px-8 py-3"
+            className="w-full sm:w-auto bg-gov-blue hover:bg-gov-blue-dark text-white"
           >
             <Plus className="w-5 h-5 mr-2" />
             Saisir un PV
@@ -561,26 +563,28 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
           <div className="space-y-4">
             {filteredCenters.map((center) => (
               <div key={center.id} className="border border-gray-200 rounded-lg">
-                <div 
-                  className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
+                <div
+                  className="flex items-center justify-between p-3 sm:p-4 cursor-pointer hover:bg-gray-50 gap-2"
                   onClick={() => toggleCenter(center.id)}
                 >
-                  <div className="flex items-center space-x-3">
-                    {getCenterStatusIcon(center.status)}
-                    <div>
-                      <h3 className="font-semibold text-gray-900">
-                        {center.name}{' '}
-                        {center.totalPvExpected > 0
-                          ? `(${center.pvCount} / ${center.totalPvExpected} PV${center.totalPvExpected > 1 ? 's' : ''} saisis)`
-                          : center.totalElectors > 0
-                            ? `(${center.electorsEntered.toLocaleString()} / ${center.totalElectors.toLocaleString()} électeurs saisis)`
-                            : `(${center.bureauxSaisis} / ${center.totalBureaux} bureaux saisis)`}
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div className="flex-shrink-0">{getCenterStatusIcon(center.status)}</div>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-gray-900 text-sm leading-tight break-words">
+                        {center.name}
                       </h3>
-                      <div className="flex items-center space-x-2 mt-1">
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {center.totalPvExpected > 0
+                          ? `${center.pvCount} / ${center.totalPvExpected} PV${center.totalPvExpected > 1 ? 's' : ''} saisis`
+                          : center.totalElectors > 0
+                            ? `${center.electorsEntered.toLocaleString()} / ${center.totalElectors.toLocaleString()} électeurs`
+                            : `${center.bureauxSaisis} / ${center.totalBureaux} bureaux saisis`}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
                         {center.status === 'completed' ? (
-                          <Badge className="bg-green-100 text-green-800 text-xs">✔️ Terminé</Badge>
+                          <Badge className="bg-green-100 text-green-800 text-[10px] whitespace-nowrap px-1.5 py-0">✔️ Terminé</Badge>
                         ) : (
-                          <Badge className="bg-blue-100 text-blue-800 text-xs">⏳ En cours</Badge>
+                          <Badge className="bg-blue-100 text-blue-800 text-[10px] whitespace-nowrap px-1.5 py-0">⏳ En cours</Badge>
                         )}
                         <Progress
                           value={center.totalPvExpected > 0
@@ -589,16 +593,18 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
                               ? (center.electorsEntered / center.totalElectors) * 100
                               : center.totalBureaux > 0 ? (center.bureauxSaisis / center.totalBureaux) * 100 : 0
                           }
-                          className="w-32 h-2"
+                          className="flex-1 h-1.5 max-w-[80px] sm:max-w-[128px]"
                         />
                       </div>
                     </div>
                   </div>
+                  <div className="flex-shrink-0">
                   {expandedCenters.includes(center.id) ? (
-                    <ChevronDown className="w-5 h-5 text-gray-400" />
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
                   ) : (
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                    <ChevronRight className="w-4 h-4 text-gray-400" />
                   )}
+                  </div>
                 </div>
 
                 {/* Détails des bureaux */}
