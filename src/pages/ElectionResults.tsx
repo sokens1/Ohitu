@@ -3619,7 +3619,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     </h3>
                     <p className="text-gray-600 text-xs sm:text-sm lg:text-base max-w-md mx-auto">
                       {isProResults
-                        ? 'Les résultats de cette élection sont publié au fur et à mesure du vote.'
+                        ? 'Les résultats de cette élection sont publiés au fur et à mesure du vote.'
                         : 'Les données détaillées des centres et bureaux de vote ne sont pas encore disponibles. Elles seront affichées dès que les résultats seront publiés.'}
                     </p>
                   </div>
