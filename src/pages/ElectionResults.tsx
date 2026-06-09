@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown, Download, FileText, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown, Download } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
@@ -337,8 +337,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   const [bureauSeatsMap, setBureauSeatsMap] = useState<Map<string, number>>(new Map());
   // État pour stocker les IDs des bureaux avec PV publiés
   const [publishedBureauIds, setPublishedBureauIds] = useState<Set<string>>(new Set());
-  // Menu téléchargement résultats (admin uniquement)
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   // Fonctions pour vérifier la présence de données
   const hasCenterData = () => {
@@ -1942,17 +1940,44 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const autoTable = (await import('jspdf-autotable')).default;
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const election = results?.election;
+      const PAGE_W = 297;
+      const MARGIN = 14;
 
-      // Bandeau titre
-      doc.setFillColor(30, 64, 175);
-      doc.rect(0, 0, 297, 18, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(13);
-      doc.text(`Résultats officiels — ${election?.title || 'Élection'}`, 14, 12);
+      const drawHeader = (subtitle: string) => {
+        doc.setFillColor(30, 64, 175);
+        doc.rect(0, 0, PAGE_W, 16, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Résultats officiels — ${election?.title || 'Élection'}`, MARGIN, 10);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text(subtitle, PAGE_W - MARGIN, 10, { align: 'right' });
+      };
 
-      // Méta
+      const drawSectionTitle = (title: string, y: number) => {
+        doc.setFillColor(219, 234, 254);
+        doc.rect(MARGIN, y, PAGE_W - MARGIN * 2, 7, 'F');
+        doc.setTextColor(30, 64, 175);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(title, MARGIN + 2, y + 5);
+        return y + 10;
+      };
+
+      const tableTheme = {
+        styles: { fontSize: 8.5, cellPadding: 2 },
+        headStyles: { fillColor: [30, 64, 175] as [number, number, number], textColor: 255, fontStyle: 'bold' as const },
+        alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
+        margin: { left: MARGIN, right: MARGIN, top: 18 },
+      };
+
+      // ── Page 1 : en-tête + statistiques + résultats globaux ──
+      drawHeader("Vue d'ensemble");
+
       doc.setTextColor(80, 80, 80);
       doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
       const metaLine = [
         election?.type,
         election?.status,
@@ -1960,24 +1985,52 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         election?.localisation,
         `Exporté le ${new Date().toLocaleDateString('fr-FR')}`,
       ].filter(Boolean).join('  •  ');
-      doc.text(metaLine, 14, 24);
+      doc.text(metaLine, MARGIN, 22);
 
-      // Stats
-      doc.setFontSize(9);
-      doc.setTextColor(40, 40, 40);
-      const statsLine = [
-        `Inscrits : ${(results?.total_voters_election || 0).toLocaleString('fr-FR')}`,
-        `Suffrages exprimés : ${(results?.total_votes_cast || 0).toLocaleString('fr-FR')}`,
-        `Participation : ${(results?.participation_rate || 0).toFixed(1)} %`,
-      ].join('   |   ');
-      doc.text(statsLine, 14, 30);
+      const totalRegistered = results?.total_voters_election || 0;
+      const totalVoters = centerRows.reduce((s, c) => s + (Number(c.total_voters) || 0), 0);
+      const totalNull = centerRows.reduce((s, c) => s + (Number(c.total_null_votes) || 0), 0);
+      const totalExpressed = results?.total_votes_cast || 0;
+      const participation = results?.participation_rate || 0;
+      const abstention = 100 - participation;
 
-      // Tableau
-      const headers = isProResults
+      const statBoxes = [
+        { label: electorsLabel || 'Inscrits', value: totalRegistered.toLocaleString('fr-FR') },
+        { label: 'Votants', value: totalVoters.toLocaleString('fr-FR') },
+        { label: 'Suffrages exprimés', value: totalExpressed.toLocaleString('fr-FR') },
+        { label: 'Bulletins nuls', value: totalNull.toLocaleString('fr-FR') },
+        { label: 'Participation', value: `${participation.toFixed(1)} %` },
+        { label: 'Abstention', value: `${abstention.toFixed(1)} %` },
+      ];
+
+      const boxGap = 3;
+      const boxW = (PAGE_W - MARGIN * 2 - boxGap * (statBoxes.length - 1)) / statBoxes.length;
+      const boxY = 27;
+      statBoxes.forEach((s, i) => {
+        const bx = MARGIN + i * (boxW + boxGap);
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(226, 232, 240);
+        doc.roundedRect(bx, boxY, boxW, 14, 1.5, 1.5, 'FD');
+        doc.setTextColor(30, 64, 175);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text(s.value, bx + boxW / 2, boxY + 6.5, { align: 'center' });
+        doc.setTextColor(100, 116, 139);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.text(s.label, bx + boxW / 2, boxY + 11.5, { align: 'center' });
+      });
+
+      const globalSectionY = drawSectionTitle(
+        isProResults ? 'Résultats globaux par syndicat' : 'Résultats globaux par candidat',
+        boxY + 18
+      );
+
+      const globalHeaders = isProResults
         ? ['Rang', 'Syndicat', 'Voix', '% des voix', 'Sièges']
-        : ['Rang', 'Candidat', 'Parti', 'Voix', '% des voix'];
+        : ['Rang', 'Candidat', 'Parti / Liste', 'Voix', '% des voix'];
 
-      const body = (results?.candidates || []).map(c =>
+      const globalBody = (results?.candidates || []).map(c =>
         isProResults
           ? [c.rank > 0 ? `#${c.rank}` : '—', c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`, c.seats ?? '—']
           : [c.rank > 0 ? `#${c.rank}` : '—', c.candidate_name, c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`]
@@ -1985,58 +2038,137 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
       // @ts-ignore
       autoTable(doc, {
-        head: [headers],
-        body,
-        startY: 35,
-        styles: { fontSize: 9, cellPadding: 2.5 },
-        headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
+        ...tableTheme,
+        head: [globalHeaders],
+        body: globalBody,
+        startY: globalSectionY,
         columnStyles: { 0: { halign: 'center', cellWidth: 14 } },
+        didDrawPage: () => drawHeader("Vue d'ensemble"),
       });
+
+      // ── Résultats par collège (élections professionnelles) ──
+      if (isProResults && collegeDetailRows.length > 0) {
+        doc.addPage();
+        drawHeader('Résultats par collège');
+        const collegeY = drawSectionTitle('Résultats par collège', 22);
+
+        const byCollege = new Map<string, CollegeDetailRow[]>();
+        collegeDetailRows.forEach(row => {
+          if (!byCollege.has(row.collegeName)) byCollege.set(row.collegeName, []);
+          byCollege.get(row.collegeName)!.push(row);
+        });
+
+        const collegeBody: any[] = [];
+        byCollege.forEach((rows, collegeName) => {
+          collegeBody.push([
+            { content: collegeName, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
+          ]);
+          rows.forEach(r => {
+            collegeBody.push([r.syndicatName, r.votes.toLocaleString('fr-FR'), r.seats || '—']);
+          });
+        });
+
+        // @ts-ignore
+        autoTable(doc, {
+          ...tableTheme,
+          head: [['Syndicat', 'Voix', 'Sièges']],
+          body: collegeBody,
+          startY: collegeY,
+          columnStyles: { 1: { halign: 'right', cellWidth: 35 }, 2: { halign: 'center', cellWidth: 25 } },
+          didDrawPage: () => drawHeader('Résultats par collège'),
+        });
+      }
+
+      // ── Résultats par établissement ──
+      if (centerRows.length > 0) {
+        doc.addPage();
+        drawHeader('Résultats par établissement');
+        const centerY = drawSectionTitle('Résultats par établissement', 22);
+
+        const centerHeaders = ['Établissement', electorsLabel || 'Inscrits', 'Votants', 'Exprimés', 'Nuls', 'Participation'];
+        const centerBody = [...centerRows]
+          .sort((a, b) => (a.center_name || '').localeCompare(b.center_name || ''))
+          .map(c => [
+            c.center_name || '',
+            (c.total_registered || 0).toLocaleString('fr-FR'),
+            (c.total_voters || 0).toLocaleString('fr-FR'),
+            (c.total_expressed_votes || 0).toLocaleString('fr-FR'),
+            (c.total_null_votes || 0).toLocaleString('fr-FR'),
+            `${(c.participation_pct || 0).toFixed(1)} %`,
+          ]);
+
+        // @ts-ignore
+        autoTable(doc, {
+          ...tableTheme,
+          head: [centerHeaders],
+          body: centerBody,
+          startY: centerY,
+          columnStyles: {
+            1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' },
+            4: { halign: 'right' }, 5: { halign: 'right' },
+          },
+          didDrawPage: () => drawHeader('Résultats par établissement'),
+        });
+      }
+
+      // ── Détail par syndicat et par établissement (élections professionnelles) ──
+      if (isProResults && bureauRows.some((b: any) => (b.syndicats || []).length > 0)) {
+        doc.addPage();
+        drawHeader('Détail par établissement');
+        const detailY = drawSectionTitle('Détail des résultats par syndicat et par établissement', 22);
+
+        const centerNameById = new Map(centerRows.map((c: any) => [c.center_id, c.center_name]));
+        const aggregated = new Map<string, Map<string, { votes: number; seats: number }>>();
+        bureauRows.forEach((b: any) => {
+          if (!b.center_id) return;
+          if (!aggregated.has(b.center_id)) aggregated.set(b.center_id, new Map());
+          const m = aggregated.get(b.center_id)!;
+          (b.syndicats || []).forEach((s: any) => {
+            const cur = m.get(s.syndicatName) || { votes: 0, seats: 0 };
+            m.set(s.syndicatName, { votes: cur.votes + (Number(s.votes) || 0), seats: cur.seats + (Number(s.seats) || 0) });
+          });
+        });
+
+        const detailBody: any[] = [];
+        Array.from(aggregated.entries())
+          .sort(([a], [b]) => (centerNameById.get(a) || '').localeCompare(centerNameById.get(b) || ''))
+          .forEach(([centerId, syndicatMap]) => {
+            detailBody.push([
+              { content: centerNameById.get(centerId) || centerId, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
+            ]);
+            Array.from(syndicatMap.entries())
+              .sort((a, b) => b[1].votes - a[1].votes)
+              .forEach(([syndicatName, data]) => {
+                detailBody.push([syndicatName, data.votes.toLocaleString('fr-FR'), data.seats || '—']);
+              });
+          });
+
+        // @ts-ignore
+        autoTable(doc, {
+          ...tableTheme,
+          head: [['Syndicat', 'Voix', 'Sièges']],
+          body: detailBody,
+          startY: detailY,
+          columnStyles: { 1: { halign: 'right', cellWidth: 35 }, 2: { halign: 'center', cellWidth: 25 } },
+          didDrawPage: () => drawHeader('Détail par établissement'),
+        });
+      }
+
+      // Pagination
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7.5);
+        doc.setTextColor(150, 150, 150);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Page ${i} / ${pageCount}`, PAGE_W - MARGIN, 205, { align: 'right' });
+        doc.text("o'Hitu — Plateforme de gestion électorale", MARGIN, 205);
+      }
 
       doc.save(`${buildExportFilename()}.pdf`);
     } catch (e) {
       console.error('Export PDF:', e);
       toast.error('Erreur lors de la génération du PDF');
-    }
-  };
-
-  const handleExportExcel = async () => {
-    try {
-      const XLSX = await import('xlsx');
-      const wb = XLSX.utils.book_new();
-
-      // Feuille 1 — Résumé
-      const summaryRows = [
-        ['Champ', 'Valeur'],
-        ['Élection', results?.election?.title || ''],
-        ['Date', results?.election?.election_date ? new Date(results.election.election_date).toLocaleDateString('fr-FR') : ''],
-        ['Type', results?.election?.type || ''],
-        ['Statut', results?.election?.status || ''],
-        ['Localisation', results?.election?.localisation || ''],
-        [],
-        ['Inscrits total', results?.total_voters_election || 0],
-        ['Suffrages exprimés', results?.total_votes_cast || 0],
-        ['Taux de participation', `${(results?.participation_rate || 0).toFixed(2)} %`],
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Résumé');
-
-      // Feuille 2 — Résultats
-      const resHeaders = isProResults
-        ? ['Rang', 'Syndicat', 'Voix', '% des voix', 'Sièges']
-        : ['Rang', 'Candidat', 'Parti', 'Voix', '% des voix'];
-
-      const resRows = (results?.candidates || []).map(c =>
-        isProResults
-          ? [c.rank > 0 ? c.rank : '', c.party_name, c.total_votes, `${c.percentage.toFixed(2)} %`, c.seats ?? '']
-          : [c.rank > 0 ? c.rank : '', c.candidate_name, c.party_name, c.total_votes, `${c.percentage.toFixed(2)} %`]
-      );
-
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([resHeaders, ...resRows]), 'Résultats');
-      XLSX.writeFile(wb, `${buildExportFilename()}.xlsx`);
-    } catch (e) {
-      console.error('Export Excel:', e);
-      toast.error('Erreur lors de la génération du fichier Excel');
     }
   };
 
@@ -2246,35 +2378,13 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
                   {/* Bouton téléchargement — admin uniquement */}
                   {isGlobalAdmin && showPublicResults && (
-                    <div className="relative w-full sm:w-auto">
-                      <button
-                        onClick={() => setExportMenuOpen(v => !v)}
-                        className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-colors text-sm sm:text-base w-full sm:w-auto justify-center"
-                      >
-                        <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        <span>Télécharger</span>
-                        <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportMenuOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportMenuOpen && (
-                        <div className="absolute top-full mt-1.5 left-0 sm:left-auto sm:right-0 bg-white border rounded-xl shadow-xl z-50 min-w-[200px] py-1 overflow-hidden">
-                          <button
-                            onClick={() => { handleExportPDF(); setExportMenuOpen(false); }}
-                            className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 transition-colors"
-                          >
-                            <FileText className="w-4 h-4 text-red-500 flex-shrink-0" />
-                            Télécharger en PDF
-                          </button>
-                          <div className="border-t mx-3 my-0.5" />
-                          <button
-                            onClick={() => { handleExportExcel(); setExportMenuOpen(false); }}
-                            className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-green-50 transition-colors"
-                          >
-                            <FileSpreadsheet className="w-4 h-4 text-green-600 flex-shrink-0" />
-                            Télécharger en Excel
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      onClick={handleExportPDF}
+                      className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-colors text-sm sm:text-base w-full sm:w-auto justify-center"
+                    >
+                      <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span>Télécharger les résultats (PDF)</span>
+                    </button>
                   )}
 
                   {/* Texte d'information sur les résultats provisoires */}
