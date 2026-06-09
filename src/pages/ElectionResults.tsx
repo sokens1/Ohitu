@@ -916,8 +916,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         ? totalElectorsElection
         : (allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0));
 
-      // Pro : si les PV/bureaux n'ont pas d'effectif saisi, utiliser le total électeurs de l'élection
-      if (isProElection && totalRegistered === 0 && totalRegisteredElection > 0) {
+      // Pro : le total élection est la référence canonique ; on prend le max pour couvrir
+      // les PVs dont total_registered est null ou sous-renseigné
+      if (isProElection && totalRegisteredElection > totalRegistered) {
         totalRegistered = totalRegisteredElection;
       }
 
@@ -1230,16 +1231,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         setTotalSeats(tSeats);
 
         // Avancement du dépouillement en SIÈGES
-        // Numérateur : somme des sièges des groupes (centerId_colType) ayant un PV publié
-        // Si showQuorumFailedPublic=false → on exclut les PV à quorum non atteint du décompte
+        // Numérateur : tous les PV publiés comptent comme dépouillés, quorum ou non
         const publishedGroupKeys = new Set<string>(
           (pvsData || [])
-            .filter((pv: any) => {
-              if (showQuorumFailedPublic) return true;
-              const reg = Number(pv.total_registered) || 0;
-              const exp = Number(pv.votes_expressed) || 0;
-              return !(reg > 0 && exp < reg / 2);
-            })
             .map((pv: any) => {
               const centerId = String(pv.voting_bureaux?.center_id || '');
               const ct = normalizeCollegeKey(pv.college_type || (pv.voting_bureaux as any)?.college_type || '') || '';
