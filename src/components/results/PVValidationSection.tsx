@@ -132,24 +132,53 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   ];
 
   return (
-    <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border border-slate-200 p-4">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">
+    <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border border-slate-200 p-3 sm:p-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
         Circuit de validation
       </p>
-      <div className="flex items-start gap-0">
+
+      {/* ── Mobile : vertical ─────────────────────────────────────────── */}
+      <div className="flex flex-col sm:hidden">
+        {steps.map((step, i) => (
+          <div key={i} className="flex items-start gap-3">
+            {/* Point + ligne verticale */}
+            <div className="flex flex-col items-center flex-shrink-0 w-7">
+              <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center z-10 flex-shrink-0 ${step.color.dot} shadow-sm`}>
+                {step.icon}
+              </div>
+              {i < steps.length - 1 && (
+                <div className={`w-0.5 flex-1 min-h-[1.75rem] ${step.color.line} mt-0.5`} />
+              )}
+            </div>
+            {/* Texte pleine largeur */}
+            <div className={`min-w-0 flex-1 ${i < steps.length - 1 ? 'pb-3' : ''}`}>
+              <p className={`text-xs font-semibold leading-tight ${step.color.text}`}>
+                {step.label}
+              </p>
+              {step.description && (
+                <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">{step.description}</p>
+              )}
+              {step.sublabel && (
+                <p className="text-[10px] font-medium text-gray-700 mt-0.5 break-words">{step.sublabel}</p>
+              )}
+              {step.date && (
+                <p className="text-[10px] text-gray-400 mt-0.5">{step.date}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Desktop : horizontal (inchangé) ──────────────────────────── */}
+      <div className="hidden sm:flex items-start gap-0">
         {steps.map((step, i) => (
           <div key={i} className="flex-1 flex flex-col items-center relative">
-            {/* Ligne de connexion gauche */}
             {i > 0 && (
               <div className={`absolute top-3.5 right-1/2 w-full h-0.5 ${steps[i - 1].color.line} -z-0`} />
             )}
-
-            {/* Point */}
             <div className={`relative z-10 w-7 h-7 rounded-full border-2 flex items-center justify-center ${step.color.dot} shadow-sm`}>
               {step.icon}
             </div>
-
-            {/* Texte */}
             <div className="mt-2 text-center px-1 w-full">
               <p className={`text-xs font-semibold leading-tight ${step.color.text}`}>
                 {step.label}
