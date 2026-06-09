@@ -14,6 +14,7 @@ export interface ElectionEntity {
   is_public_visible?: boolean;
   cover_image_url?: string;
   type?: string;
+  show_quorum_failed_public?: boolean;
 }
 
 export async function fetchAllElections(): Promise<ElectionEntity[]> {

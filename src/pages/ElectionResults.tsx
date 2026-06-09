@@ -82,6 +82,7 @@ interface ElectionResults {
   election: ElectionData | null;
   total_voters: number;
   total_voters_election?: number; // Nombre total d'inscrits de l'élection
+  total_registered_published?: number; // Inscrits dans les bureaux publiés uniquement
   total_votes_cast: number;
   participation_rate: number;
   candidates: CandidateResult[];
@@ -582,158 +583,65 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     fetchAvailableElections();
   }, []);
 
-  // Calculer le taux de couverture quand l'élection change
+  // Reset couverture quand l'élection change (totalBureaux est désormais défini dans fetchElectionResults)
   useEffect(() => {
-    const isMobile = window.innerWidth < 640;
-    console.log('🔍 Mobile useEffect electionId - isMobile:', isMobile, 'electionId:', electionId, 'type:', typeof electionId);
-    if (electionId) {
-      console.log('🔍 Mobile Appel calculateBureauCoverage depuis useEffect electionId');
-      calculateBureauCoverage();
-
-      // Fallback pour mobile : retry plus agressif
-      if (isMobile) {
-        // Retry immédiat après 500ms
-        setTimeout(() => {
-          console.log('🔍 Mobile Fallback 500ms - totalBureaux:', totalBureaux);
-          if (totalBureaux === 0) {
-            console.log('🔍 Mobile Fallback 500ms - Retry calculateBureauCoverage');
-            calculateBureauCoverage();
-          }
-        }, 500);
-
-        // Retry après 1.5s
-        setTimeout(() => {
-          console.log('🔍 Mobile Fallback 1.5s - totalBureaux:', totalBureaux);
-          if (totalBureaux === 0) {
-            console.log('🔍 Mobile Fallback 1.5s - Retry calculateBureauCoverage');
-            calculateBureauCoverage();
-          }
-        }, 1500);
-
-        // Retry après 3s
-        setTimeout(() => {
-          console.log('🔍 Mobile Fallback 3s - totalBureaux:', totalBureaux);
-          if (totalBureaux === 0) {
-            console.log('🔍 Mobile Fallback 3s - Retry calculateBureauCoverage');
-            calculateBureauCoverage();
-          }
-        }, 3000);
-      }
-    } else {
-      console.log('🔍 Mobile Pas d\'electionId, reset des valeurs');
+    if (!electionId) {
       setTotalBureaux(0);
       setBureauxAvecResultats(0);
-      setMobileRetryCount(0);
     }
   }, [electionId]);
-
-  // Recalculer le taux de couverture quand les données des bureaux changent
-  useEffect(() => {
-    const isMobile = window.innerWidth < 640;
-    console.log('🔍 Mobile useEffect centerRows/bureauRows - isMobile:', isMobile, 'centerRows.length:', centerRows.length, 'bureauRows.length:', bureauRows.length, 'electionId:', electionId);
-    if (electionId && (centerRows.length >= 0 && bureauRows.length >= 0)) { // Permettre le calcul même avec 0 bureaux
-      console.log('🔍 Mobile Appel calculateBureauCoverage depuis useEffect centerRows/bureauRows');
-      calculateBureauCoverage();
-    }
-  }, [centerRows, bureauRows]);
-
-  // Recalculer le taux de couverture quand totalBureaux est mis à jour
-  useEffect(() => {
-    const isMobile = window.innerWidth < 640;
-    console.log('🔍 Mobile useEffect totalBureaux - isMobile:', isMobile, 'totalBureaux:', totalBureaux, 'bureauRows.length:', bureauRows.length);
-    if (totalBureaux > 0 && bureauRows.length > 0) {
-      console.log('🔍 Mobile totalBureaux mis à jour, recalcul de la couverture');
-      // Recalculer les bureaux avec résultats
-      const avecResultats = bureauRows.filter(bureau =>
-        bureau.total_voters > 0 || bureau.total_registered > 0 || bureau.total_expressed_votes > 0
-      ).length;
-      setBureauxAvecResultats(avecResultats);
-    }
-  }, [totalBureaux, bureauRows]);
 
   const fetchElectionResults = async (id: string) => {
     try {
       setLoading(true);
 
-      // Récupérer les données de l'élection
+      // ROUND 1 : données de l'élection (nécessaire pour connaître le type)
       const election = await fetchElectionById(id);
-      if (!election) {
-        throw new Error('Élection non trouvée');
-      }
+      if (!election) throw new Error('Élection non trouvée');
 
       const isProElection = isProfessionalElection(election.type);
-      const totalElectorsElection = await getElectionElectorsTotal(id, election.type);
-
-      // Vérifier visibilité publique (bypassed en mode admin preview)
-      if (!isAdminPreview && !isElectionPublishedForPublic(election)) {
-        console.log('⚠️ Élection non accessible au public - Aucun résultat affiché');
-        setPublishedBureauIds(new Set());
-        setResults({
-          election,
-          total_voters: 0,
-          total_voters_election: totalElectorsElection,
-          total_votes_cast: 0,
-          participation_rate: 0,
-          candidates: [],
-          last_updated: new Date().toISOString()
-        });
-        setCenterRows([]);
-        setBureauRows([]);
-        setLoading(false);
-        return;
-      }
-
-      console.log('✅ Élection publiée - Chargement des résultats');
-
-      // Vue publique : uniquement les PV publiés. Vue admin preview : validés aussi acceptés.
       const pvStatuses = isAdminPreview
         ? ['published', 'validated', 'validé']
         : ['published'];
-      const { data: publishedPVs, error: pvError } = await supabase
-        .from('procès_verbaux')
-        .select('bureau_id, id, status')
-        .eq('election_id', id)
-        .in('status', pvStatuses);
 
-      if (pvError) {
-        console.error('❌ Erreur lors de la récupération des PV publiés/validés:', pvError);
-      }
+      // ROUND 2 : en parallèle — liste PV, centres, collèges électoraux, listes syndicales
+      const [
+        { data: publishedPVs, error: pvError },
+        { data: electionCentersRaw },
+        { data: electoralCollegesRaw },
+        { data: unionListsRaw },
+      ] = await Promise.all([
+        supabase.from('procès_verbaux').select('bureau_id, id, status').eq('election_id', id).in('status', pvStatuses),
+        supabase.from('election_centers').select('center_id').eq('election_id', id),
+        isProElection
+          ? supabase.from('electoral_colleges').select('name, college_type, seats_to_fill, total_voters').eq('election_id', id)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        isProElection
+          ? supabase.from('union_lists').select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym, logo)').eq('election_id', id).order('order_num', { ascending: true, nullsFirst: true }).order('id', { ascending: true })
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
 
-      console.log('🔍 [ElectionResults] PV récupérés:', publishedPVs);
-      console.log('🔍 [ElectionResults] Election ID recherché:', id);
+      if (pvError) console.error('❌ Erreur PV:', pvError);
+
+      // Données pro disponibles dès le round 2
+      const electoralCollegesForPro: any[] = electoralCollegesRaw || [];
+      let unionLists: any[] = unionListsRaw || [];
+      const collegesElectorsTotal = electoralCollegesForPro.reduce((s: number, c: any) => s + (Number(c.total_voters) || 0), 0);
 
       const publishedBureauIdsSet = new Set<string>((publishedPVs || []).map(pv => String(pv.bureau_id)));
       setPublishedBureauIds(publishedBureauIdsSet);
-      console.log('📊 [ElectionResults] Nombre de PV publiés/validés:', publishedBureauIdsSet.size);
-      console.log('📊 [ElectionResults] IDs des bureaux publiés/validés:', Array.from(publishedBureauIdsSet));
 
-      // Si aucun PV publié ou validé, afficher des résultats vides
-      if (publishedBureauIdsSet.size === 0) {
-        console.log('⚠️ Aucun PV publié ou validé - Affichage de résultats vides');
-        
-        // Calculer quand même le vrai total d'inscrits pour l'affichage
-        const { data: electionCenters } = await supabase
-          .from('election_centers')
-          .select('center_id')
-          .eq('election_id', id);
+      const allCenterIds = (electionCentersRaw || []).map((ec: any) => ec.center_id).filter(Boolean);
+      const publishedPVIds = (publishedPVs || []).map(pv => pv.id);
 
-        let allBureauxRegistered = 0;
-        if (electionCenters && electionCenters.length > 0) {
-          const centerIds = electionCenters.map(ec => ec.center_id);
-          const { data: allBureauxData } = await supabase
-            .from('voting_bureaux')
-            .select('registered_voters')
-            .in('center_id', centerIds);
-
-          if (allBureauxData) {
-            allBureauxRegistered = allBureauxData.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
-          }
-        }
-        
+      // Vérifier visibilité publique
+      if (!isAdminPreview && !isElectionPublishedForPublic(election)) {
+        const totalElectorsElection = collegesElectorsTotal > 0 ? collegesElectorsTotal : (Number(election.nb_electeurs) || 0);
         setResults({
           election,
           total_voters: 0,
           total_voters_election: totalElectorsElection,
+          total_registered_published: 0,
           total_votes_cast: 0,
           participation_rate: 0,
           candidates: [],
@@ -745,55 +653,51 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         return;
       }
 
-      // Récupérer TOUS les bureaux de l'élection (complément au total électeurs)
-      const { data: electionCenters, error: centersError } = await supabase
-        .from('election_centers')
-        .select('center_id')
-        .eq('election_id', id);
+      // ROUND 3 : en parallèle — tous les bureaux + données complètes des PV publiés
+      const [
+        { data: allBureauxData },
+        { data: pvsData, error: pvsDataError },
+      ] = await Promise.all([
+        allCenterIds.length > 0
+          ? supabase.from('voting_bureaux').select('id, name, center_id, college, seats_to_fill, registered_voters').in('center_id', allCenterIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        publishedPVIds.length > 0
+          ? supabase.from('procès_verbaux').select(`id, bureau_id, college_type, total_registered, total_voters, votes_expressed, null_votes, voting_bureaux!inner(id, name, center_id, registered_voters, college_type)`).in('id', publishedPVIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
 
-      let allBureauxRegistered = 0;
-      let allBureauxList: any[] = [];
-      if (electionCenters && electionCenters.length > 0) {
-        const centerIds = electionCenters.map(ec => ec.center_id);
-        const { data: allBureauxData, error: bureauxError } = await supabase
-          .from('voting_bureaux')
-          .select('id, name, center_id, college, seats_to_fill, registered_voters')
-          .in('center_id', centerIds);
+      if (pvsDataError) console.error('❌ Erreur chargement PV:', pvsDataError);
 
-        if (allBureauxData) {
-          allBureauxList = allBureauxData;
-          allBureauxRegistered = allBureauxData.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
-        }
+      const allBureauxList: any[] = allBureauxData || [];
+      const allBureauxRegistered = allBureauxList.reduce((sum: number, b: any) => sum + (Number(b.registered_voters) || 0), 0);
+
+      // Définir totalBureaux directement — évite les requêtes redondantes de calculateBureauCoverage
+      setTotalBureaux(allBureauxList.length);
+
+      const totalElectorsElection = collegesElectorsTotal > 0
+        ? collegesElectorsTotal
+        : (allBureauxRegistered > 0 ? allBureauxRegistered : (Number(election.nb_electeurs) || 0));
+
+      // Aucun PV publié → résultats vides
+      if (publishedBureauIdsSet.size === 0) {
+        setResults({
+          election,
+          total_voters: 0,
+          total_voters_election: totalElectorsElection,
+          total_registered_published: 0,
+          total_votes_cast: 0,
+          participation_rate: 0,
+          candidates: [],
+          last_updated: new Date().toISOString()
+        });
+        setCenterRows([]);
+        setBureauRows([]);
+        setBureauxAvecResultats(0);
+        setLoading(false);
+        return;
       }
 
-      console.log('📊 [ElectionResults] Total inscrits calculé depuis TOUS les bureaux:', allBureauxRegistered);
-
-      // Récupérer les données DIRECTEMENT depuis les PV publiés
-      const publishedPVIds = (publishedPVs || []).map(pv => pv.id);
-      
-      // 1. Récupérer les données des PV publiés
-      // On inclut voting_bureaux.college_type pour fallback quand pv.college_type est null
-      const { data: pvsData, error: pvsDataError } = await supabase
-        .from('procès_verbaux')
-        .select(`
-          id,
-          bureau_id,
-          college_type,
-          total_registered,
-          total_voters,
-          votes_expressed,
-          null_votes,
-          voting_bureaux!inner(id, name, center_id, registered_voters, college_type)
-        `)
-        .in('id', publishedPVIds);
-
-      if (pvsDataError) {
-        console.error('❌ Erreur chargement PV:', pvsDataError);
-      }
-
-      // Mapping pv_id → college_type
-      // Fallback : college_type du bureau si le PV n'a pas de college_type renseigné
-      // (évite d'ignorer silencieusement des PV dont le college_type est null)
+      // Mapping pv_id → college_type (fallback sur le bureau si PV sans college_type)
       const pvToCollegeType = new Map<string, string>(
         (pvsData || []).map((pv: any) => [
           String(pv.id),
@@ -801,36 +705,24 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         ])
       );
 
-      // Données electoral_colleges partagées (sièges par collège + calcul détail)
-      let electoralCollegesForPro: any[] = [];
+      // ROUND 4 : en parallèle — noms des centres + résultats candidats
+      const pvCenterIds = [...new Set((pvsData || []).map((pv: any) => pv.voting_bureaux?.center_id).filter(Boolean))];
 
-      console.log('📊 [ElectionResults] PV data chargés:', pvsData);
-      
-      // Récupérer les noms des centres
-      const centerIds = [...new Set((pvsData || []).map((pv: any) => pv.voting_bureaux?.center_id).filter(Boolean))];
-      const { data: centersNamesData } = await supabase
-        .from('voting_centers')
-        .select('id, name')
-        .in('id', centerIds);
-      
+      const [
+        { data: centersNamesData },
+        { data: candidateResultsData, error: crError },
+      ] = await Promise.all([
+        pvCenterIds.length > 0
+          ? supabase.from('voting_centers').select('id, name').in('id', pvCenterIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        publishedPVIds.length > 0
+          ? supabase.from('candidate_results').select(`pv_id, candidate_id, votes, candidates!inner(id, name, party)`).in('pv_id', publishedPVIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
+
+      if (crError) console.error('❌ Erreur chargement résultats candidats:', crError);
+
       const centerNamesMap = new Map((centersNamesData || []).map((c: any) => [c.id, c.name]));
-
-      // 2. Récupérer les résultats des candidats pour ces PV
-      const { data: candidateResultsData, error: crError } = await supabase
-        .from('candidate_results')
-        .select(`
-          pv_id,
-          candidate_id,
-          votes,
-          candidates!inner(id, name, party)
-        `)
-        .in('pv_id', publishedPVIds);
-
-      if (crError) {
-        console.error('❌ Erreur chargement résultats candidats:', crError);
-      }
-
-      console.log('📊 [ElectionResults] Résultats candidats chargés:', candidateResultsData);
 
       // Paramètre admin : afficher ou non les lignes rouges quorum sur la page publique
       const showQuorumFailedPublic = election.show_quorum_failed_public !== false;
@@ -922,8 +814,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         totalRegistered = totalRegisteredElection;
       }
 
-      const participationRate = totalRegistered > 0
-        ? Math.min(Math.max((votersSum / totalRegistered) * 100, 0), 100)
+      const participationRate = registeredInBureauxWithResults > 0
+        ? Math.min(Math.max((votersSum / registeredInBureauxWithResults) * 100, 0), 100)
         : 0;
 
       // Agréger les votes par candidat ou syndicat
@@ -966,24 +858,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       let filteredSummaryData = Array.from(candidateVotesMap.values());
 
       // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
-      let unionLists: any[] = [];
+      // unionLists et electoralCollegesForPro sont déjà chargés au round 2
       let collegeSyndicatSeats = new Map<string, number>();
-      
+
       if (isProfessional) {
-        const [ecRowsResult, unionListsResult] = await Promise.all([
-          supabase
-            .from('electoral_colleges')
-            .select('name, college_type, seats_to_fill')
-            .eq('election_id', id),
-          supabase
-            .from('union_lists')
-            .select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym, logo)')
-            .eq('election_id', id)
-            .order('order_num', { ascending: true, nullsFirst: true })
-            .order('id', { ascending: true })
-        ]);
-        electoralCollegesForPro = ecRowsResult.data || [];
-        unionLists = unionListsResult.data || [];
 
         // seats_to_fill = total de l'élection pour ce collège
         // Les clés sont NORMALISÉES pour correspondre aux college_type des PV
@@ -1396,6 +1274,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         election,
         total_voters: totalRegistered,
         total_voters_election: totalRegisteredElection,
+        total_registered_published: registeredInBureauxWithResults,
         total_votes_cast: totalVotesCast,
         participation_rate: participationRate,
         candidates: finalCandidates,
@@ -2263,7 +2142,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 color="bg-gradient-to-br from-blue-500 to-blue-600"
                 subtitle={
                   isProfessionalElection(results.election?.type)
-                    ? `Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()} électeurs`
+                    ? `Bureaux dépouillés : ${(results.total_registered_published || 0).toLocaleString()} électeurs`
                     : `Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()} inscrits`
                 }
                 animated={true}
@@ -2336,25 +2215,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center">
               {/* Carte dépouillement pour élections pro */}
-              {isProResults && totalGroupCount === 0 ? (
-                <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
-                  <div className="text-center">
-                    <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-1">
-                      Avancement du dépouillement
-                    </h3>
-                    <p className="text-xs text-gray-500 mb-3">Sièges dépouillés / Total sièges élection</p>
-                    <div className="bg-orange-100 rounded-lg p-3 sm:p-4 mb-3">
-                      <div className="text-2xl sm:text-3xl font-bold text-orange-800 mb-1">
-                        0%
-                      </div>
-                      <div className="text-xs sm:text-sm text-gray-600">
-                        Aucun siège dépouillé
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">En attente des premiers procès-verbaux</p>
-                  </div>
-                </div>
-              ) : isProResults && totalGroupCount > 0 ? (
+              {isProResults && totalGroupCount > 0 ? (
                 (() => {
                   const depPct = Math.round((publishedGroupCount / totalGroupCount) * 100);
                   const isComplete = publishedGroupCount >= totalGroupCount;
@@ -2383,373 +2244,11 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                   );
                 })()
               ) : (() => {
-                // Calculer le taux de couverture basé sur les données réelles
-                // Utiliser totalBureaux si disponible, sinon utiliser un fallback intelligent
-                let totalBureauxCount = totalBureaux;
-
-                // Si pas de données de la base, utiliser les données disponibles comme fallback temporaire
-                if (totalBureauxCount === 0) {
-                  console.log('🔍 Aucune donnée disponible - totalBureaux:', totalBureaux, 'bureauRows.length:', bureauRows.length);
-
-                  // Déclencher un recalcul si on n'a pas de données
-                  if (electionId && !loading) {
-                    console.log('🔍 Déclenchement calculateBureauCoverage depuis affichage');
-                    calculateBureauCoverage();
-
-                    // Continuer à essayer de récupérer les vraies données en arrière-plan
-                    setTimeout(() => {
-                      console.log('🔍 Retry calculateBureauCoverage après 5s');
-                      calculateBureauCoverage();
-                    }, 5000);
-
-                    setTimeout(() => {
-                      console.log('🔍 Retry calculateBureauCoverage après 10s');
-                      calculateBureauCoverage();
-                    }, 10000);
-                  }
-
-                  // Si on a des données dans bureauRows, essayer de récupérer le vrai total de bureaux
-                  if (bureauRows.length > 0) {
-                    console.log('🔍 Tentative de récupération du vrai nombre total de bureaux...');
-
-                    // Essayer plusieurs méthodes pour récupérer le vrai total de bureaux
-                    const fetchRealBureauxCount = async () => {
-                      try {
-                        // Méthode 1: Via la table elections directement
-                        console.log('🔍 Méthode A: elections...');
-                        const { data: electionData, error: electionError } = await supabase
-                          .from('elections')
-                          .select('*')
-                          .eq('id', electionId)
-                          .single();
-
-                        console.log('🔍 Élection trouvée:', electionData, 'erreur:', electionError);
-
-                        if (!electionError && electionData) {
-                          // Essayer différents champs possibles pour le nombre de bureaux
-                          const nbBureaux = electionData.nb_bureaux || electionData.total_bureaux || electionData.num_bureaux || electionData.bureaux_count;
-                          if (nbBureaux) {
-                            console.log('🔍 ✅ Nombre total depuis elections:', nbBureaux, 'champ utilisé:', Object.keys(electionData).find(key => electionData[key] === nbBureaux));
-                            return nbBureaux;
-                          } else {
-                            console.log('🔍 ❌ Aucun champ nb_bureaux trouvé. Champs disponibles:', Object.keys(electionData));
-
-                            // Essayer de déduire depuis le titre
-                            const title = electionData.title || '';
-                            const titleLower = title.toLowerCase();
-
-                            const isLocalElection = titleLower.includes('locale') || titleLower.includes('municipale');
-                            const isLegislativeElection = titleLower.includes('législative') || titleLower.includes('legislative') ||
-                              titleLower.includes('législatives') || titleLower.includes('legislatives');
-
-                            console.log('🔍 Détection du type dans fetchRealBureauxCount:', title, 'isLocal:', isLocalElection, 'isLegislative:', isLegislativeElection);
-
-                            if (isLocalElection) {
-                              console.log('🔍 ✅ Retour de 29 pour élection locale');
-                              return 29;
-                            } else if (isLegislativeElection) {
-                              console.log('🔍 ✅ Retour de 35 pour élection législative');
-                              return 35;
-                            }
-                          }
-                        }
-
-                        // Méthode 2: Compter tous les bureaux liés à cette élection
-                        console.log('🔍 Méthode B: Compter tous les bureaux de l\'élection...');
-                        const { data: allBureaux, error: allBureauxError } = await supabase
-                          .from('voting_bureaux')
-                          .select('id, election_id')
-                          .eq('election_id', electionId);
-
-                        console.log('🔍 Tous les bureaux trouvés:', allBureaux?.length, 'erreur:', allBureauxError);
-
-                        if (!allBureauxError && allBureaux) {
-                          console.log('🔍 ✅ Nombre total depuis comptage direct:', allBureaux.length);
-                          return allBureaux.length;
-                        }
-
-                        // Méthode 3: Via les centres de l'élection
-                        console.log('🔍 Méthode C: Via les centres de l\'élection...');
-                        const { data: centersData, error: centersError } = await supabase
-                          .from('election_centers')
-                          .select(`
-                          center_id,
-                          voting_centers!inner(
-                            id,
-                            voting_bureaux(id)
-                          )
-                        `)
-                          .eq('election_id', electionId);
-
-                        if (!centersError && centersData) {
-                          const totalBureaux = centersData.reduce((sum, ec) => {
-                            const bureauxCount = ec.voting_centers?.voting_bureaux?.length || 0;
-                            return sum + bureauxCount;
-                          }, 0);
-                          console.log('🔍 ✅ Nombre total via centres:', totalBureaux);
-                          return totalBureaux;
-                        }
-
-                        // Méthode 4: Essayer une requête SQL directe
-                        console.log('🔍 Méthode D: Requête SQL directe...');
-                        const { data: sqlResult, error: sqlError } = await supabase
-                          .rpc('count_election_bureaux', { election_id_param: electionId });
-
-                        if (!sqlError && sqlResult !== null) {
-                          console.log('🔍 ✅ Nombre total via fonction SQL:', sqlResult);
-                          return sqlResult;
-                        } else {
-                          console.log('🔍 ❌ Fonction SQL non disponible:', sqlError);
-                        }
-
-                        // Méthode 5: Vérifier la structure des tables
-                        console.log('🔍 Méthode E: Vérifier la structure des tables...');
-                        const { data: sampleBureaux, error: sampleError } = await supabase
-                          .from('voting_bureaux')
-                          .select('*')
-                          .limit(5);
-
-                        console.log('🔍 Échantillon de bureaux:', sampleBureaux, 'erreur:', sampleError);
-
-                        // Méthode 6: Essayer de compter via une jointure manuelle
-                        console.log('🔍 Méthode F: Jointure manuelle...');
-                        const { data: manualJoin, error: manualError } = await supabase
-                          .from('election_centers')
-                          .select(`
-                          voting_centers!inner(
-                            voting_bureaux(id)
-                          )
-                        `)
-                          .eq('election_id', electionId);
-
-                        if (!manualError && manualJoin) {
-                          const totalCount = manualJoin.reduce((sum, ec) => {
-                            const bureaux = ec.voting_centers?.voting_bureaux || [];
-                            return sum + bureaux.length;
-                          }, 0);
-                          console.log('🔍 ✅ Nombre total via jointure manuelle:', totalCount);
-                          return totalCount;
-                        }
-
-                        return null;
-                      } catch (error) {
-                        console.log('🔍 Erreur lors de la récupération du vrai total:', error);
-                        return null;
-                      }
-                    };
-
-                    // Méthode spéciale : essayer de récupérer depuis les données de bureauRows et de l'élection
-                    const getTotalFromAvailableData = () => {
-                      // D'abord, essayer depuis les données de l'élection déjà chargées
-                      if (results?.election) {
-                        const electionTitle = results.election.title || '';
-                        const titleLower = electionTitle.toLowerCase();
-
-                        // Détecter le type d'élection
-                        const isLocalElection = titleLower.includes('locale') || titleLower.includes('municipale');
-                        const isLegislativeElection = titleLower.includes('législative') || titleLower.includes('legislative') || titleLower.includes('législatives') || titleLower.includes('legislatives');
-
-                        console.log('🔍 Analyse du titre:', electionTitle, 'isLocal:', isLocalElection, 'isLegislative:', isLegislativeElection);
-
-                        if (isLocalElection) {
-                          console.log('🔍 ✅ Élection locale détectée, utilisation de 29 bureaux');
-                          setTotalBureaux(29);
-                          setIsDataEstimated(false);
-                          return 29;
-                        } else if (isLegislativeElection) {
-                          console.log('🔍 ✅ Élection législative détectée, utilisation de 35 bureaux');
-                          setTotalBureaux(35);
-                          setIsDataEstimated(false);
-                          return 35;
-                        }
-                      }
-
-                      // Ensuite, essayer depuis les données de bureauRows
-                      if (bureauRows.length > 0) {
-                        // Chercher le numéro de bureau le plus élevé
-                        const bureauNumbers = bureauRows.map(bureau => {
-                          const num = bureau.bureau_number || bureau.id;
-                          return typeof num === 'string' ? parseInt(num) || 0 : num || 0;
-                        });
-
-                        const maxBureauNumber = Math.max(...bureauNumbers);
-                        console.log('🔍 Numéros de bureaux trouvés:', bureauNumbers, 'max:', maxBureauNumber);
-
-                        // Si on a des numéros de bureaux, essayer de déterminer le total
-                        if (maxBureauNumber > 0) {
-                          // Pour les élections locales, le total est souvent autour de 29
-                          // Vérifier si on peut déduire le total des données disponibles
-                          const uniqueNumbers = new Set(bureauNumbers).size;
-
-                          // Si le max est proche de 29 et qu'on a plusieurs bureaux, c'est probablement 29
-                          if (maxBureauNumber >= 25 && maxBureauNumber <= 35 && uniqueNumbers >= 5) {
-                            console.log('🔍 ✅ Estimation basée sur les numéros de bureaux - probablement 29');
-                            setTotalBureaux(29);
-                            setIsDataEstimated(false);
-                            return 29;
-                          }
-                        }
-                      }
-                      return null;
-                    };
-
-                    // Essayer d'abord la méthode spéciale
-                    const totalFromRows = getTotalFromAvailableData();
-
-                    // Sinon, récupérer depuis la base de données
-                    if (!totalFromRows) {
-                      fetchRealBureauxCount().then(realTotal => {
-                        if (realTotal && realTotal > 0) {
-                          console.log('🔍 Mise à jour avec le vrai total:', realTotal);
-                          setTotalBureaux(realTotal);
-                          setIsDataEstimated(false);
-                        }
-                      });
-                    }
-
-                    // Utiliser le vrai total si disponible, sinon estimation
-                    let displayTotal = totalFromRows || totalBureaux;
-
-                    if (displayTotal === 0) {
-                      // En dernier recours, utiliser une estimation basée sur le type d'élection
-                      const uniqueBureaux = new Set(bureauRows.map(bureau => bureau.bureau_number || bureau.id)).size;
-                      let estimatedTotal = Math.max(uniqueBureaux, bureauRows.length);
-
-                      // Détecter le type d'élection depuis les données disponibles
-                      const electionTitle = results?.election?.title || '';
-                      const titleLower = electionTitle.toLowerCase();
-
-                      const isLocalElection = titleLower.includes('locale') || titleLower.includes('municipale');
-                      const isLegislativeElection = titleLower.includes('législative') || titleLower.includes('legislative') ||
-                        titleLower.includes('législatives') || titleLower.includes('legislatives');
-
-                      console.log('🔍 Détection du type pour estimation:', electionTitle, 'isLocal:', isLocalElection, 'isLegislative:', isLegislativeElection);
-
-                      if (isLocalElection) {
-                        // Pour les élections locales, utiliser 29
-                        estimatedTotal = 29;
-                        console.log('🔍 Estimation pour élection locale:', estimatedTotal);
-                      } else if (isLegislativeElection) {
-                        // Pour les élections législatives, utiliser 35
-                        estimatedTotal = 35;
-                        console.log('🔍 Estimation pour élection législative:', estimatedTotal);
-                      } else {
-                        // Pour les autres élections, utiliser une estimation générique
-                        if (estimatedTotal <= 10) {
-                          estimatedTotal = Math.max(estimatedTotal * 3, 25);
-                        } else if (estimatedTotal <= 20) {
-                          estimatedTotal = Math.max(estimatedTotal * 2, 30);
-                        }
-                      }
-
-                      displayTotal = estimatedTotal;
-                      console.log('🔍 Utilisation de l\'estimation finale:', estimatedTotal);
-                    } else {
-                      console.log('🔍 Utilisation du vrai total:', displayTotal);
-                    }
-
-                    // Utiliser le nombre de PV publiés
-                    const bureauxAvecResultats = publishedBureauIds.size;
-
-                    const coveragePercentage = displayTotal > 0 ? Math.round((publishedBureauIds.size / displayTotal) * 100) : 0;
-                    const isComplete = coveragePercentage >= 100;
-                    const isRealData = totalFromRows || totalBureaux > 0;
-
-                    const bgColor = isComplete
-                      ? "bg-green-100"
-                      : "bg-orange-100";
-                    const textColor = isComplete
-                      ? "text-green-800"
-                      : "text-orange-800";
-
-                    return (
-                      <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
-                        <div className="text-center">
-                          <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-2">
-                            Couverture des bureaux
-                          </h3>
-                          <p className="text-xs sm:text-sm text-gray-600 mb-4">
-                            Taux de couverture des bureaux de vote
-                          </p>
-                          <div className={`${bgColor} rounded-lg p-3 sm:p-4 mb-3`}>
-                            <div className={`text-xl sm:text-2xl font-bold ${textColor} mb-1`}>
-                              {coveragePercentage}%
-                            </div>
-                            <div className="text-xs sm:text-sm text-gray-600">
-                              {bureauxAvecResultats} sur {displayTotal} bureaux
-                            </div>
-                          </div>
-                          <div className="text-xs sm:text-sm text-gray-600">
-                            {isRealData
-                              ? (isComplete ? "Tous les bureaux ont été publiés" : "PV publiés / Total bureaux")
-                              : (
-                                <div className="flex items-center justify-center gap-2">
-                                  <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
-                                  Récupération du nombre total...
-                                </div>
-                              )
-                            }
-                          </div>
-                          {!isRealData && (
-                            <button
-                              onClick={() => {
-                                console.log('🔍 Rafraîchissement manuel demandé');
-                                calculateBureauCoverage();
-                              }}
-                              className="mt-2 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
-                            >
-                              Actualiser
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  } else {
-                    // Pas de données du tout, afficher le chargement
-                    return (
-                      <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
-                        <div className="text-center">
-                          <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-2">
-                            Couverture des bureaux
-                          </h3>
-                          <p className="text-xs sm:text-sm text-gray-600 mb-4">
-                            Taux de couverture des bureaux de vote
-                          </p>
-                          <div className="bg-gray-100 rounded-lg p-3 sm:p-4 mb-3">
-                            <div className="text-xl sm:text-2xl font-bold text-gray-600 mb-1">
-                              Chargement...
-                            </div>
-                            <div className="text-xs sm:text-sm text-gray-500">
-                              Récupération des données
-                            </div>
-                          </div>
-                          <div className="text-xs sm:text-sm text-gray-600">
-                            Chargement des données...
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-                }
-
-                // Utiliser le nombre de PV publiés
-                const bureauxAvecResultats = publishedBureauIds.size;
-
-                // Logs pour debug mobile
-                console.log('🔍 Mobile Coverage Debug - totalBureaux:', totalBureaux, 'bureauRows.length:', bureauRows.length, 'totalBureauxCount:', totalBureauxCount, 'PV publiés:', publishedBureauIds.size);
-
-                // Les données sont maintenant gérées par les useEffect
-
-                const coveragePercentage = totalBureauxCount > 0 ? Math.round((publishedBureauIds.size / totalBureauxCount) * 100) : 0;
-                const isComplete = coveragePercentage >= 100;
-
-                const bgColor = isComplete
-                  ? "bg-green-100"
-                  : "bg-orange-100";
-                const textColor = isComplete
-                  ? "text-green-800"
-                  : "text-orange-800";
-
+                const bureauxPubCount = publishedBureauIds.size;
+                const coveragePercentage = totalBureaux > 0 ? Math.round((bureauxPubCount / totalBureaux) * 100) : 0;
+                const isComplete = totalBureaux > 0 && bureauxPubCount >= totalBureaux;
+                const bgColor = isComplete ? "bg-green-100" : "bg-orange-100";
+                const textColor = isComplete ? "text-green-800" : "text-orange-800";
                 return (
                   <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
                     <div className="text-center">
@@ -2761,19 +2260,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                       </p>
                       <div className={`${bgColor} rounded-lg p-3 sm:p-4 mb-3`}>
                         <div className={`text-xl sm:text-2xl font-bold ${textColor} mb-1`}>
-                          {coveragePercentage}%
+                          {totalBureaux > 0 ? `${coveragePercentage}%` : '0%'}
                         </div>
                         <div className="text-xs sm:text-sm text-gray-600">
-                          {bureauxAvecResultats} sur {totalBureauxCount} bureaux
+                          {bureauxPubCount} sur {totalBureaux} bureaux
                         </div>
                       </div>
                       <div className="text-xs sm:text-sm text-gray-600">
-                        {isDataEstimated
-                          ? "Données estimées"
-                          : isComplete
-                            ? "Tous les bureaux ont été publiés"
-                            : "PV publiés / Total bureaux"
-                        }
+                        {isComplete ? "Tous les bureaux ont été publiés" : "PV publiés / Total bureaux"}
                       </div>
                     </div>
                   </div>
@@ -2839,8 +2333,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 </div>
                 <h3 className="text-lg sm:text-xl lg:text-2xl font-semibold text-gray-800 mb-2 sm:mb-3">Aucun résultat disponible</h3>
                 <p className="text-gray-600 max-w-md mx-auto px-2 sm:px-4 text-sm sm:text-base">
-                  Les résultats de cette élection ne sont pas encore publiés.
-                  Revenez plus tard pour consulter les résultats.
+                  Les résultats de cette élection sont publiés au fur et à mesure du vote.
                 </p>
               </div>
             ) : (
@@ -3619,7 +3112,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     </h3>
                     <p className="text-gray-600 text-xs sm:text-sm lg:text-base max-w-md mx-auto">
                       {isProResults
-                        ? 'Les résultats de cette élection sont publiés au fur et à mesure du vote.'
+                        ? 'Les résultats par établissement et collège électoral seront affichés dès que les premiers procès-verbaux seront publiés.'
                         : 'Les données détaillées des centres et bureaux de vote ne sont pas encore disponibles. Elles seront affichées dès que les résultats seront publiés.'}
                     </p>
                   </div>
