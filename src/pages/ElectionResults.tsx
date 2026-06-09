@@ -2336,7 +2336,25 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center">
               {/* Carte dépouillement pour élections pro */}
-              {isProResults && totalGroupCount > 0 ? (
+              {isProResults && totalGroupCount === 0 ? (
+                <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
+                  <div className="text-center">
+                    <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-1">
+                      Avancement du dépouillement
+                    </h3>
+                    <p className="text-xs text-gray-500 mb-3">Sièges dépouillés / Total sièges élection</p>
+                    <div className="bg-orange-100 rounded-lg p-3 sm:p-4 mb-3">
+                      <div className="text-2xl sm:text-3xl font-bold text-orange-800 mb-1">
+                        0%
+                      </div>
+                      <div className="text-xs sm:text-sm text-gray-600">
+                        Aucun siège dépouillé
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">En attente des premiers procès-verbaux</p>
+                  </div>
+                </div>
+              ) : isProResults && totalGroupCount > 0 ? (
                 (() => {
                   const depPct = Math.round((publishedGroupCount / totalGroupCount) * 100);
                   const isComplete = publishedGroupCount >= totalGroupCount;
