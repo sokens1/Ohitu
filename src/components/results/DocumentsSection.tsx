@@ -46,6 +46,7 @@ interface Center {
   id: string;
   name: string;
   assignedColleges: string[]; // [] = tous
+  bureauNames?: string[];     // noms des bureaux assignés (president-bureau / suppleant)
 }
 
 interface ReviewState {
@@ -200,7 +201,26 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         : ['cadres', 'employes', 'ouvriers', 'general'];
       setAllCollegeTypes(electionColleges);
 
+      // Noms des bureaux assignés pour president-bureau / suppleant-president
+      const BUREAU_ROLES = ['president-bureau', 'suppleant-president'];
+      let bureauNameMap = new Map<string, string>(); // bureauId → name
+      if (canUpload && user?.role && BUREAU_ROLES.includes(user.role)) {
+        const allBureauIds: string[] = Object.values(user.assigned_center_bureaux ?? {}).flat() as string[];
+        if (allBureauIds.length > 0) {
+          const { data: vbNameRows } = await supabase
+            .from('voting_bureaux')
+            .select('id, name')
+            .in('id', allBureauIds);
+          bureauNameMap = new Map((vbNameRows ?? []).map((b: any) => [b.id, b.name]));
+        }
+      }
+
       const builtCenters: Center[] = centerIds.map(cid => {
+        const assignedBureauIds: string[] = (user?.assigned_center_bureaux ?? {})[cid] ?? [];
+        const bureauNames = assignedBureauIds
+          .map(bid => bureauNameMap.get(bid))
+          .filter((n): n is string => !!n);
+
         if (canUpload) {
           // Président : UNIQUEMENT les collèges assignés pour ce centre
           // Si liste vide → "vide = tous" → tous les collèges de l'élection
@@ -209,6 +229,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
             id: cid,
             name: (centerMap.get(cid) ?? cid) as string,
             assignedColleges: assigned.length > 0 ? assigned : electionColleges,
+            bureauNames: bureauNames.length > 0 ? bureauNames : undefined,
           };
         }
         return {
@@ -756,6 +777,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-gray-900 text-sm truncate">{center.name}</p>
+                  {center.bureauNames && center.bureauNames.length > 0 && (
+                    <p className="text-[11px] text-teal-600 font-medium truncate">
+                      {center.bureauNames.join(' · ')}
+                    </p>
+                  )}
                   <p className={`text-[11px] ${allDone ? 'text-emerald-600' : 'text-gray-400'}`}>
                     {allDone ? '✓ Tous les documents déposés' : `${centerFilled}/${centerTotal} document${centerTotal > 1 ? 's' : ''}`}
                   </p>
