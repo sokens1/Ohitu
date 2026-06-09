@@ -353,16 +353,18 @@ export async function notifyOpinionReaction(opts: {
   collegeType: string | null;
   reactionType: 'approved' | 'overridden';
   actorName: string;
+  comment?: string | null;
 }): Promise<void> {
   const actorId = await getActorId();
   if (!actorId) return;
 
   const isApproved = opts.reactionType === 'approved';
   const cLabel     = collegeLabel(opts.collegeType);
+  const commentSuffix = !isApproved && opts.comment ? ` : "${opts.comment}"` : '';
   await insertNotifications([opts.recipientId], actorId, {
     type:       'opinion_reaction',
     title:      `${isApproved ? 'Réserves approuvée' : 'Réserves annulée'} — ${opts.centerName}${cLabel}`,
-    message:    `${opts.actorName} a ${isApproved ? 'approuvé' : 'annulé (marqué conforme)'} votre réserves sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}.`,
+    message:    `${opts.actorName} a ${isApproved ? 'approuvé' : 'annulé (marqué conforme)'} votre réserves sur le PV de ${opts.bureauName}${cLabel} — ${opts.centerName}${commentSuffix}.`,
     severity:   isApproved ? 'success' : 'info',
     election_id: opts.electionId,
     center_id:   opts.centerId,

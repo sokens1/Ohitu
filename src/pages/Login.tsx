@@ -90,7 +90,7 @@ const Login = () => {
   const [loginError, setLoginError] = useState<{ type: 'credentials' | 'disabled' | 'pending' | 'generic'; message: string } | null>(null);
   const [elections, setElections] = useState<Election[]>([]);
   const [electionsLoading, setElectionsLoading] = useState(true);
-  const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau'];
+  const OPERATIONAL_ROLES: UserRole[] = ['agent-saisie', 'validateur', 'observateur', 'president-bureau', 'president-etablissement', 'suppleant-president', 'employeur'];
 
   const { login, user } = useAuth();
   const navigate = useNavigate();
