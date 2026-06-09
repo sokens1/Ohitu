@@ -1,7 +1,8 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserRole } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import {
   Home,
@@ -71,6 +72,20 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const isMobile = useIsMobile();
+  const [bureauNames, setBureauNames] = useState<string[]>([]);
+
+  // Charger les noms des bureaux assignés pour president-bureau et suppleant-president
+  useEffect(() => {
+    const BUREAU_ROLES: UserRole[] = ['president-bureau', 'suppleant-president'];
+    if (!user || !BUREAU_ROLES.includes(user.role)) { setBureauNames([]); return; }
+    const ids: string[] = Object.values(user.assigned_center_bureaux ?? {}).flat() as string[];
+    if (ids.length === 0) { setBureauNames([]); return; }
+    supabase
+      .from('voting_bureaux')
+      .select('name')
+      .in('id', ids)
+      .then(({ data }) => setBureauNames((data ?? []).map((b: any) => b.name)));
+  }, [user?.id, user?.role]);
   const {
     notifications,
     unreadCount,
