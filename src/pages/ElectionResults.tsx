@@ -591,7 +591,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     };
 
     fetchAvailableElections();
-  }, [user, isGlobalAdmin, assignedElectionIds]);
+  // Dépendances primitives stables — évite la boucle infinie due au tableau assignedElectionIds
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isGlobalAdmin, assignedElectionIds.join(',')]);
 
   // Reset couverture quand l'élection change (totalBureaux est désormais défini dans fetchElectionResults)
   useEffect(() => {
@@ -735,7 +737,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const centerNamesMap = new Map((centersNamesData || []).map((c: any) => [c.id, c.name]));
 
       // Paramètre admin : afficher ou non les lignes rouges quorum sur la page publique
-      const showQuorumFailedPublic = election.show_quorum_failed_public !== false;
+      // election may not have show_quorum_failed_public on its typed interface
+      const showQuorumFailedPublic = (election as any)?.show_quorum_failed_public !== false;
 
       // Mapper tous les PV publiés (sans filtre quorum) — utilisé pour les cartes stats
       const allPublishedBureaux = (pvsData || []).map((pv: any) => {
@@ -865,7 +868,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         candidateVotesMap.set(groupKey, existing);
       });
 
-      let filteredSummaryData = Array.from(candidateVotesMap.values());
+      const filteredSummaryData = Array.from(candidateVotesMap.values());
 
       // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
       // unionLists et electoralCollegesForPro sont déjà chargés au round 2
