@@ -913,8 +913,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         ? totalElectorsElection
         : (allBureauxRegistered > 0 ? allBureauxRegistered : (election.nb_electeurs || 0));
 
-      // Pro : si les PV/bureaux n'ont pas d'effectif saisi, utiliser le total électeurs de l'élection
-      if (isProElection && totalRegistered === 0 && totalRegisteredElection > 0) {
+      // Pro : le total élection est la référence canonique ; on prend le max pour couvrir
+      // les PVs dont total_registered est null ou sous-renseigné
+      if (isProElection && totalRegisteredElection > totalRegistered) {
         totalRegistered = totalRegisteredElection;
       }
 
@@ -1227,16 +1228,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         setTotalSeats(tSeats);
 
         // Avancement du dépouillement en SIÈGES
-        // Numérateur : somme des sièges des groupes (centerId_colType) ayant un PV publié
-        // Si showQuorumFailedPublic=false → on exclut les PV à quorum non atteint du décompte
+        // Numérateur : tous les PV publiés comptent comme dépouillés, quorum ou non
         const publishedGroupKeys = new Set<string>(
           (pvsData || [])
-            .filter((pv: any) => {
-              if (showQuorumFailedPublic) return true;
-              const reg = Number(pv.total_registered) || 0;
-              const exp = Number(pv.votes_expressed) || 0;
-              return !(reg > 0 && exp < reg / 2);
-            })
             .map((pv: any) => {
               const centerId = String(pv.voting_bureaux?.center_id || '');
               const ct = normalizeCollegeKey(pv.college_type || (pv.voting_bureaux as any)?.college_type || '') || '';
@@ -2339,7 +2333,25 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center">
               {/* Carte dépouillement pour élections pro */}
-              {isProResults && totalGroupCount > 0 ? (
+              {isProResults && totalGroupCount === 0 ? (
+                <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
+                  <div className="text-center">
+                    <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-1">
+                      Avancement du dépouillement
+                    </h3>
+                    <p className="text-xs text-gray-500 mb-3">Sièges dépouillés / Total sièges élection</p>
+                    <div className="bg-orange-100 rounded-lg p-3 sm:p-4 mb-3">
+                      <div className="text-2xl sm:text-3xl font-bold text-orange-800 mb-1">
+                        0%
+                      </div>
+                      <div className="text-xs sm:text-sm text-gray-600">
+                        Aucun siège dépouillé
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">En attente des premiers procès-verbaux</p>
+                  </div>
+                </div>
+              ) : isProResults && totalGroupCount > 0 ? (
                 (() => {
                   const depPct = Math.round((publishedGroupCount / totalGroupCount) * 100);
                   const isComplete = publishedGroupCount >= totalGroupCount;
@@ -3604,7 +3616,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     </h3>
                     <p className="text-gray-600 text-xs sm:text-sm lg:text-base max-w-md mx-auto">
                       {isProResults
-                        ? 'Les résultats par établissement et collège électoral seront affichés dès que les premiers procès-verbaux seront publiés.'
+                        ? 'Les résultats de cette élection sont publiés au fur et à mesure du vote.'
                         : 'Les données détaillées des centres et bureaux de vote ne sont pas encore disponibles. Elles seront affichées dès que les résultats seront publiés.'}
                     </p>
                   </div>
