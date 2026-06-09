@@ -1988,17 +1988,16 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                 Suivant
                 <ChevronRight className="w-4 h-4 ml-2" />
               </Button>
-            ) : (
+            ) : !readOnly ? (
               <Button
                 onClick={handleSubmitPV}
-                disabled={!canSubmit() || submitting || readOnly}
+                disabled={!canSubmit() || submitting}
                 className="bg-green-600 hover:bg-green-700"
-                title={readOnly ? 'Accès en lecture seule' : undefined}
               >
                 <CheckCircle className="w-4 h-4 mr-2" />
                 {submitting ? 'Soumission...' : 'Soumettre le PV'}
               </Button>
-            )}
+            ) : null}
           </div>
         </CardContent>
       </Card>

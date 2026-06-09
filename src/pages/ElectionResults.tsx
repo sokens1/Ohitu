@@ -330,9 +330,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   const [totalGroupCount, setTotalGroupCount] = useState<number>(0);
   // Sièges par groupe (centerId_collegeType → seats_to_fill)
   const [bureauSeatsMap, setBureauSeatsMap] = useState<Map<string, number>>(new Map());
-  // Modal politique de confidentialité
-  const [privacyOpen, setPrivacyOpen] = useState(false);
-  
   // État pour stocker les IDs des bureaux avec PV publiés
   const [publishedBureauIds, setPublishedBureauIds] = useState<Set<string>>(new Set());
 
@@ -3781,34 +3778,19 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 © {new Date(results.last_updated).getFullYear()} o'Hitu. Tous droits réservés.
               </div>
               <div className="flex items-center justify-center gap-3 text-[10px] sm:text-xs text-white/70">
-                <button
-                  onClick={() => setPrivacyOpen(true)}
+                <Link
+                  to="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="hover:text-white underline underline-offset-2 transition-colors"
                 >
                   Politique de confidentialité
-                </button>
+                </Link>
               </div>
             </div>
           </div>
         </footer>
       </div>
-
-      {/* Modal Politique de confidentialité */}
-      <Dialog open={privacyOpen} onOpenChange={setPrivacyOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Politique de confidentialité
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 text-center text-gray-500 text-sm">
-            <p className="font-medium text-gray-700 mb-2">Contenu à venir</p>
-            <p className="text-xs text-gray-400">
-              La politique de confidentialité de la plateforme o'Hitu sera publiée prochainement.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Chatbot flottant */}
       <FloatingChatbot />

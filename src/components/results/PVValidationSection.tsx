@@ -341,6 +341,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
           collegeType:   pvData.college_type ?? null,
           reactionType:  type,
           actorName:     reactorName,
+          comment:       comment || null,
         }).catch(() => {/* silencieux */});
       }
       setReactionTarget(null);
