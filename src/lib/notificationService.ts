@@ -124,6 +124,16 @@ export async function deleteNotification(id: string): Promise<void> {
   await supabase.from('notifications').delete().eq('id', id);
 }
 
+/** Super-admin uniquement : supprime toutes les notifications antérieures à `before`.
+ *  Retourne le nombre de lignes supprimées, ou lance une erreur si l'appel échoue. */
+export async function purgeNotificationsBefore(before: Date): Promise<number> {
+  const { data, error } = await supabase.rpc('purge_notifications_before', {
+    p_before: before.toISOString(),
+  });
+  if (error) throw error;
+  return (data as number) ?? 0;
+}
+
 // ── Événements métier ─────────────────────────────────────────────────────────
 
 /**
