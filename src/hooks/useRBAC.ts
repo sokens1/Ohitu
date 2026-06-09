@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserRole } from '@/contexts/AuthContext';
 
@@ -107,13 +108,18 @@ export function useRBAC() {
     return OPERATIONAL_ROLES.includes(user.role) ? '/results' : '/dashboard';
   };
 
-  // IDs des élections assignées (plusieurs possible)
-  const assignedElectionIds: string[] =
-    user?.assigned_election_ids?.length
-      ? user.assigned_election_ids
-      : user?.assigned_election_id
-        ? [user.assigned_election_id]
-        : [];
+  // IDs des élections assignées — mémoïsé pour éviter les boucles de re-renders
+  // (un nouveau tableau à chaque appel casserait les dépendances useEffect)
+  const assignedElectionIds = useMemo<string[]>(
+    () =>
+      user?.assigned_election_ids?.length
+        ? user.assigned_election_ids
+        : user?.assigned_election_id
+          ? [user.assigned_election_id]
+          : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user?.assigned_election_ids?.join(','), user?.assigned_election_id]
+  );
 
   return {
     can,

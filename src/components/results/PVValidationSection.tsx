@@ -559,7 +559,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         votes_expressed: pv.votes_expressed,
         null_votes: pv.null_votes,
         pv_photo_url: pv.pv_photo_url,
-        entered_by: pv.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : 'Inconnu',
+        entered_by: pv.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : null,
         entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
         validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',

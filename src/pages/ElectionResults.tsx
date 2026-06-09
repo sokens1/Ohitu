@@ -590,7 +590,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     };
 
     fetchAvailableElections();
-  }, [user, isGlobalAdmin, assignedElectionIds]);
+  // Dépendances primitives stables — évite la boucle infinie due au tableau assignedElectionIds
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isGlobalAdmin, assignedElectionIds.join(',')]);
 
   // Calculer le taux de couverture quand l'élection change
   useEffect(() => {
@@ -843,7 +845,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       console.log('📊 [ElectionResults] Résultats candidats chargés:', candidateResultsData);
 
       // Paramètre admin : afficher ou non les lignes rouges quorum sur la page publique
-      const showQuorumFailedPublic = election.show_quorum_failed_public !== false;
+      // election may not have show_quorum_failed_public on its typed interface
+      const showQuorumFailedPublic = (election as any)?.show_quorum_failed_public !== false;
 
       // Mapper tous les PV publiés (sans filtre quorum) — utilisé pour les cartes stats
       const allPublishedBureaux = (pvsData || []).map((pv: any) => {
@@ -973,7 +976,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         candidateVotesMap.set(groupKey, existing);
       });
 
-      let filteredSummaryData = Array.from(candidateVotesMap.values());
+      const filteredSummaryData = Array.from(candidateVotesMap.values());
 
       // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
       let unionLists: any[] = [];
@@ -2395,7 +2398,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               ) : (() => {
                 // Calculer le taux de couverture basé sur les données réelles
                 // Utiliser totalBureaux si disponible, sinon utiliser un fallback intelligent
-                let totalBureauxCount = totalBureaux;
+                const totalBureauxCount = totalBureaux;
 
                 // Si pas de données de la base, utiliser les données disponibles comme fallback temporaire
                 if (totalBureauxCount === 0) {
