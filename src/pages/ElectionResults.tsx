@@ -2369,8 +2369,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                   })}
                 </div>
               ) : (
-                <div className="overflow-x-auto -mx-2 sm:-mx-4 lg:-mx-6">
-                  <table className="min-w-full bg-white border rounded-lg">
+                <div className="overflow-x-auto">
+                  <table className="min-w-[380px] w-full bg-white border rounded-lg">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="text-left px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">
@@ -2427,7 +2427,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         {showPublicResults && (
         <Dialog open={!!openCandidateId} onOpenChange={(o) => !o && setOpenCandidateId(null)}>
           <DialogContent
-            className="w-[min(28rem,calc(100vw-2rem))] sm:w-full sm:max-w-4xl lg:max-w-5xl max-h-[calc(100vh-2rem)] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6"
+            className="w-[calc(100vw-1rem)] sm:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto p-3 sm:p-6"
           >
             <DialogHeader>
               <DialogTitle className="text-lg sm:text-xl">
@@ -2484,15 +2484,16 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                             <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200">
                               <h4 className="font-semibold text-gray-800 text-sm">{group.center.center_name}</h4>
                             </div>
-                            <div className="px-4 py-3">
-                              <table className="w-full text-xs sm:text-sm">
+                            <div className="px-3 py-3">
+                              <div className="overflow-x-auto">
+                              <table className="w-full min-w-[280px] text-xs sm:text-sm">
                                 <thead>
                                   <tr className="border-b border-gray-200">
-                                    <th className="text-left py-1.5 font-semibold text-gray-600">Collège</th>
-                                    <th className="text-center py-1.5 font-semibold text-gray-600 whitespace-nowrap">Sièges obtenus</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600">Voix</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600 pr-1">Score</th>
-                                    <th className="text-left py-1.5 font-semibold text-gray-600 pl-4">Délégué</th>
+                                    <th className="text-left py-1.5 pr-2 font-semibold text-gray-600">Collège</th>
+                                    <th className="text-center py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Sièges</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
+                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -2509,17 +2510,25 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                       ? `${(r.syndicat.votes / r.total_expressed_votes * 100).toFixed(1)} %`
                                       : '—';
                                     return (
-                                      <tr key={i} className="hover:bg-gray-50 transition-colors">
-                                        <td className="py-2 font-medium text-gray-800">{r.collegeName}</td>
-                                        <td className="py-2 text-center font-bold text-blue-600">{r.syndicat.seats}</td>
-                                        <td className="py-2 text-right text-gray-600">{r.syndicat.votes?.toLocaleString() || '0'}</td>
-                                        <td className="py-2 text-right text-gray-500 pr-1">{score}</td>
-                                        <td className="py-2 text-gray-600 pl-4">{delegueDisplay}</td>
-                                      </tr>
+                                      <React.Fragment key={i}>
+                                        <tr className="hover:bg-gray-50 transition-colors">
+                                          <td className="py-2 pr-2 font-medium text-gray-800">{r.collegeName}</td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{r.syndicat.seats}</td>
+                                          <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{r.syndicat.votes?.toLocaleString() || '0'}</td>
+                                          <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
+                                          <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                        </tr>
+                                        {delegueDisplay && delegueDisplay !== '—' && (
+                                          <tr className="sm:hidden bg-slate-50">
+                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">Délégué : {delegueDisplay}</td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
                                     );
                                   })}
                                 </tbody>
                               </table>
+                              </div>
                             </div>
                           </div>
                         );
@@ -2765,24 +2774,24 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                         <div className="hidden sm:block" />
                         {centerTotalSeats > 0 && (
                           <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                            <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Sièges en lice</div>
+                            <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Sièges en lice</div>
                             <div className="font-bold text-gray-800 text-sm sm:text-base">{centerTotalSeats}</div>
                           </div>
                         )}
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_registered === 'number' ? c.total_registered.toLocaleString('fr-FR') : (c.total_registered || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Votants</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Votants</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_voters === 'number' ? c.total_voters.toLocaleString('fr-FR') : (c.total_voters || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Exprimés</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Exprimés</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_expressed_votes === 'number' ? c.total_expressed_votes.toLocaleString('fr-FR') : (c.total_expressed_votes || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Abstention</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Abstention</div>
                           <div className={`font-bold text-sm sm:text-base ${typeof c.participation_pct === 'number'
                             ? ((100 - c.participation_pct) >= 49.51 ? 'text-red-600' : ((100 - c.participation_pct) > 20.5 ? 'text-yellow-600' : 'text-green-600'))
                             : 'text-gray-400'}`}>
@@ -2858,38 +2867,39 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   </div>
                                   <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>Abs. {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
                                 </div>
-                                <div className={`mt-2 grid ${centerTotalSeats > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-2 text-xs text-center ml-6`}>
+                                <div className={`mt-2 grid ${centerTotalSeats > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5 text-center ml-4 sm:ml-6`}>
                                   {centerTotalSeats > 0 && (
-                                    <div>
-                                      <div className="text-gray-500 uppercase">Sièges</div>
-                                      <div className="font-semibold text-gray-800">{rowSeats > 0 ? rowSeats : '-'}</div>
+                                    <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                      <div className="text-[10px] text-gray-500 uppercase leading-tight">Sièges</div>
+                                      <div className="text-xs font-semibold text-gray-800">{rowSeats > 0 ? rowSeats : '-'}</div>
                                     </div>
                                   )}
-                                  <div>
-                                    <div className="text-gray-500 uppercase">{electorsLabel}</div>
-                                    <div className="font-semibold text-gray-800">{row.total_registered?.toLocaleString() || '-'}</div>
+                                  <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                    <div className="text-[10px] text-gray-500 uppercase leading-tight truncate">{electorsLabel}</div>
+                                    <div className="text-xs font-semibold text-gray-800">{row.total_registered?.toLocaleString() || '-'}</div>
                                   </div>
-                                  <div>
-                                    <div className="text-gray-500 uppercase">Votants</div>
-                                    <div className="font-semibold text-gray-800">{row.total_voters?.toLocaleString() || '-'}</div>
+                                  <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                    <div className="text-[10px] text-gray-500 uppercase leading-tight">Votants</div>
+                                    <div className="text-xs font-semibold text-gray-800">{row.total_voters?.toLocaleString() || '-'}</div>
                                   </div>
-                                  <div>
-                                    <div className="text-gray-500 uppercase">Exprimés</div>
-                                    <div className="font-semibold text-gray-800">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
+                                  <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                    <div className="text-[10px] text-gray-500 uppercase leading-tight">Exprimés</div>
+                                    <div className="text-xs font-semibold text-gray-800">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
                                   </div>
                                 </div>
                               </div>
                             </summary>
                             {/* Accordéon syndicats */}
-                            <div className="px-4 sm:px-8 lg:px-12 py-3 bg-slate-50 border-t border-gray-100">
-                              <table className="w-full text-xs sm:text-sm">
+                            <div className="px-2 sm:px-6 lg:px-10 py-3 bg-slate-50 border-t border-gray-100">
+                              <div className="overflow-x-auto">
+                              <table className="w-full min-w-[280px] text-xs sm:text-sm">
                                 <thead>
                                   <tr className="border-b border-gray-200">
-                                    <th className="text-left py-1.5 font-semibold text-gray-600">Syndicat</th>
-                                    <th className="text-center py-1.5 font-semibold text-gray-600 whitespace-nowrap">Sièges obtenus</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600">Voix</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600 pr-1">Score</th>
-                                    <th className="text-left py-1.5 font-semibold text-gray-600 pl-4">Délégué</th>
+                                    <th className="text-left py-1.5 pr-2 font-semibold text-gray-600">Syndicat</th>
+                                    <th className="text-center py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Sièges</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
+                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -2906,15 +2916,22 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                       ? `${(s.votes / row.total_expressed_votes * 100).toFixed(1)} %`
                                       : '—';
                                     return (
-                                      <tr key={si} className="hover:bg-white transition-colors">
-                                        <td className="py-2 font-medium text-gray-800">
-                                          {s.syndicat}
-                                        </td>
-                                        <td className="py-2 text-center font-bold text-blue-600">{s.seats}</td>
-                                        <td className="py-2 text-right text-gray-600">{s.votes?.toLocaleString() || '0'}</td>
-                                        <td className="py-2 text-right text-gray-500 pr-1">{score}</td>
-                                        <td className="py-2 text-gray-600 pl-4">{delegueDisplay}</td>
-                                      </tr>
+                                      <React.Fragment key={si}>
+                                        <tr className="hover:bg-white transition-colors">
+                                          <td className="py-2 pr-2 font-medium text-gray-800 break-words max-w-[120px] sm:max-w-none">
+                                            {s.syndicat}
+                                          </td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{s.seats}</td>
+                                          <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{s.votes?.toLocaleString() || '0'}</td>
+                                          <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
+                                          <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                        </tr>
+                                        {delegueDisplay && delegueDisplay !== '—' && (
+                                          <tr className="sm:hidden bg-white">
+                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">Délégué : {delegueDisplay}</td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
                                     );
                                   }) : (
                                     <tr>
@@ -2925,6 +2942,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   )}
                                 </tbody>
                               </table>
+                              </div>
                             </div>
                           </details>
                         );
