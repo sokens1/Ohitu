@@ -84,6 +84,7 @@ interface ElectionResults {
   election: ElectionData | null;
   total_voters: number;
   total_voters_election?: number; // Nombre total d'inscrits de l'élection
+  total_registered_published?: number; // Inscrits dans les bureaux publiés uniquement
   total_votes_cast: number;
   participation_rate: number;
   candidates: CandidateResult[];
@@ -594,158 +595,65 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isGlobalAdmin, assignedElectionIds.join(',')]);
 
-  // Calculer le taux de couverture quand l'élection change
+  // Reset couverture quand l'élection change (totalBureaux est désormais défini dans fetchElectionResults)
   useEffect(() => {
-    const isMobile = window.innerWidth < 640;
-    console.log('🔍 Mobile useEffect electionId - isMobile:', isMobile, 'electionId:', electionId, 'type:', typeof electionId);
-    if (electionId) {
-      console.log('🔍 Mobile Appel calculateBureauCoverage depuis useEffect electionId');
-      calculateBureauCoverage();
-
-      // Fallback pour mobile : retry plus agressif
-      if (isMobile) {
-        // Retry immédiat après 500ms
-        setTimeout(() => {
-          console.log('🔍 Mobile Fallback 500ms - totalBureaux:', totalBureaux);
-          if (totalBureaux === 0) {
-            console.log('🔍 Mobile Fallback 500ms - Retry calculateBureauCoverage');
-            calculateBureauCoverage();
-          }
-        }, 500);
-
-        // Retry après 1.5s
-        setTimeout(() => {
-          console.log('🔍 Mobile Fallback 1.5s - totalBureaux:', totalBureaux);
-          if (totalBureaux === 0) {
-            console.log('🔍 Mobile Fallback 1.5s - Retry calculateBureauCoverage');
-            calculateBureauCoverage();
-          }
-        }, 1500);
-
-        // Retry après 3s
-        setTimeout(() => {
-          console.log('🔍 Mobile Fallback 3s - totalBureaux:', totalBureaux);
-          if (totalBureaux === 0) {
-            console.log('🔍 Mobile Fallback 3s - Retry calculateBureauCoverage');
-            calculateBureauCoverage();
-          }
-        }, 3000);
-      }
-    } else {
-      console.log('🔍 Mobile Pas d\'electionId, reset des valeurs');
+    if (!electionId) {
       setTotalBureaux(0);
       setBureauxAvecResultats(0);
-      setMobileRetryCount(0);
     }
   }, [electionId]);
-
-  // Recalculer le taux de couverture quand les données des bureaux changent
-  useEffect(() => {
-    const isMobile = window.innerWidth < 640;
-    console.log('🔍 Mobile useEffect centerRows/bureauRows - isMobile:', isMobile, 'centerRows.length:', centerRows.length, 'bureauRows.length:', bureauRows.length, 'electionId:', electionId);
-    if (electionId && (centerRows.length >= 0 && bureauRows.length >= 0)) { // Permettre le calcul même avec 0 bureaux
-      console.log('🔍 Mobile Appel calculateBureauCoverage depuis useEffect centerRows/bureauRows');
-      calculateBureauCoverage();
-    }
-  }, [centerRows, bureauRows]);
-
-  // Recalculer le taux de couverture quand totalBureaux est mis à jour
-  useEffect(() => {
-    const isMobile = window.innerWidth < 640;
-    console.log('🔍 Mobile useEffect totalBureaux - isMobile:', isMobile, 'totalBureaux:', totalBureaux, 'bureauRows.length:', bureauRows.length);
-    if (totalBureaux > 0 && bureauRows.length > 0) {
-      console.log('🔍 Mobile totalBureaux mis à jour, recalcul de la couverture');
-      // Recalculer les bureaux avec résultats
-      const avecResultats = bureauRows.filter(bureau =>
-        bureau.total_voters > 0 || bureau.total_registered > 0 || bureau.total_expressed_votes > 0
-      ).length;
-      setBureauxAvecResultats(avecResultats);
-    }
-  }, [totalBureaux, bureauRows]);
 
   const fetchElectionResults = async (id: string) => {
     try {
       setLoading(true);
 
-      // Récupérer les données de l'élection
+      // ROUND 1 : données de l'élection (nécessaire pour connaître le type)
       const election = await fetchElectionById(id);
-      if (!election) {
-        throw new Error('Élection non trouvée');
-      }
+      if (!election) throw new Error('Élection non trouvée');
 
       const isProElection = isProfessionalElection(election.type);
-      const totalElectorsElection = await getElectionElectorsTotal(id, election.type);
-
-      // Vérifier visibilité publique (bypassed en mode admin preview)
-      if (!isAdminPreview && !isElectionPublishedForPublic(election)) {
-        console.log('⚠️ Élection non accessible au public - Aucun résultat affiché');
-        setPublishedBureauIds(new Set());
-        setResults({
-          election,
-          total_voters: 0,
-          total_voters_election: totalElectorsElection,
-          total_votes_cast: 0,
-          participation_rate: 0,
-          candidates: [],
-          last_updated: new Date().toISOString()
-        });
-        setCenterRows([]);
-        setBureauRows([]);
-        setLoading(false);
-        return;
-      }
-
-      console.log('✅ Élection publiée - Chargement des résultats');
-
-      // Vue publique : uniquement les PV publiés. Vue admin preview : validés aussi acceptés.
       const pvStatuses = isAdminPreview
         ? ['published', 'validated', 'validé']
         : ['published'];
-      const { data: publishedPVs, error: pvError } = await supabase
-        .from('procès_verbaux')
-        .select('bureau_id, id, status')
-        .eq('election_id', id)
-        .in('status', pvStatuses);
 
-      if (pvError) {
-        console.error('❌ Erreur lors de la récupération des PV publiés/validés:', pvError);
-      }
+      // ROUND 2 : en parallèle — liste PV, centres, collèges électoraux, listes syndicales
+      const [
+        { data: publishedPVs, error: pvError },
+        { data: electionCentersRaw },
+        { data: electoralCollegesRaw },
+        { data: unionListsRaw },
+      ] = await Promise.all([
+        supabase.from('procès_verbaux').select('bureau_id, id, status').eq('election_id', id).in('status', pvStatuses),
+        supabase.from('election_centers').select('center_id').eq('election_id', id),
+        isProElection
+          ? supabase.from('electoral_colleges').select('name, college_type, seats_to_fill, total_voters').eq('election_id', id)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        isProElection
+          ? supabase.from('union_lists').select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym, logo)').eq('election_id', id).order('order_num', { ascending: true, nullsFirst: true }).order('id', { ascending: true })
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
 
-      console.log('🔍 [ElectionResults] PV récupérés:', publishedPVs);
-      console.log('🔍 [ElectionResults] Election ID recherché:', id);
+      if (pvError) console.error('❌ Erreur PV:', pvError);
+
+      // Données pro disponibles dès le round 2
+      const electoralCollegesForPro: any[] = electoralCollegesRaw || [];
+      let unionLists: any[] = unionListsRaw || [];
+      const collegesElectorsTotal = electoralCollegesForPro.reduce((s: number, c: any) => s + (Number(c.total_voters) || 0), 0);
 
       const publishedBureauIdsSet = new Set<string>((publishedPVs || []).map(pv => String(pv.bureau_id)));
       setPublishedBureauIds(publishedBureauIdsSet);
-      console.log('📊 [ElectionResults] Nombre de PV publiés/validés:', publishedBureauIdsSet.size);
-      console.log('📊 [ElectionResults] IDs des bureaux publiés/validés:', Array.from(publishedBureauIdsSet));
 
-      // Si aucun PV publié ou validé, afficher des résultats vides
-      if (publishedBureauIdsSet.size === 0) {
-        console.log('⚠️ Aucun PV publié ou validé - Affichage de résultats vides');
-        
-        // Calculer quand même le vrai total d'inscrits pour l'affichage
-        const { data: electionCenters } = await supabase
-          .from('election_centers')
-          .select('center_id')
-          .eq('election_id', id);
+      const allCenterIds = (electionCentersRaw || []).map((ec: any) => ec.center_id).filter(Boolean);
+      const publishedPVIds = (publishedPVs || []).map(pv => pv.id);
 
-        let allBureauxRegistered = 0;
-        if (electionCenters && electionCenters.length > 0) {
-          const centerIds = electionCenters.map(ec => ec.center_id);
-          const { data: allBureauxData } = await supabase
-            .from('voting_bureaux')
-            .select('registered_voters')
-            .in('center_id', centerIds);
-
-          if (allBureauxData) {
-            allBureauxRegistered = allBureauxData.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
-          }
-        }
-        
+      // Vérifier visibilité publique
+      if (!isAdminPreview && !isElectionPublishedForPublic(election)) {
+        const totalElectorsElection = collegesElectorsTotal > 0 ? collegesElectorsTotal : (Number(election.nb_electeurs) || 0);
         setResults({
           election,
           total_voters: 0,
           total_voters_election: totalElectorsElection,
+          total_registered_published: 0,
           total_votes_cast: 0,
           participation_rate: 0,
           candidates: [],
@@ -757,55 +665,51 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         return;
       }
 
-      // Récupérer TOUS les bureaux de l'élection (complément au total électeurs)
-      const { data: electionCenters, error: centersError } = await supabase
-        .from('election_centers')
-        .select('center_id')
-        .eq('election_id', id);
+      // ROUND 3 : en parallèle — tous les bureaux + données complètes des PV publiés
+      const [
+        { data: allBureauxData },
+        { data: pvsData, error: pvsDataError },
+      ] = await Promise.all([
+        allCenterIds.length > 0
+          ? supabase.from('voting_bureaux').select('id, name, center_id, college, seats_to_fill, registered_voters').in('center_id', allCenterIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        publishedPVIds.length > 0
+          ? supabase.from('procès_verbaux').select(`id, bureau_id, college_type, total_registered, total_voters, votes_expressed, null_votes, voting_bureaux!inner(id, name, center_id, registered_voters, college_type)`).in('id', publishedPVIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
 
-      let allBureauxRegistered = 0;
-      let allBureauxList: any[] = [];
-      if (electionCenters && electionCenters.length > 0) {
-        const centerIds = electionCenters.map(ec => ec.center_id);
-        const { data: allBureauxData, error: bureauxError } = await supabase
-          .from('voting_bureaux')
-          .select('id, name, center_id, college, seats_to_fill, registered_voters')
-          .in('center_id', centerIds);
+      if (pvsDataError) console.error('❌ Erreur chargement PV:', pvsDataError);
 
-        if (allBureauxData) {
-          allBureauxList = allBureauxData;
-          allBureauxRegistered = allBureauxData.reduce((sum, b) => sum + (Number(b.registered_voters) || 0), 0);
-        }
+      const allBureauxList: any[] = allBureauxData || [];
+      const allBureauxRegistered = allBureauxList.reduce((sum: number, b: any) => sum + (Number(b.registered_voters) || 0), 0);
+
+      // Définir totalBureaux directement — évite les requêtes redondantes de calculateBureauCoverage
+      setTotalBureaux(allBureauxList.length);
+
+      const totalElectorsElection = collegesElectorsTotal > 0
+        ? collegesElectorsTotal
+        : (allBureauxRegistered > 0 ? allBureauxRegistered : (Number(election.nb_electeurs) || 0));
+
+      // Aucun PV publié → résultats vides
+      if (publishedBureauIdsSet.size === 0) {
+        setResults({
+          election,
+          total_voters: 0,
+          total_voters_election: totalElectorsElection,
+          total_registered_published: 0,
+          total_votes_cast: 0,
+          participation_rate: 0,
+          candidates: [],
+          last_updated: new Date().toISOString()
+        });
+        setCenterRows([]);
+        setBureauRows([]);
+        setBureauxAvecResultats(0);
+        setLoading(false);
+        return;
       }
 
-      console.log('📊 [ElectionResults] Total inscrits calculé depuis TOUS les bureaux:', allBureauxRegistered);
-
-      // Récupérer les données DIRECTEMENT depuis les PV publiés
-      const publishedPVIds = (publishedPVs || []).map(pv => pv.id);
-      
-      // 1. Récupérer les données des PV publiés
-      // On inclut voting_bureaux.college_type pour fallback quand pv.college_type est null
-      const { data: pvsData, error: pvsDataError } = await supabase
-        .from('procès_verbaux')
-        .select(`
-          id,
-          bureau_id,
-          college_type,
-          total_registered,
-          total_voters,
-          votes_expressed,
-          null_votes,
-          voting_bureaux!inner(id, name, center_id, registered_voters, college_type)
-        `)
-        .in('id', publishedPVIds);
-
-      if (pvsDataError) {
-        console.error('❌ Erreur chargement PV:', pvsDataError);
-      }
-
-      // Mapping pv_id → college_type
-      // Fallback : college_type du bureau si le PV n'a pas de college_type renseigné
-      // (évite d'ignorer silencieusement des PV dont le college_type est null)
+      // Mapping pv_id → college_type (fallback sur le bureau si PV sans college_type)
       const pvToCollegeType = new Map<string, string>(
         (pvsData || []).map((pv: any) => [
           String(pv.id),
@@ -813,36 +717,24 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         ])
       );
 
-      // Données electoral_colleges partagées (sièges par collège + calcul détail)
-      let electoralCollegesForPro: any[] = [];
+      // ROUND 4 : en parallèle — noms des centres + résultats candidats
+      const pvCenterIds = [...new Set((pvsData || []).map((pv: any) => pv.voting_bureaux?.center_id).filter(Boolean))];
 
-      console.log('📊 [ElectionResults] PV data chargés:', pvsData);
-      
-      // Récupérer les noms des centres
-      const centerIds = [...new Set((pvsData || []).map((pv: any) => pv.voting_bureaux?.center_id).filter(Boolean))];
-      const { data: centersNamesData } = await supabase
-        .from('voting_centers')
-        .select('id, name')
-        .in('id', centerIds);
-      
+      const [
+        { data: centersNamesData },
+        { data: candidateResultsData, error: crError },
+      ] = await Promise.all([
+        pvCenterIds.length > 0
+          ? supabase.from('voting_centers').select('id, name').in('id', pvCenterIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        publishedPVIds.length > 0
+          ? supabase.from('candidate_results').select(`pv_id, candidate_id, votes, candidates!inner(id, name, party)`).in('pv_id', publishedPVIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
+
+      if (crError) console.error('❌ Erreur chargement résultats candidats:', crError);
+
       const centerNamesMap = new Map((centersNamesData || []).map((c: any) => [c.id, c.name]));
-
-      // 2. Récupérer les résultats des candidats pour ces PV
-      const { data: candidateResultsData, error: crError } = await supabase
-        .from('candidate_results')
-        .select(`
-          pv_id,
-          candidate_id,
-          votes,
-          candidates!inner(id, name, party)
-        `)
-        .in('pv_id', publishedPVIds);
-
-      if (crError) {
-        console.error('❌ Erreur chargement résultats candidats:', crError);
-      }
-
-      console.log('📊 [ElectionResults] Résultats candidats chargés:', candidateResultsData);
 
       // Paramètre admin : afficher ou non les lignes rouges quorum sur la page publique
       // election may not have show_quorum_failed_public on its typed interface
@@ -935,8 +827,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         totalRegistered = totalRegisteredElection;
       }
 
-      const participationRate = totalRegistered > 0
-        ? Math.min(Math.max((votersSum / totalRegistered) * 100, 0), 100)
+      const participationRate = registeredInBureauxWithResults > 0
+        ? Math.min(Math.max((votersSum / registeredInBureauxWithResults) * 100, 0), 100)
         : 0;
 
       // Agréger les votes par candidat ou syndicat
@@ -979,24 +871,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const filteredSummaryData = Array.from(candidateVotesMap.values());
 
       // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
-      let unionLists: any[] = [];
+      // unionLists et electoralCollegesForPro sont déjà chargés au round 2
       let collegeSyndicatSeats = new Map<string, number>();
-      
+
       if (isProfessional) {
-        const [ecRowsResult, unionListsResult] = await Promise.all([
-          supabase
-            .from('electoral_colleges')
-            .select('name, college_type, seats_to_fill')
-            .eq('election_id', id),
-          supabase
-            .from('union_lists')
-            .select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym, logo)')
-            .eq('election_id', id)
-            .order('order_num', { ascending: true, nullsFirst: true })
-            .order('id', { ascending: true })
-        ]);
-        electoralCollegesForPro = ecRowsResult.data || [];
-        unionLists = unionListsResult.data || [];
 
         // seats_to_fill = total de l'élection pour ce collège
         // Les clés sont NORMALISÉES pour correspondre aux college_type des PV
@@ -1409,6 +1287,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         election,
         total_voters: totalRegistered,
         total_voters_election: totalRegisteredElection,
+        total_registered_published: registeredInBureauxWithResults,
         total_votes_cast: totalVotesCast,
         participation_rate: participationRate,
         candidates: finalCandidates,
@@ -2276,7 +2155,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 color="bg-gradient-to-br from-blue-500 to-blue-600"
                 subtitle={
                   isProfessionalElection(results.election?.type)
-                    ? `Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()} électeurs`
+                    ? `Bureaux dépouillés : ${(results.total_registered_published || 0).toLocaleString()} électeurs`
                     : `Bureaux dépouillés : ${(results.total_voters || 0).toLocaleString()} inscrits`
                 }
                 animated={true}
@@ -2349,25 +2228,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center">
               {/* Carte dépouillement pour élections pro */}
-              {isProResults && totalGroupCount === 0 ? (
-                <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
-                  <div className="text-center">
-                    <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-1">
-                      Avancement du dépouillement
-                    </h3>
-                    <p className="text-xs text-gray-500 mb-3">Sièges dépouillés / Total sièges élection</p>
-                    <div className="bg-orange-100 rounded-lg p-3 sm:p-4 mb-3">
-                      <div className="text-2xl sm:text-3xl font-bold text-orange-800 mb-1">
-                        0%
-                      </div>
-                      <div className="text-xs sm:text-sm text-gray-600">
-                        Aucun siège dépouillé
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">En attente des premiers procès-verbaux</p>
-                  </div>
-                </div>
-              ) : isProResults && totalGroupCount > 0 ? (
+              {isProResults && totalGroupCount > 0 ? (
                 (() => {
                   const depPct = Math.round((publishedGroupCount / totalGroupCount) * 100);
                   const isComplete = publishedGroupCount >= totalGroupCount;
@@ -2396,6 +2257,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                   );
                 })()
               ) : (() => {
+<<<<<<< HEAD
                 // Calculer le taux de couverture basé sur les données réelles
                 // Utiliser totalBureaux si disponible, sinon utiliser un fallback intelligent
                 const totalBureauxCount = totalBureaux;
@@ -2763,6 +2625,13 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                   ? "text-green-800"
                   : "text-orange-800";
 
+=======
+                const bureauxPubCount = publishedBureauIds.size;
+                const coveragePercentage = totalBureaux > 0 ? Math.round((bureauxPubCount / totalBureaux) * 100) : 0;
+                const isComplete = totalBureaux > 0 && bureauxPubCount >= totalBureaux;
+                const bgColor = isComplete ? "bg-green-100" : "bg-orange-100";
+                const textColor = isComplete ? "text-green-800" : "text-orange-800";
+>>>>>>> bf4eb0b5eb999987cd2102aab32e2a89f182f17b
                 return (
                   <div className="bg-white rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200 max-w-sm w-full">
                     <div className="text-center">
@@ -2774,19 +2643,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                       </p>
                       <div className={`${bgColor} rounded-lg p-3 sm:p-4 mb-3`}>
                         <div className={`text-xl sm:text-2xl font-bold ${textColor} mb-1`}>
-                          {coveragePercentage}%
+                          {totalBureaux > 0 ? `${coveragePercentage}%` : '0%'}
                         </div>
                         <div className="text-xs sm:text-sm text-gray-600">
-                          {bureauxAvecResultats} sur {totalBureauxCount} bureaux
+                          {bureauxPubCount} sur {totalBureaux} bureaux
                         </div>
                       </div>
                       <div className="text-xs sm:text-sm text-gray-600">
-                        {isDataEstimated
-                          ? "Données estimées"
-                          : isComplete
-                            ? "Tous les bureaux ont été publiés"
-                            : "PV publiés / Total bureaux"
-                        }
+                        {isComplete ? "Tous les bureaux ont été publiés" : "PV publiés / Total bureaux"}
                       </div>
                     </div>
                   </div>
@@ -2852,8 +2716,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 </div>
                 <h3 className="text-lg sm:text-xl lg:text-2xl font-semibold text-gray-800 mb-2 sm:mb-3">Aucun résultat disponible</h3>
                 <p className="text-gray-600 max-w-md mx-auto px-2 sm:px-4 text-sm sm:text-base">
-                  Les résultats de cette élection ne sont pas encore publiés.
-                  Revenez plus tard pour consulter les résultats.
+                  Les résultats de cette élection sont publiés au fur et à mesure du vote.
                 </p>
               </div>
             ) : (
@@ -3632,7 +3495,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     </h3>
                     <p className="text-gray-600 text-xs sm:text-sm lg:text-base max-w-md mx-auto">
                       {isProResults
-                        ? 'Les résultats de cette élection sont publiés au fur et à mesure du vote.'
+                        ? 'Les résultats par établissement et collège électoral seront affichés dès que les premiers procès-verbaux seront publiés.'
                         : 'Les données détaillées des centres et bureaux de vote ne sont pas encore disponibles. Elles seront affichées dès que les résultats seront publiés.'}
                     </p>
                   </div>

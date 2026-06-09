@@ -361,6 +361,9 @@ export async function importEstablishmentsToElection(
   }
 
   // 6. Batch insert des bureaux par établissement avec progression
+  // La contrainte unique (election_id, center_id, name) permet d'avoir les mêmes
+  // bureaux dans des élections différentes sans conflit.
+  // Le nettoyage de l'étape 1 a déjà supprimé les bureaux de cette élection.
   let done = 0;
   const BOOTH_BATCH = 100;
   for (const { center, centerId } of centerRows) {
@@ -380,7 +383,12 @@ export async function importEstablishmentsToElection(
       }));
 
       for (let i = 0; i < boothRows.length; i += BOOTH_BATCH) {
-        await supabase.from('voting_bureaux').insert(boothRows.slice(i, i + BOOTH_BATCH));
+        const { error: insertErr } = await supabase
+          .from('voting_bureaux')
+          .insert(boothRows.slice(i, i + BOOTH_BATCH));
+        if (insertErr) {
+          result.errors.push(`Bureaux ${center.name}: ${insertErr.message}`);
+        }
       }
     }
     done++;
