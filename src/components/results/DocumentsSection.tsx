@@ -170,12 +170,22 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
 
       if (centerIds.length === 0) { setDocs([]); setCenters([]); setAllCollegeTypes([]); return; }
 
-      // 2. Noms des centres
+      // 2. Noms des centres (et bureaux en fallback si center_id référence voting_bureaux)
       const { data: vcRows } = await supabase
         .from('voting_centers')
         .select('id, name')
         .in('id', centerIds);
       const centerMap = new Map((vcRows ?? []).map((v: any) => [v.id, v.name]));
+
+      // Certains center_id peuvent référencer voting_bureaux (élections pro)
+      const unmatchedIds = centerIds.filter(id => !centerMap.has(id));
+      if (unmatchedIds.length > 0) {
+        const { data: vbRows } = await supabase
+          .from('voting_bureaux')
+          .select('id, name')
+          .in('id', unmatchedIds);
+        (vbRows ?? []).forEach((b: any) => centerMap.set(b.id, b.name));
+      }
 
       // 3. Collèges disponibles pour cette élection (référence)
       const { data: ecColleges } = await supabase

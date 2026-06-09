@@ -4,13 +4,17 @@ import { useNotifications } from '@/contexts/NotificationContext';
 import type { DBNotification } from '@/contexts/NotificationContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import {
   Bell, CheckCircle, AlertCircle, AlertTriangle, Info,
-  Trash2, CheckCheck, Search, Filter, Check,
+  Trash2, CheckCheck, Search, Check, ShieldAlert, CalendarClock, Loader2,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
+import { useRBAC } from '@/hooks/useRBAC';
+import { purgeNotificationsBefore } from '@/lib/notificationService';
+import { toast } from 'sonner';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,9 +70,35 @@ type FilterTab = 'all' | 'unread' | 'read';
 const NotificationsPage: React.FC = () => {
   const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification, loading } = useNotifications();
   const navigate = useNavigate();
+  const { isGlobalAdmin, role } = useRBAC();
+  const isSuperAdmin = role === 'super-admin';
 
   const [tab,    setTab]    = useState<FilterTab>('all');
   const [search, setSearch] = useState('');
+
+  // ── Purge super-admin ──────────────────────────────────────────────────────
+  const [purgeDate,        setPurgeDate]        = useState('');
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
+  const [purging,          setPurging]          = useState(false);
+
+  const handlePurgeConfirm = async () => {
+    if (!purgeDate) return;
+    setPurging(true);
+    try {
+      const count = await purgeNotificationsBefore(new Date(purgeDate));
+      toast.success(`${count} notification${count !== 1 ? 's' : ''} supprimée${count !== 1 ? 's' : ''} avec succès.`);
+      setPurgeConfirmOpen(false);
+      setPurgeDate('');
+    } catch (err: any) {
+      toast.error(`Erreur : ${err?.message ?? 'Impossible de purger les notifications.'}`);
+    } finally {
+      setPurging(false);
+    }
+  };
+
+  const purgeBeforeLabel = purgeDate
+    ? format(new Date(purgeDate), "d MMMM yyyy 'à' HH'h'mm", { locale: fr })
+    : '';
 
   const filtered = notifications.filter(n => {
     if (tab === 'unread' && n.read)  return false;
@@ -165,6 +195,43 @@ const NotificationsPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Zone administration super-admin */}
+        {isSuperAdmin && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-red-700">
+              <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+              <span className="text-sm font-semibold">Administration — Purge des notifications</span>
+            </div>
+            <p className="text-xs text-red-600 leading-relaxed">
+              Supprime définitivement toutes les notifications de <strong>tous les utilisateurs</strong> antérieures à la date et l'heure choisies.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-end">
+              <div className="flex flex-col gap-1 flex-1">
+                <label className="text-xs font-medium text-red-700 flex items-center gap-1.5">
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  Supprimer les notifications antérieures au :
+                </label>
+                <input
+                  type="datetime-local"
+                  value={purgeDate}
+                  onChange={e => setPurgeDate(e.target.value)}
+                  className="h-9 rounded-lg border border-red-300 bg-white px-3 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent w-full sm:w-64"
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!purgeDate}
+                onClick={() => setPurgeConfirmOpen(true)}
+                className="border-red-400 text-red-700 hover:bg-red-100 hover:border-red-500 disabled:opacity-40 whitespace-nowrap"
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Purger
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Liste */}
         {loading ? (
           <div className="flex items-center justify-center h-32">
@@ -248,6 +315,52 @@ const NotificationsPage: React.FC = () => {
           </p>
         )}
       </div>
+
+      {/* Modale de confirmation purge */}
+      {isSuperAdmin && (
+        <Dialog open={purgeConfirmOpen} onOpenChange={open => { if (!purging) setPurgeConfirmOpen(open); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-700">
+                <ShieldAlert className="w-5 h-5" />
+                Confirmer la purge
+              </DialogTitle>
+              <DialogDescription className="text-sm text-gray-600 pt-1">
+                Cette action est <strong>irréversible</strong>. Toutes les notifications de tous les utilisateurs
+                créées avant le <strong className="text-gray-800">{purgeBeforeLabel}</strong> seront définitivement supprimées.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPurgeConfirmOpen(false)}
+                disabled={purging}
+              >
+                Annuler
+              </Button>
+              <Button
+                size="sm"
+                onClick={handlePurgeConfirm}
+                disabled={purging}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {purging ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    Suppression…
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                    Confirmer la suppression
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </Layout>
   );
 };

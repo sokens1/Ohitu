@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRBAC } from '@/hooks/useRBAC';
 import { fetchElectionById, fetchElectionBySlug, fetchPublicElections } from '../api/elections';
 import { fetchElectionSummary, fetchCenterSummary, fetchBureauSummary, fetchCenterSummaryByCandidate, fetchBureauSummaryByCandidate } from '../api/results';
 import { toast } from 'sonner';
@@ -287,6 +289,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   // electionId est résolu à partir du slug, ou directement depuis electionIdOverride (mode admin preview)
   const [electionId, setElectionId] = useState<string | undefined>(electionIdOverride);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { isGlobalAdmin, assignedElectionIds } = useRBAC();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [results, setResults] = useState<ElectionResults | null>(null);
   const [loading, setLoading] = useState(true);
@@ -568,7 +572,16 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       try {
         setElectionsLoading(true);
         const elections = await fetchPublicElections();
-        setAvailableElections(elections || []);
+        const all = elections || [];
+
+        // Utilisateur connecté, rôle restreint (non global-admin) avec élections assignées
+        // → ne montrer que ses élections assignées
+        if (user && !isGlobalAdmin && assignedElectionIds.length > 0) {
+          const assignedSet = new Set(assignedElectionIds.map(String));
+          setAvailableElections(all.filter((e: any) => assignedSet.has(String(e.id))));
+        } else {
+          setAvailableElections(all);
+        }
       } catch (error) {
         console.error('Erreur lors du chargement des élections:', error);
       } finally {
@@ -577,7 +590,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     };
 
     fetchAvailableElections();
-  }, []);
+  }, [user, isGlobalAdmin, assignedElectionIds]);
 
   // Calculer le taux de couverture quand l'élection change
   useEffect(() => {
