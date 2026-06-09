@@ -72,8 +72,10 @@ function dhondt(votes: number[], totalSeats: number): number[] {
 interface SyndicatVotes {
   partyKey: string;
   votes: number;
-  anciennete: number; // en mois — 0 si inconnu
-  age: number;        // en années — 0 si inconnu
+  anciennete: number;   // en mois — 0 si inconnu (1er titulaire, liste order_num=1)
+  age: number;          // en années — 0 si inconnu (1er titulaire)
+  anciennete2?: number; // 2ème titulaire (liste order_num=2) — cas particulier 2 sièges déjà attribué
+  age2?: number;        // 2ème titulaire
 }
 interface CollegeAllocation {
   seats: Record<string, number>;
@@ -87,13 +89,27 @@ function allocateSeatsForCollege(syndicats: SyndicatVotes[], seatsToFill: number
   const suffrages = syndicats.reduce((sum, s) => sum + s.votes, 0);
   if (suffrages === 0) return { seats: empty };
 
-  // Sous-départage ancienneté → âge → égalité absolue
+  // Sous-départage ancienneté → âge (1er titulaire — Cas 1 et Cas 2 sans siège)
   const ancAgeTie = (tied: SyndicatVotes[]): SyndicatVotes | null => {
     const maxAnc = Math.max(...tied.map(t => t.anciennete));
     const byAnc = tied.filter(t => t.anciennete === maxAnc);
     if (byAnc.length === 1) return byAnc[0];
     const maxAge = Math.max(...byAnc.map(t => t.age));
     const byAge = byAnc.filter(t => t.age === maxAge);
+    return byAge.length === 1 ? byAge[0] : null;
+  };
+
+  // Cas particulier (PDF p.3) : si syndicat a déjà 1 siège, utiliser le 2ème titulaire
+  const ancAgeTieDynamic = (tied: SyndicatVotes[], allocState: Record<string, number>): SyndicatVotes | null => {
+    const getAnc = (t: SyndicatVotes) =>
+      (t.anciennete2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.anciennete2 : t.anciennete;
+    const getAge = (t: SyndicatVotes) =>
+      (t.age2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.age2 : t.age;
+    const maxAnc = Math.max(...tied.map(getAnc));
+    const byAnc = tied.filter(t => getAnc(t) === maxAnc);
+    if (byAnc.length === 1) return byAnc[0];
+    const maxAge = Math.max(...byAnc.map(getAge));
+    const byAge = byAnc.filter(t => getAge(t) === maxAge);
     return byAge.length === 1 ? byAge[0] : null;
   };
 
@@ -121,11 +137,11 @@ function allocateSeatsForCollege(syndicats: SyndicatVotes[], seatsToFill: number
       const tied = withMoy.filter(m => m.moy === maxMoy);
       if (tied.length === 1) { allocated[tied[0].partyKey]++; remaining--; continue; }
 
-      // Égalité de moyenne → voix totales → ancienneté → âge → manuel
+      // Égalité de moyenne → voix totales → ancienneté/âge (2ème titulaire si déjà 1 siège) → manuel
       const maxV = Math.max(...tied.map(t => t.votes));
       const byVotes = tied.filter(t => t.votes === maxV);
       if (byVotes.length === 1) { allocated[byVotes[0].partyKey]++; remaining--; continue; }
-      const winner = ancAgeTie(byVotes);
+      const winner = ancAgeTieDynamic(byVotes, allocated);
       if (!winner) return { seats: allocated, manualTie: byVotes.map(s => s.partyKey) };
       allocated[winner.partyKey]++;
       remaining--;
@@ -253,8 +269,9 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
           resolveCandidatesForElection(selectedElection, electionData?.type),
           supabase
             .from('union_lists')
-            .select('id, college, titulaires, suppleants, unions(id, name, acronym)')
+            .select('id, college, order_num, titulaires, suppleants, unions(id, name, acronym)')
             .eq('election_id', selectedElection)
+            .order('order_num', { ascending: true, nullsFirst: true })
         ]);
 
         const pvsValidated = pvsValidatedResult.data || [];
@@ -771,29 +788,35 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
     const resultSeats: Record<string, number> = {};
     const manualTies: { group: string; parties: string[] }[] = [];
 
-    // Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority }
-    const candidateInfoMap = new Map<string, { age: number; seniority: number }>();
+    // Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority, age2?, seniority2? }
+    // unionLists trié par order_num ASC → order_num=1 traité avant order_num=2.
+    // seniority/age = 1er titulaire ; seniority2/age2 = 2ème titulaire (cas particulier 2 sièges)
+    const candidateInfoMap = new Map<string, { age: number; seniority: number; age2?: number; seniority2?: number }>();
     unionLists.forEach(ul => {
       const acronym = ul.unions?.acronym?.trim();
       const name = ul.unions?.name?.trim();
       const collegeKey = normalizeCollegeKey(ul.college);
-      
-      let age = 0;
-      let seniority = 0;
-      
-      const t = Array.isArray(ul.titulaires) && ul.titulaires.length > 0
-        ? ul.titulaires[0]
-        : (typeof ul.titulaires === 'string' ? JSON.parse(ul.titulaires || '[]')[0] : null);
+      if (!collegeKey) return;
 
-      if (t) {
-        age = Number(t.age) || 0;
-        seniority = Number(t.anciennete) || 0;
-      }
-      
-      if (collegeKey) {
-        if (acronym) candidateInfoMap.set(`${acronym}_${collegeKey}`, { age, seniority });
-        if (name) candidateInfoMap.set(`${name}_${collegeKey}`, { age, seniority });
-      }
+      const tArr = Array.isArray(ul.titulaires)
+        ? ul.titulaires
+        : (typeof ul.titulaires === 'string' ? (JSON.parse(ul.titulaires || '[]') as any[]) : []);
+      const t = tArr[0] ?? null;
+      if (!t) return;
+
+      const orderNum = Number((ul as any).order_num) || 1;
+      const thisAge = Number(t.age) || 0;
+      const thisSeniority = Number(t.anciennete) || 0;
+
+      [acronym, name].filter(Boolean).forEach(k => {
+        const mapKey = `${k!}_${collegeKey}`;
+        const existing = candidateInfoMap.get(mapKey);
+        if (!existing) {
+          candidateInfoMap.set(mapKey, { age: thisAge, seniority: thisSeniority });
+        } else if (orderNum >= 2) {
+          candidateInfoMap.set(mapKey, { ...existing, age2: thisAge, seniority2: thisSeniority });
+        }
+      });
     });
 
     // 1) Récupérer les voix par PV
@@ -844,7 +867,7 @@ const PublishSection: React.FC<PublishSectionProps> = ({ selectedElection, readO
       const colKey = normalizeCollegeKey(gm.collegeType);
       const syndicats: SyndicatVotes[] = Array.from(aggVotes.entries()).map(([pk, v]) => {
         const info = candidateInfoMap.get(`${pk}_${colKey}`) || { age: 0, seniority: 0 };
-        return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age };
+        return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age, anciennete2: info.seniority2, age2: info.age2 };
       });
 
       const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
