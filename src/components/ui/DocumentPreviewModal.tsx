@@ -9,12 +9,12 @@
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { ZoomIn, ZoomOut, RotateCw, ExternalLink, Download, FileText } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, ExternalLink, Download } from 'lucide-react';
 
 interface Props {
   url:       string | null;
-  title?:    string;           // titre affiché dans l'en-tête
-  subtitle?: string;           // sous-titre (établissement, collège, etc.)
+  title?:    string;
+  subtitle?: string;
   fileName?: string | null;
   onClose:   () => void;
   onDownload?: () => void;
@@ -38,27 +38,27 @@ const DocumentPreviewModal: React.FC<Props> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-5xl w-full max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl lg:max-w-5xl max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
 
         {/* ── En-tête ── */}
-        <DialogHeader className="px-5 py-3.5 border-b bg-white flex-shrink-0">
-          <div className="flex items-start justify-between gap-4 mr-8">
-            <div className="min-w-0">
-              <DialogTitle className="text-base font-semibold text-gray-900 truncate">
+        <DialogHeader className="px-3 sm:px-5 py-3 border-b bg-white flex-shrink-0">
+          <div className="flex items-start justify-between gap-2 mr-7 sm:mr-8">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-sm sm:text-base font-semibold text-gray-900 truncate">
                 {title ?? (fileName ?? 'Document')}
               </DialogTitle>
               {subtitle && (
-                <p className="text-xs text-gray-500 mt-0.5 truncate">{subtitle}</p>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 truncate">{subtitle}</p>
               )}
               {fileName && title && (
-                <p className="text-xs text-gray-400 italic truncate">{fileName}</p>
+                <p className="text-[11px] sm:text-xs text-gray-400 italic truncate">{fileName}</p>
               )}
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-1 flex-shrink-0 mr-2">
+            {/* Actions — zoom masqué sur mobile (peu utilisable au doigt) */}
+            <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
               {!isPdf(url) && (
-                <>
+                <div className="hidden sm:flex items-center gap-0.5">
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
                     title="Zoom +" onClick={() => setImgZoom(z => Math.min(z + 0.25, 3))}>
                     <ZoomIn className="w-4 h-4" />
@@ -71,7 +71,7 @@ const DocumentPreviewModal: React.FC<Props> = ({
                     title="Rotation" onClick={() => setImgRotation(r => (r + 90) % 360)}>
                     <RotateCw className="w-4 h-4" />
                   </Button>
-                </>
+                </div>
               )}
               {onDownload && (
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-gray-800"
@@ -88,17 +88,15 @@ const DocumentPreviewModal: React.FC<Props> = ({
         </DialogHeader>
 
         {/* ── Corps ── */}
-        <div className="flex-1 overflow-hidden bg-gray-100 relative" style={{ minHeight: '60vh' }}>
+        <div className="flex-1 overflow-hidden bg-gray-100 relative min-h-[50vh] sm:min-h-[65vh]">
           {isPdf(url) ? (
             <iframe
               src={url}
-              className="w-full h-full border-0"
-              style={{ minHeight: '65vh' }}
+              className="w-full h-full border-0 min-h-[50vh] sm:min-h-[65vh]"
               title="Prévisualisation document"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center overflow-auto p-4"
-              style={{ minHeight: '65vh' }}>
+            <div className="w-full h-full flex items-center justify-center overflow-auto p-2 sm:p-4 min-h-[50vh] sm:min-h-[65vh]">
               <img
                 src={url}
                 alt="Document"
@@ -106,7 +104,7 @@ const DocumentPreviewModal: React.FC<Props> = ({
                   transform:   `scale(${imgZoom}) rotate(${imgRotation}deg)`,
                   transition:  'transform 0.2s ease',
                   maxWidth:    imgZoom <= 1 ? '100%' : 'none',
-                  maxHeight:   imgZoom <= 1 ? '65vh' : 'none',
+                  maxHeight:   imgZoom <= 1 ? '60vh' : 'none',
                   objectFit:   'contain',
                   display:     'block',
                 }}
