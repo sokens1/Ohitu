@@ -44,19 +44,25 @@ async function fetchElectionsFn({
   isGlobalAdmin: boolean;
   assignedElectionIds: string[];
 }): Promise<ElectionOption[]> {
-  // Non super-admin sans élection assignée → aucune élection accessible
-  if (!isGlobalAdmin && assignedElectionIds.length === 0) {
-    return [];
+  // super-admin et admin → toutes les élections sans restriction
+  if (isGlobalAdmin) {
+    const { data, error } = await supabase
+      .from('elections')
+      .select('id, title')
+      .order('election_date', { ascending: false });
+    if (error) { console.error('Erreur chargement élections:', error); return []; }
+    return (data ?? []).map((e: { id: string; title: string }) => ({ id: e.id.toString(), name: e.title }));
   }
+
+  // Rôle restreint sans élection assignée → aucun accès
+  if (assignedElectionIds.length === 0) return [];
 
   let query = supabase.from('elections').select('id, title').order('election_date', { ascending: false });
 
-  // Tout rôle non super-admin : restreindre aux élections assignées
-  if (!isGlobalAdmin && assignedElectionIds.length > 0) {
-    query = assignedElectionIds.length === 1
-      ? query.eq('id', assignedElectionIds[0])
-      : query.in('id', assignedElectionIds);
-  }
+  // Restreindre strictement aux élections assignées
+  query = assignedElectionIds.length === 1
+    ? query.eq('id', assignedElectionIds[0])
+    : query.in('id', assignedElectionIds);
 
   const { data, error } = await query;
   if (error) {

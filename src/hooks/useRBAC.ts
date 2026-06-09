@@ -123,7 +123,7 @@ export function useRBAC() {
     // Compatibilité : première élection assignée (ou null)
     assignedElectionId: assignedElectionIds[0] ?? null,
     assignedElectionIds,
-    isGlobalAdmin: user?.role === 'super-admin',
+    isGlobalAdmin: user?.role === 'super-admin' || user?.role === 'admin',
     isAdmin: user?.role === 'admin',
     isOperational: OPERATIONAL_ROLES.includes(user?.role ?? '' as UserRole),
   };
