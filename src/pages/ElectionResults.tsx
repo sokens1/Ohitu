@@ -900,34 +900,43 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         });
         setBureauSeatsMap(new Map(bureauSeats));
 
-        // 2) Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority }
-        const candidateInfoMap = new Map<string, { age: number; seniority: number }>();
+        // 2) Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority, age2?, seniority2? }
+        // unionLists est trié par order_num ASC → order_num=1 traité avant order_num=2.
+        // Pour un collège 2 sièges, un syndicat peut avoir deux listes (order_num=1 et order_num=2).
+        // seniority/age  = 1er titulaire (liste order_num=1)
+        // seniority2/age2 = 2ème titulaire (liste order_num=2) — cas particulier départage 2 sièges
+        const candidateInfoMap = new Map<string, { age: number; seniority: number; age2?: number; seniority2?: number }>();
         unionLists.forEach((ul: any) => {
           const acronym = ul.unions?.acronym?.trim();
           const name = ul.unions?.name?.trim();
           const collegeKey = normalizeCollegeKey(ul.college);
-          
-          let age = 0;
-          let seniority = 0;
-          
-          const t = Array.isArray(ul.titulaires) && ul.titulaires.length > 0
-            ? ul.titulaires[0]
-            : (typeof ul.titulaires === 'string' ? JSON.parse(ul.titulaires || '[]')[0] : null);
+          if (!collegeKey) return;
 
-          if (t) {
-            age = Number(t.age) || 0;
-            seniority = Number(t.anciennete) || 0;
-          }
-          
-          if (collegeKey) {
-            if (acronym) candidateInfoMap.set(`${acronym}_${collegeKey}`, { age, seniority });
-            if (name) candidateInfoMap.set(`${name}_${collegeKey}`, { age, seniority });
-          }
+          const tArr = Array.isArray(ul.titulaires)
+            ? ul.titulaires
+            : (typeof ul.titulaires === 'string' ? (JSON.parse(ul.titulaires || '[]') as any[]) : []);
+          const t = tArr[0] ?? null;
+          if (!t) return;
+
+          const orderNum = Number(ul.order_num) || 1;
+          const thisAge = Number(t.age) || 0;
+          const thisSeniority = Number(t.anciennete) || 0;
+
+          [acronym, name].filter(Boolean).forEach(k => {
+            const mapKey = `${k!}_${collegeKey}`;
+            const existing = candidateInfoMap.get(mapKey);
+            if (!existing) {
+              candidateInfoMap.set(mapKey, { age: thisAge, seniority: thisSeniority });
+            } else if (orderNum >= 2) {
+              // Données du 2ème titulaire — ne pas écraser le 1er
+              candidateInfoMap.set(mapKey, { ...existing, age2: thisAge, seniority2: thisSeniority });
+            }
+          });
         });
 
         // 3) Algorithme de répartition légal CSE
         const allocateSeatsForCollege = (
-          syndicats: { partyKey: string; votes: number; age: number; anciennete: number }[],
+          syndicats: { partyKey: string; votes: number; age: number; anciennete: number; anciennete2?: number; age2?: number }[],
           seatsToFill: number
         ) => {
           const empty: Record<string, number> = {};
@@ -936,12 +945,27 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           const suffrages = syndicats.reduce((sum, s) => sum + s.votes, 0);
           if (suffrages === 0) return { seats: empty };
 
+          // Départage ancienneté → âge (1er titulaire — Cas 1 et Cas 2 sans siège attribué)
           const ancAgeTie = (tied: typeof syndicats) => {
             const maxAnc = Math.max(...tied.map(t => t.anciennete));
             const byAnc = tied.filter(t => t.anciennete === maxAnc);
             if (byAnc.length === 1) return byAnc[0];
             const maxAge = Math.max(...byAnc.map(t => t.age));
             const byAge = byAnc.filter(t => t.age === maxAge);
+            return byAge.length === 1 ? byAge[0] : null;
+          };
+
+          // Cas particulier (PDF p.3) : si un syndicat a déjà 1 siège, utiliser le 2ème titulaire
+          const ancAgeTieDynamic = (tied: typeof syndicats, allocState: Record<string, number>) => {
+            const getAnc = (t: typeof syndicats[0]) =>
+              (t.anciennete2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.anciennete2 : t.anciennete;
+            const getAge = (t: typeof syndicats[0]) =>
+              (t.age2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.age2 : t.age;
+            const maxAnc = Math.max(...tied.map(getAnc));
+            const byAnc = tied.filter(t => getAnc(t) === maxAnc);
+            if (byAnc.length === 1) return byAnc[0];
+            const maxAge = Math.max(...byAnc.map(getAge));
+            const byAge = byAnc.filter(t => getAge(t) === maxAge);
             return byAge.length === 1 ? byAge[0] : null;
           };
 
@@ -969,11 +993,11 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               const tied = withMoy.filter(m => m.moy === maxMoy);
               if (tied.length === 1) { allocated[tied[0].partyKey]++; remaining--; continue; }
 
-              // Égalité de moyenne -> voix totales -> ancienneté -> âge -> manuel
+              // Égalité de moyenne → voix totales → ancienneté/âge (avec 2ème titulaire si déjà 1 siège) → manuel
               const maxV = Math.max(...tied.map(t => t.votes));
               const byVotes = tied.filter(t => t.votes === maxV);
               if (byVotes.length === 1) { allocated[byVotes[0].partyKey]++; remaining--; continue; }
-              const winner = ancAgeTie(byVotes);
+              const winner = ancAgeTieDynamic(byVotes, allocated);
               if (!winner) return { seats: allocated, manualTie: byVotes.map(s => s.partyKey) };
               allocated[winner.partyKey]++;
               remaining--;
@@ -1043,7 +1067,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           const colKey  = normalizeCollegeKey(colType) || '';
           const syndicats = Array.from(aggVotes.entries()).map(([pk, v]) => {
             const info = candidateInfoMap.get(`${pk}_${colKey}`) || { age: 0, seniority: 0 };
-            return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age };
+            return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age, anciennete2: info.seniority2, age2: info.age2 };
           });
           const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
           groupAllocations.set(gk, alloc.seats);
