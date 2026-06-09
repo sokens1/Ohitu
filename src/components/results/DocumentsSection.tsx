@@ -160,8 +160,16 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
         // Président : UNIQUEMENT ses centres assignés via assigned_center_bureaux
         // Si null → aucun centre → l'écran affiche "Aucun établissement assigné"
         centerIds = Object.keys(user?.assigned_center_bureaux ?? {});
+      } else if (
+        (user?.role === 'employeur' || user?.role === 'observateur') &&
+        Array.isArray(user?.assigned_center_ids) &&
+        user.assigned_center_ids.length > 0
+      ) {
+        // Employeur / observateur avec centres restreints : uniquement leurs centres assignés
+        centerIds = user.assigned_center_ids as string[];
       } else {
-        // Admin / agent-saisie / validateur : tous les centres de l'élection
+        // Admin / agent-saisie / validateur / employeur sans restriction de centre :
+        // tous les centres de l'élection
         const { data: ecRows } = await supabase
           .from('election_centers')
           .select('center_id')
