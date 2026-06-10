@@ -92,11 +92,18 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
   const [submitting, setSubmitting] = useState(false);
   const [showQuorumWarning, setShowQuorumWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const listFileInputRef = useRef<HTMLInputElement | null>(null);
   // Sélection d'un PV existant
   const [showExistingPvPicker, setShowExistingPvPicker] = useState(false);
   const [existingValidatedPvs, setExistingValidatedPvs] = useState<{ id: string; bureau_name: string; pv_photo_url: string }[]>([]);
   const [loadingExistingPvs, setLoadingExistingPvs] = useState(false);
   const [selectedExistingPvUrl, setSelectedExistingPvUrl] = useState<string | null>(null);
+  // Sélection d'une liste de participation existante
+  const [showExistingListPicker, setShowExistingListPicker] = useState(false);
+  const [existingValidatedLists, setExistingValidatedLists] = useState<{ id: string; label: string; file_url: string }[]>([]);
+  const [loadingExistingLists, setLoadingExistingLists] = useState(false);
+  const [selectedExistingListUrl, setSelectedExistingListUrl] = useState<string | null>(null);
+  const [uploadedListFile, setUploadedListFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl]     = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState<string>('Document');
   const [formData, setFormData] = useState({
@@ -352,6 +359,23 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             ...(rv > 0         ? { inscrits: String(rv) }    : {}),
             ...(sieges > 0     ? { sieges:   String(sieges) } : {}),
           }));
+
+          // En mode modification, charger les URLs de documents existants
+          if (bureauId) {
+            let pvQuery = supabase
+              .from('procès_verbaux')
+              .select('pv_photo_url, participation_list_url')
+              .eq('election_id', selectedElection)
+              .eq('bureau_id', bureauId);
+            if (preCollegeType) pvQuery = pvQuery.eq('college_type', preCollegeType);
+            const { data: existingPvData } = await pvQuery.maybeSingle();
+            if (existingPvData?.pv_photo_url) {
+              setSelectedExistingPvUrl(existingPvData.pv_photo_url);
+            }
+            if (existingPvData?.participation_list_url) {
+              setSelectedExistingListUrl(existingPvData.participation_list_url);
+            }
+          }
         }
 
       } catch (error) {
@@ -574,6 +598,99 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     }
   };
 
+  // Ouvre le picker de listes de participation existantes
+  const handleOpenExistingListPicker = async () => {
+    if (!formData.centre) {
+      toast.warning('Veuillez d\'abord sélectionner un établissement.');
+      return;
+    }
+    setLoadingExistingLists(true);
+    setShowExistingListPicker(true);
+    try {
+      const selectedBureauObj = votingBureaux.find((b: any) => String(b.id) === String(formData.bureau));
+      const bureauCollegeType: string | null =
+        selectedBureauObj?.college_type || selectedBureauObj?.college || null;
+
+      let docQuery = supabase
+        .from('establishment_documents')
+        .select('id, file_url, file_name, college_type, status, uploaded_at')
+        .eq('election_id', selectedElection)
+        .eq('center_id', formData.centre)
+        .eq('document_type', 'participation_list')
+        .in('status', ['validated', 'reserved']);
+
+      if (bureauCollegeType) {
+        docQuery = docQuery.eq('college_type', bureauCollegeType);
+      }
+
+      const { data: docRows } = await docQuery.order('uploaded_at', { ascending: false });
+
+      const results: { id: string; label: string; file_url: string }[] = (docRows || []).map((doc: any) => {
+        const collegeLabel = doc.college_type ? ` — ${toCollegeLabel(doc.college_type)}` : '';
+        const statusLabel = doc.status === 'reserved' ? ' (réserve)' : '';
+        return {
+          id: `list_${doc.id}`,
+          label: `Liste de participation${collegeLabel}${statusLabel}`,
+          file_url: doc.file_url,
+        };
+      });
+
+      if (results.length === 0) {
+        toast.info('Aucune liste de participation validée trouvée pour cet établissement / collège.');
+      }
+      setExistingValidatedLists(results);
+    } catch (e) {
+      toast.error('Erreur lors du chargement des listes existantes.');
+      setShowExistingListPicker(false);
+    } finally {
+      setLoadingExistingLists(false);
+    }
+  };
+
+  const handleListFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const isSlowConnection = network.quality === 'poor' || network.quality === 'fair' || !network.isOnline;
+      if (isSlowConnection && file.type.startsWith('image/')) {
+        const loadingToast = toast.loading('Compression de la liste en cours...');
+        try {
+          const compressed = await compressImageFile(file);
+          setUploadedListFile(compressed);
+          toast.dismiss(loadingToast);
+          toast.success(`Compression terminée : ${(file.size / 1024 / 1024).toFixed(1)} Mo ➔ ${(compressed.size / 1024).toFixed(0)} Ko.`);
+        } catch (e) {
+          toast.dismiss(loadingToast);
+          setUploadedListFile(file);
+        }
+      } else {
+        setUploadedListFile(file);
+      }
+    }
+    if (listFileInputRef.current) listFileInputRef.current.value = '';
+  };
+
+  const uploadListFile = async (file: File, electionId: string, centerId: string, bureauId: string) => {
+    const bucket = 'pv-uploads';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+    const relPath = `${electionId}/${centerId || 'center'}/lists/${bureauId || 'bureau'}/${timestamp}_${safeName}`;
+
+    let { data: uploadData, error: uploadErr } = await supabase.storage
+      .from(bucket)
+      .upload(relPath, file, { cacheControl: '3600', upsert: true, contentType: file.type || undefined });
+
+    if (uploadErr && (`${uploadErr?.message || ''}`.toLowerCase().includes('bucket not found') || `${uploadErr?.error || ''}`.toLowerCase().includes('bucket'))) {
+      await ensureBucketExists(bucket);
+      ({ data: uploadData, error: uploadErr } = await supabase.storage
+        .from(bucket)
+        .upload(relPath, file, { cacheControl: '3600', upsert: true, contentType: file.type || undefined }));
+    }
+
+    if (uploadErr) throw uploadErr;
+    const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(uploadData!.path);
+    return publicUrlData.publicUrl;
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -728,6 +845,16 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
         }
       }
 
+      let participationListUrl: string | null = selectedExistingListUrl || null;
+      if (uploadedListFile) {
+        try {
+          participationListUrl = await uploadListFile(uploadedListFile, selectedElection, centerId, bureauId);
+        } catch (uploadErr: any) {
+          console.error('Upload liste échoué:', uploadErr);
+          toast.warning(`Upload de la liste échoué: ${uploadErr?.message || 'erreur inconnue'}. Enregistrement sans liste.`);
+        }
+      }
+
       const total_voters = parseInt(formData.votants) || 0;
       const null_votes = parseInt(formData.bulletinsNuls) || 0;
       const votes_expressed = parseInt(formData.suffragesExprimes) || 0;
@@ -760,6 +887,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             entered_by: user?.id ?? null,
             entered_at: new Date().toISOString(),
             pv_photo_url: pvPhotoUrl || undefined,
+            participation_list_url: participationListUrl || undefined,
             college_type: collegeType,
           })
           .eq('id', existingPv.id)
@@ -781,6 +909,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             entered_by: user?.id ?? null,
             entered_at: new Date().toISOString(),
             pv_photo_url: pvPhotoUrl,
+            participation_list_url: participationListUrl,
             college_type: collegeType,
           })
           .select()
@@ -1594,6 +1723,165 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
               )}
             </div>
 
+            {/* ── Section liste de participation ───────────────────────────── */}
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+              <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <h4 className="text-lg font-medium text-gray-900 mb-2">Joindre la liste de participation</h4>
+              <p className="text-sm text-gray-600 mb-4">Formats acceptés : PDF, JPG, PNG (max. 10 Mo)</p>
+
+              {!uploadedListFile && !selectedExistingListUrl && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
+                  ℹ️ L'ajout d'une liste de participation est optionnel. Vous pouvez poursuivre et enregistrer les chiffres directement.
+                </div>
+              )}
+
+              <input
+                ref={listFileInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={handleListFileUpload}
+                className="hidden"
+              />
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <Button
+                  variant="outline"
+                  className="cursor-pointer"
+                  onClick={() => {
+                    setSelectedExistingListUrl(null);
+                    listFileInputRef.current?.click();
+                  }}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Importer une liste
+                </Button>
+
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                  onClick={handleOpenExistingListPicker}
+                >
+                  <FolderOpen className="w-4 h-4 mr-2" />
+                  Sélectionner une liste existante
+                </Button>
+              </div>
+
+              {/* Fichier importé */}
+              {uploadedListFile && (
+                <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-green-700 min-w-0">
+                      <FileText className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm font-medium truncate">{uploadedListFile.name}</span>
+                      <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => {
+                          const localUrl = URL.createObjectURL(uploadedListFile);
+                          setPreviewTitle(uploadedListFile.name);
+                          setPreviewUrl(localUrl);
+                        }}
+                        className="text-xs font-medium text-green-700 hover:text-green-900 underline-offset-2 hover:underline transition-colors"
+                      >
+                        Voir
+                      </button>
+                      <button
+                        onClick={() => setUploadedListFile(null)}
+                        className="text-green-600 hover:text-green-800 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Liste existante sélectionnée */}
+              {selectedExistingListUrl && !uploadedListFile && (
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-blue-700">
+                      <FileText className="w-4 h-4" />
+                      <span className="text-sm font-medium">Liste sélectionnée</span>
+                      <CheckCircle className="w-4 h-4" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setPreviewTitle('Liste de participation');
+                          setPreviewUrl(selectedExistingListUrl);
+                        }}
+                        className="text-xs font-medium text-blue-700 hover:text-blue-900 underline-offset-2 hover:underline transition-colors"
+                      >
+                        Voir
+                      </button>
+                      <button
+                        onClick={() => setSelectedExistingListUrl(null)}
+                        className="text-blue-500 hover:text-blue-700 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Dialog picker de listes existantes */}
+            <Dialog open={showExistingListPicker} onOpenChange={setShowExistingListPicker}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <FolderOpen className="w-5 h-5 text-blue-600" />
+                    Sélectionner une liste de participation
+                  </DialogTitle>
+                </DialogHeader>
+
+                {loadingExistingLists ? (
+                  <div className="py-8 text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3" />
+                    <p className="text-sm text-gray-500">Chargement des listes validées…</p>
+                  </div>
+                ) : existingValidatedLists.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500">
+                    <AlertCircle className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                    <p className="font-medium text-gray-700">Aucune liste validée disponible</p>
+                    <p className="text-sm mt-1 text-gray-400">
+                      Aucune liste de participation validée n'a été trouvée pour cet établissement.
+                      Importez un nouveau fichier.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 py-2 max-h-64 overflow-y-auto">
+                    <p className="text-xs text-gray-500 mb-3">
+                      {existingValidatedLists.length} liste{existingValidatedLists.length > 1 ? 's' : ''} validée{existingValidatedLists.length > 1 ? 's' : ''} trouvée{existingValidatedLists.length > 1 ? 's' : ''} pour cet établissement
+                    </p>
+                    {existingValidatedLists.map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setSelectedExistingListUrl(item.file_url);
+                          setUploadedListFile(null);
+                          setShowExistingListPicker(false);
+                          toast.success('Liste de participation sélectionnée.');
+                        }}
+                        className="w-full text-left p-3 border border-gray-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-colors flex items-center gap-3 group"
+                      >
+                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-blue-200 transition-colors">
+                          <FileText className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{item.label}</p>
+                          <p className="text-xs text-gray-400 truncate">{item.file_url.split('/').pop()}</p>
+                        </div>
+                        <CheckCircle className="w-4 h-4 text-green-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+
             {/* Dialog picker de PV existants */}
             <Dialog open={showExistingPvPicker} onOpenChange={setShowExistingPvPicker}>
               <DialogContent className="max-w-md">
@@ -1773,7 +2061,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   </div>
                   
                   <div>
-                    <h4 className="font-medium text-gray-900 mb-2">Document Attaché</h4>
+                    <h4 className="font-medium text-gray-900 mb-2">PV Scanné</h4>
                     {formData.uploadedFile ? (
                       <div className="flex items-center space-x-2 text-green-700">
                         <FileText className="w-4 h-4" />
@@ -1796,7 +2084,35 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         </a>
                       </div>
                     ) : (
-                      <div className="text-gray-400 text-sm italic">Aucun document attaché (optionnel)</div>
+                      <div className="text-gray-400 text-sm italic">Aucun PV attaché (optionnel)</div>
+                    )}
+                  </div>
+
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Liste de Participation</h4>
+                    {uploadedListFile ? (
+                      <div className="flex items-center space-x-2 text-green-700">
+                        <FileText className="w-4 h-4" />
+                        <span className="text-sm">{uploadedListFile.name}</span>
+                        <CheckCircle className="w-4 h-4" />
+                      </div>
+                    ) : selectedExistingListUrl ? (
+                      <div className="flex items-center gap-2 text-blue-700">
+                        <FileText className="w-4 h-4" />
+                        <span className="text-sm">Liste existante sélectionnée</span>
+                        <CheckCircle className="w-4 h-4" />
+                        <a
+                          href={selectedExistingListUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs underline hover:text-blue-900 ml-1"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          Voir
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="text-gray-400 text-sm italic">Aucune liste attachée (optionnel)</div>
                     )}
                   </div>
                 </CardContent>

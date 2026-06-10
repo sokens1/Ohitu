@@ -23,6 +23,7 @@ import {
 import PVEntrySection from './PVEntrySection';
 import { toast } from 'sonner';
 import { importPVsFromExcel } from '@/utils/pvExcelImport';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Retry automatique sur erreurs réseau (ERR_CONNECTION_RESET, ERR_HTTP2_PING_FAILED)
 async function sbQuery<T>(
@@ -61,6 +62,7 @@ interface DataEntrySectionProps {
 }
 
 const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElection, readOnly = false, refreshKey }) => {
+  const { user } = useAuth();
   const [expandedCenters, setExpandedCenters] = useState<string[]>([]);
   const [showAnomaliesOnly, setShowAnomaliesOnly] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
@@ -399,6 +401,7 @@ const DataEntrySection: React.FC<DataEntrySectionProps> = ({ stats, selectedElec
         null_votes: 0,
         votes_expressed: 0,
         status: 'entered',
+        entered_by: user?.id ?? null,
         entered_at: new Date().toISOString(),
         college_type: bureau.college_type || null,
       };
