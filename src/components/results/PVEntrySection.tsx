@@ -118,7 +118,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     bulletinsNuls: '',
     suffragesExprimes: '',
     candidateVotes: {} as Record<string, string>,
-    uploadedFile: null as File | null
+    uploadedFile: null as File | null,
+    is_second_tour: false,
   });
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const network = useNetworkQuality();
@@ -185,6 +186,15 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     setHasDraft(false);
     toast.info('Brouillon supprimé.');
   };
+
+  // Auto-calcul is_second_tour : quorum non atteint → second tour par défaut
+  useEffect(() => {
+    const inscrits = parseInt(formData.inscrits) || 0;
+    const exprimes = parseInt(formData.suffragesExprimes) || 0;
+    if (inscrits > 0) {
+      setFormData(prev => ({ ...prev, is_second_tour: exprimes < inscrits / 2 }));
+    }
+  }, [formData.inscrits, formData.suffragesExprimes]);
 
   // Référence stable vers prefill pour l'utiliser dans loadAll sans le mettre en dépendance
   const prefillRef = useRef(prefill);
@@ -695,22 +705,23 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     const file = event.target.files?.[0];
     if (file) {
       const isSlowConnection = network.quality === 'poor' || network.quality === 'fair' || !network.isOnline;
-      
+
       if (isSlowConnection && file.type.startsWith('image/')) {
         const loadingToast = toast.loading('Qualité réseau limitée détectée. Compression du PV en cours...');
         try {
           const compressed = await compressImageFile(file);
-          setFormData({ ...formData, uploadedFile: compressed });
+          setFormData(prev => ({ ...prev, uploadedFile: compressed }));
           toast.dismiss(loadingToast);
           toast.success(`Compression terminée : ${(file.size / 1024 / 1024).toFixed(1)} Mo ➔ ${(compressed.size / 1024).toFixed(0)} Ko.`);
         } catch (e) {
           toast.dismiss(loadingToast);
-          setFormData({ ...formData, uploadedFile: file });
+          setFormData(prev => ({ ...prev, uploadedFile: file }));
         }
       } else {
-        setFormData({ ...formData, uploadedFile: file });
+        setFormData(prev => ({ ...prev, uploadedFile: file }));
       }
     }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const ensureBucketExists = async (bucket: string) => {
@@ -889,6 +900,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             pv_photo_url: pvPhotoUrl || undefined,
             participation_list_url: participationListUrl || undefined,
             college_type: collegeType,
+            is_second_tour: formData.is_second_tour,
           })
           .eq('id', existingPv.id)
           .select()
@@ -911,6 +923,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             pv_photo_url: pvPhotoUrl,
             participation_list_url: participationListUrl,
             college_type: collegeType,
+            is_second_tour: formData.is_second_tour,
           })
           .select()
           .single();
@@ -1670,8 +1683,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                       <CheckCircle className="w-4 h-4 flex-shrink-0" />
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* Prévisualiser le fichier local via URL.createObjectURL */}
                       <button
+                        type="button"
                         onClick={() => {
                           const localUrl = URL.createObjectURL(formData.uploadedFile!);
                           setPreviewTitle(formData.uploadedFile!.name);
@@ -1682,8 +1695,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setFormData(prev => ({ ...prev, uploadedFile: null }))}
-                        className="text-green-600 hover:text-green-800 transition-colors"
+                        className="p-1 text-green-600 hover:text-green-800 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1703,6 +1717,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => {
                           setPreviewTitle('PV sélectionné');
                           setPreviewUrl(selectedExistingPvUrl);
@@ -1712,8 +1727,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setSelectedExistingPvUrl(null)}
-                        className="text-blue-500 hover:text-blue-700 transition-colors"
+                        className="p-1 text-blue-500 hover:text-blue-700 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1776,6 +1792,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
+                        type="button"
                         onClick={() => {
                           const localUrl = URL.createObjectURL(uploadedListFile);
                           setPreviewTitle(uploadedListFile.name);
@@ -1786,8 +1803,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setUploadedListFile(null)}
-                        className="text-green-600 hover:text-green-800 transition-colors"
+                        className="p-1 text-green-600 hover:text-green-800 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1807,6 +1825,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => {
                           setPreviewTitle('Liste de participation');
                           setPreviewUrl(selectedExistingListUrl);
@@ -1816,8 +1835,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setSelectedExistingListUrl(null)}
-                        className="text-blue-500 hover:text-blue-700 transition-colors"
+                        className="p-1 text-blue-500 hover:text-blue-700 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -2115,6 +2135,45 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                       <div className="text-gray-400 text-sm italic">Aucune liste attachée (optionnel)</div>
                     )}
                   </div>
+
+                  {/* Statut du scrutin */}
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-3">Statut du scrutin</h4>
+                    <div className={`rounded-lg border p-4 ${formData.is_second_tour ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="scrutin_statut"
+                            checked={!formData.is_second_tour}
+                            onChange={() => setFormData(prev => ({ ...prev, is_second_tour: false }))}
+                            className="w-4 h-4 accent-green-600"
+                          />
+                          <span className={`text-sm font-semibold ${!formData.is_second_tour ? 'text-green-800' : 'text-gray-500'}`}>
+                            ✓ Valide (1er tour)
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="scrutin_statut"
+                            checked={formData.is_second_tour}
+                            onChange={() => setFormData(prev => ({ ...prev, is_second_tour: true }))}
+                            className="w-4 h-4 accent-orange-600"
+                          />
+                          <span className={`text-sm font-semibold ${formData.is_second_tour ? 'text-orange-800' : 'text-gray-500'}`}>
+                            ↻ Second tour requis
+                          </span>
+                        </label>
+                      </div>
+                      {formData.is_second_tour && (
+                        <p className="text-xs text-orange-600 mt-2">
+                          Quorum non atteint — ce bureau nécessite un second tour. Modifiable si besoin.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
                 </CardContent>
               </Card>
             </div>

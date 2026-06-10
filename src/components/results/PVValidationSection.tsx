@@ -238,6 +238,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [existingLists, setExistingLists] = useState<{ id: string; label: string; file_url: string }[]>([]);
   const [loadingLists, setLoadingLists] = useState(false);
   const [selectedListUrl, setSelectedListUrl] = useState<string | null>(null);
+  const [isSecondTour, setIsSecondTour] = useState(false);
   const [showPvPicker, setShowPvPicker] = useState(false);
   const [existingPvDocs, setExistingPvDocs] = useState<{ id: string; label: string; file_url: string }[]>([]);
   const [loadingPvDocs, setLoadingPvDocs] = useState(false);
@@ -516,7 +517,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         if (!selectedElection) { setPvs([]); setBureauxMap(new Map()); setCentersMap(new Map()); setLoading(false); return; }
         const { data: pvRows, error: pvErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url, participation_list_url, observer_annotation, observer_conformity, observer_id, observer_annotated_at, college_type')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url, participation_list_url, observer_annotation, observer_conformity, observer_id, observer_annotated_at, college_type, is_second_tour')
           .eq('election_id', selectedElection)
           .order('created_at', { ascending: false })
           .limit(500);
@@ -701,6 +702,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         null_votes: pv.null_votes,
         pv_photo_url: pv.pv_photo_url,
         participation_list_url: (pv as any).participation_list_url ?? null,
+        is_second_tour: !!(pv as any).is_second_tour,
         entered_by: pv.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : null,
         entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
@@ -1221,6 +1223,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     setDetailOpen(true);
                     setSelectedListUrl((pv as any).participation_list_url ?? null);
                     setSelectedPvUrl(pv.pv_photo_url ?? null);
+                    setIsSecondTour(!!(pv as any).is_second_tour);
                     setNewListFile(null);
                     setNewPvFile(null);
                     setInlinePreviewUrl(null);
@@ -1439,19 +1442,17 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       {/* ── Liste de participation ── */}
                       <div className="p-3 sm:p-4">
                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Liste de participation</p>
-                        {!selectedPVData.participation_list_url && !selectedListUrl && !newListFile && (
+                        {!selectedListUrl && !newListFile && (
                           <p className="text-sm text-gray-400 italic mb-2">Aucune liste attachée</p>
                         )}
                         <div className="flex items-center gap-2 flex-wrap">
-                          {(selectedListUrl || selectedPVData.participation_list_url) && !newListFile && (
+                          {selectedListUrl && !newListFile && (
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => {
-                                const url = selectedListUrl || selectedPVData.participation_list_url;
-                                if (!url) return;
-                                if (window.innerWidth >= 1024) setInlinePreviewUrl(url);
-                                else setPreviewUrl(url);
+                                if (window.innerWidth >= 1024) setInlinePreviewUrl(selectedListUrl);
+                                else setPreviewUrl(selectedListUrl);
                               }}
                             >
                               <Eye className="w-4 h-4 mr-2" /> Voir
@@ -1460,7 +1461,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           {newListFile && (
                             <span className="text-xs text-green-700 font-medium flex items-center gap-1">
                               <FileText className="w-3 h-3" />{newListFile.name}
-                              <button onClick={() => setNewListFile(null)} className="ml-1 text-gray-400 hover:text-red-500">
+                              <button type="button" onClick={() => setNewListFile(null)} className="ml-1 text-gray-400 hover:text-red-500">
                                 <XIcon className="w-3 h-3" />
                               </button>
                             </span>
@@ -1476,7 +1477,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                               />
                               <Button variant="secondary" size="sm" onClick={() => listFileInputRef.current?.click()}>
                                 <Upload className="w-4 h-4 mr-2" />
-                                {selectedListUrl || selectedPVData.participation_list_url ? 'Remplacer' : 'Importer'}
+                                {selectedListUrl ? 'Remplacer' : 'Importer'}
                               </Button>
                               <div className="flex items-center gap-1">
                                 <Button
@@ -1488,7 +1489,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                   <FolderOpen className="w-4 h-4 mr-2" />
                                   Sélectionner existante
                                 </Button>
-                                {(selectedListUrl || selectedPVData.participation_list_url) && (
+                                {selectedListUrl && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1506,6 +1507,49 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
                     </div>
                   </div>
+
+                  {/* ── Statut du scrutin ── */}
+                  {editMode && (
+                    <div className="p-3 sm:p-4 border-t">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Statut du scrutin</p>
+                      <div className={`rounded-lg border p-3 flex flex-col sm:flex-row gap-3 ${isSecondTour ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="pv_statut_scrutin"
+                            checked={!isSecondTour}
+                            onChange={() => setIsSecondTour(false)}
+                            className="w-4 h-4 accent-green-600"
+                          />
+                          <span className={`text-sm font-semibold ${!isSecondTour ? 'text-green-800' : 'text-gray-500'}`}>✓ Valide (1er tour)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="pv_statut_scrutin"
+                            checked={isSecondTour}
+                            onChange={() => setIsSecondTour(true)}
+                            className="w-4 h-4 accent-orange-600"
+                          />
+                          <span className={`text-sm font-semibold ${isSecondTour ? 'text-orange-800' : 'text-gray-500'}`}>↻ Second tour requis</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {!editMode && (
+                    <div className="p-3 sm:p-4 border-t">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Statut du scrutin</p>
+                      {(selectedPVData as any)?.is_second_tour ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-orange-100 text-orange-700 border border-orange-200">
+                          ↻ Second tour requis
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-green-100 text-green-700 border border-green-200">
+                          ✓ Valide (1er tour)
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
               {/* Résultats par candidat */}
@@ -1896,6 +1940,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       };
                       updatePayload.pv_photo_url = pvPhotoUrl;
                       updatePayload.participation_list_url = listUrl;
+                      updatePayload.is_second_tour = isSecondTour;
                       const { error: pvErr } = await supabase
                         .from('procès_verbaux')
                         .update(updatePayload)
@@ -1928,6 +1973,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                         votes_expressed: editValues.votes_expressed,
                         pv_photo_url: pvPhotoUrl,
                         participation_list_url: listUrl,
+                        is_second_tour: isSecondTour,
                       } : p));
                       setSelectedPvUrl(pvPhotoUrl);
                       setEditMode(false);
