@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown, Download, FileText, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown, Download, Scale } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
@@ -30,6 +30,7 @@ type CollegeDetailRow = {
   syndicatName: string;
   votes: number;
   seats: number;
+  tiebreakType: 'anciennete' | 'age' | null;
 };
 
 const getNormalizedCollegeLabel = (val: string | null | undefined): string => {
@@ -76,6 +77,7 @@ interface CandidateResult {
   percentage: number;
   rank: number;
   seats?: number;
+  tiebreak?: boolean;
   colleges?: string[];
   logo?: string;
 }
@@ -242,8 +244,11 @@ const CandidateCard: React.FC<{
           {/* Barre de progression moderne */}
           <div className="mb-3 sm:mb-4">
             <div className="flex flex-wrap justify-between items-baseline gap-x-2 gap-y-1 mb-2">
-              <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 whitespace-nowrap">
+              <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 whitespace-nowrap inline-flex items-center gap-1.5">
                 {candidate.seats !== undefined ? `${candidate.seats} siège${candidate.seats !== 1 ? 's' : ''}` : candidate.total_votes.toLocaleString()}
+                {candidate.tiebreak && (
+                  <Scale className="w-4 h-4 text-amber-500" title="Siège attribué par départage (ancienneté/âge)" />
+                )}
               </span>
               <span className="text-sm sm:text-base font-semibold text-blue-600 whitespace-nowrap">
                 {candidate.seats !== undefined ? `(${candidate.total_votes.toLocaleString()} voix · ${percentage.toFixed(2)}%)` : `${percentage.toFixed(2)}%`}
@@ -337,8 +342,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   const [bureauSeatsMap, setBureauSeatsMap] = useState<Map<string, number>>(new Map());
   // État pour stocker les IDs des bureaux avec PV publiés
   const [publishedBureauIds, setPublishedBureauIds] = useState<Set<string>>(new Set());
-  // Menu téléchargement résultats (admin uniquement)
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   // Fonctions pour vérifier la présence de données
   const hasCenterData = () => {
@@ -835,7 +838,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
       // Agréger les votes par candidat ou syndicat
       const isProfessional = isProElection;
-      const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number; colleges: Set<string>; seats: number; remainder: number }>();
+      const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number; colleges: Set<string>; seats: number; remainder: number; tiebreak: boolean }>();
       
       (candidateResultsData || []).forEach((cr: any) => {
         if (!quorumOkPvIds.has(cr.pv_id)) return; // PV sans quorum → exclu des totaux
@@ -862,6 +865,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           colleges: new Set<string>(),
           seats: 0,
           remainder: 0,
+          tiebreak: false,
         };
         existing.total_votes += Number(cr.votes) || 0;
         if (isProfessional) {
@@ -875,6 +879,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
       // unionLists et electoralCollegesForPro sont déjà chargés au round 2
       let collegeSyndicatSeats = new Map<string, number>();
+      // Sièges attribués par départage ancienneté/âge (pour étiquette UI) — clé "collegeLabel_syndicat"
+      let collegeSyndicatTiebreak = new Map<string, 'anciennete' | 'age'>();
 
       if (isProfessional) {
 
@@ -948,27 +954,28 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           if (suffrages === 0) return { seats: empty };
 
           // Départage ancienneté → âge (1er titulaire — Cas 1 et Cas 2 sans siège attribué)
-          const ancAgeTie = (tied: typeof syndicats) => {
+          // Renvoie le gagnant ET le critère qui a tranché, pour l'étiquette UI
+          const ancAgeTie = (tied: typeof syndicats): { winner: typeof syndicats[0]; type: 'anciennete' | 'age' } | null => {
             const maxAnc = Math.max(...tied.map(t => t.anciennete));
             const byAnc = tied.filter(t => t.anciennete === maxAnc);
-            if (byAnc.length === 1) return byAnc[0];
+            if (byAnc.length === 1) return { winner: byAnc[0], type: 'anciennete' };
             const maxAge = Math.max(...byAnc.map(t => t.age));
             const byAge = byAnc.filter(t => t.age === maxAge);
-            return byAge.length === 1 ? byAge[0] : null;
+            return byAge.length === 1 ? { winner: byAge[0], type: 'age' } : null;
           };
 
           // Cas particulier (PDF p.3) : si un syndicat a déjà 1 siège, utiliser le 2ème titulaire
-          const ancAgeTieDynamic = (tied: typeof syndicats, allocState: Record<string, number>) => {
+          const ancAgeTieDynamic = (tied: typeof syndicats, allocState: Record<string, number>): { winner: typeof syndicats[0]; type: 'anciennete' | 'age' } | null => {
             const getAnc = (t: typeof syndicats[0]) =>
               (t.anciennete2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.anciennete2 : t.anciennete;
             const getAge = (t: typeof syndicats[0]) =>
               (t.age2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.age2 : t.age;
             const maxAnc = Math.max(...tied.map(getAnc));
             const byAnc = tied.filter(t => getAnc(t) === maxAnc);
-            if (byAnc.length === 1) return byAnc[0];
+            if (byAnc.length === 1) return { winner: byAnc[0], type: 'anciennete' };
             const maxAge = Math.max(...byAnc.map(getAge));
             const byAge = byAnc.filter(t => getAge(t) === maxAge);
-            return byAge.length === 1 ? byAge[0] : null;
+            return byAge.length === 1 ? { winner: byAge[0], type: 'age' } : null;
           };
 
           // Cas 1 : 1 siège
@@ -976,9 +983,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             const maxV = Math.max(...syndicats.map(s => s.votes));
             const tied = syndicats.filter(s => s.votes === maxV);
             if (tied.length === 1) return { seats: { ...empty, [tied[0].partyKey]: 1 } };
-            const winner = ancAgeTie(tied);
-            if (!winner) return { seats: empty, manualTie: tied.map(s => s.partyKey) };
-            return { seats: { ...empty, [winner.partyKey]: 1 } };
+            const result = ancAgeTie(tied);
+            if (!result) return { seats: empty, manualTie: tied.map(s => s.partyKey) };
+            return { seats: { ...empty, [result.winner.partyKey]: 1 }, tiebreakKeys: [{ partyKey: result.winner.partyKey, type: result.type }] };
           }
 
           // Cas 2 : 2 sièges
@@ -989,6 +996,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             let remaining = 2 - Object.values(allocated).reduce((a, b) => a + b, 0);
             if (remaining === 0) return { seats: allocated };
 
+            const tiebreakKeys: { partyKey: string; type: 'anciennete' | 'age' }[] = [];
             while (remaining > 0) {
               const withMoy = syndicats.map(s => ({ ...s, moy: s.votes / (allocated[s.partyKey] + 1) }));
               const maxMoy = Math.max(...withMoy.map(m => m.moy));
@@ -999,12 +1007,13 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               const maxV = Math.max(...tied.map(t => t.votes));
               const byVotes = tied.filter(t => t.votes === maxV);
               if (byVotes.length === 1) { allocated[byVotes[0].partyKey]++; remaining--; continue; }
-              const winner = ancAgeTieDynamic(byVotes, allocated);
-              if (!winner) return { seats: allocated, manualTie: byVotes.map(s => s.partyKey) };
-              allocated[winner.partyKey]++;
+              const result = ancAgeTieDynamic(byVotes, allocated);
+              if (!result) return { seats: allocated, manualTie: byVotes.map(s => s.partyKey) };
+              allocated[result.winner.partyKey]++;
+              tiebreakKeys.push({ partyKey: result.winner.partyKey, type: result.type });
               remaining--;
             }
-            return { seats: allocated };
+            return { seats: allocated, tiebreakKeys };
           }
 
           return { seats: empty };
@@ -1019,10 +1028,11 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         });
 
         // Réinitialiser les sièges dans filteredSummaryData
-        filteredSummaryData.forEach(c => { c.seats = 0; });
+        filteredSummaryData.forEach(c => { c.seats = 0; c.tiebreak = false; });
 
         // Map pour stocker les sièges cumulés par collège et par syndicat
         collegeSyndicatSeats = new Map<string, number>();
+        collegeSyndicatTiebreak = new Map<string, 'anciennete' | 'age'>();
 
         // 5) Calcul des sièges par groupe (centerId_colKey) — UN SEUL calcul par collège×établissement.
         //    Plusieurs PVs publiés pour le même collège (ex : bureau physique + pseudo-bureau créés
@@ -1063,6 +1073,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
         // Phase B : une seule allocation par groupe sur les voix agrégées
         const groupAllocations = new Map<string, Record<string, number>>();
+        const groupTiebreakKeys = new Map<string, Map<string, 'anciennete' | 'age'>>(); // gk → partyKey → critère de départage
         groupAggVotes.forEach((aggVotes, gk) => {
           const seatsToFill = bureauSeats.get(gk) || 0;
           const colType = groupColType.get(gk) || '';
@@ -1073,6 +1084,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           });
           const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
           groupAllocations.set(gk, alloc.seats);
+          const tiebreakMap = new Map<string, 'anciennete' | 'age'>();
+          (alloc.tiebreakKeys ?? []).forEach(tb => tiebreakMap.set(tb.partyKey, tb.type));
+          groupTiebreakKeys.set(gk, tiebreakMap);
 
           // Répercuter dans filteredSummaryData et collegeSyndicatSeats (une fois par groupe)
           Object.entries(alloc.seats).forEach(([pk, s]) => {
@@ -1081,6 +1095,11 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             const collegeLabel = getNormalizedCollegeLabel(colType);
             const seatKey = `${collegeLabel}_${pk}`;
             collegeSyndicatSeats.set(seatKey, (collegeSyndicatSeats.get(seatKey) || 0) + s);
+            const tbType = tiebreakMap.get(pk);
+            if (tbType) {
+              if (entry) entry.tiebreak = true;
+              collegeSyndicatTiebreak.set(seatKey, tbType);
+            }
           });
         });
 
@@ -1092,6 +1111,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         pvCandidateResults.forEach((results, pvId) => {
           const gk = pvGroupKey.get(pvId);
           const groupAlloc = gk ? (groupAllocations.get(gk) || {}) : {};
+          const groupTiebreaks = gk ? (groupTiebreakKeys.get(gk) || new Map<string, 'anciennete' | 'age'>()) : new Map<string, 'anciennete' | 'age'>();
           const pvObject = (pvsData || []).find((pv: any) => String(pv.id) === String(pvId));
           const bureauName = pvObject?.voting_bureaux?.name || '';
           const isPseudo = bureauName.startsWith('College -');
@@ -1114,7 +1134,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             .map(([syndicatName, votes]) => ({
               syndicatName,
               votes,
-              seats: isPrimary ? (groupAlloc[syndicatName] || 0) : 0
+              seats: isPrimary ? (groupAlloc[syndicatName] || 0) : 0,
+              tiebreakType: isPrimary ? (groupTiebreaks.get(syndicatName) ?? null) : null
             }))
             .sort((a, b) => b.votes - a.votes);
 
@@ -1137,7 +1158,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             partyVotes.set(syndicat, (partyVotes.get(syndicat) || 0) + (Number(r.votes) || 0));
           });
           bRow.syndicats = Array.from(partyVotes.entries())
-            .map(([syndicatName, votes]) => ({ syndicatName, votes, seats: 0 }))
+            .map(([syndicatName, votes]) => ({ syndicatName, votes, seats: 0, tiebreakType: null as 'anciennete' | 'age' | null }))
             .sort((a: any, b: any) => b.votes - a.votes);
         });
 
@@ -1187,6 +1208,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             percentage: totalCandidateVotesForPct > 0 ? (100 * (c.total_votes || 0)) / totalCandidateVotesForPct : 0,
             rank: 0,
             seats: c.seats,
+            tiebreak: c.tiebreak,
             colleges: Array.from(c.colleges),
             logo: logosMap.get(c.candidate_id) || undefined
           }))
@@ -1246,6 +1268,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 syndicatName,
                 votes,
                 seats: seats,
+                tiebreakType: collegeSyndicatTiebreak.get(seatKey) ?? null,
               });
             });
         }
@@ -1469,6 +1492,13 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     return `${lastName} ${firstInitials}`;
   };
 
+  // Libellé de l'étiquette de départage selon le critère ayant tranché
+  const tiebreakLabel = (type: 'anciennete' | 'age' | null | undefined): string | null => {
+    if (type === 'anciennete') return 'Victoire par ancienneté';
+    if (type === 'age') return 'Victoire par âge';
+    return null;
+  };
+
   const getProCollegeTableRows = (bureaux: any[], centerId?: string) => {
     const collegeMap = new Map<string, {
       collegeName: string;
@@ -1477,7 +1507,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       total_voters: number;
       total_expressed_votes: number;
       quorum_failed: boolean;
-      syndicats: Map<string, { syndicat: string; seats: number; votes: number }>;
+      syndicats: Map<string, { syndicat: string; seats: number; votes: number; tiebreakType: 'anciennete' | 'age' | null }>;
     }>();
 
     bureaux.forEach((b: any) => {
@@ -1505,11 +1535,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       if (b.syndicats) {
         b.syndicats.forEach((s: any) => {
           if (!entry.syndicats.has(s.syndicatName)) {
-            entry.syndicats.set(s.syndicatName, { syndicat: s.syndicatName, seats: 0, votes: 0 });
+            entry.syndicats.set(s.syndicatName, { syndicat: s.syndicatName, seats: 0, votes: 0, tiebreakType: null });
           }
           const sEntry = entry.syndicats.get(s.syndicatName)!;
           sEntry.seats += Number(s.seats) || 0;
           sEntry.votes += Number(s.votes) || 0;
+          if (s.tiebreakType) sEntry.tiebreakType = s.tiebreakType;
         });
       }
     });
@@ -1942,17 +1973,48 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const autoTable = (await import('jspdf-autotable')).default;
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const election = results?.election;
+      const PAGE_W = 297;
+      const MARGIN = 14;
 
-      // Bandeau titre
-      doc.setFillColor(30, 64, 175);
-      doc.rect(0, 0, 297, 18, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(13);
-      doc.text(`Résultats officiels — ${election?.title || 'Élection'}`, 14, 12);
+      // toLocaleString('fr-FR') sépare les milliers par une espace insécable fine (U+202F),
+      // que la police Helvetica de jsPDF affiche comme "/" — on la remplace par une espace normale
+      const fmtNum = (n: number) => n.toLocaleString('fr-FR').replace(/[  ]/g, ' ');
 
-      // Méta
+      const drawHeader = (subtitle: string) => {
+        doc.setFillColor(30, 64, 175);
+        doc.rect(0, 0, PAGE_W, 16, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Résultats officiels — ${election?.title || 'Élection'}`, MARGIN, 10);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text(subtitle, PAGE_W - MARGIN, 10, { align: 'right' });
+      };
+
+      const drawSectionTitle = (title: string, y: number) => {
+        doc.setFillColor(219, 234, 254);
+        doc.rect(MARGIN, y, PAGE_W - MARGIN * 2, 7, 'F');
+        doc.setTextColor(30, 64, 175);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(title, MARGIN + 2, y + 5);
+        return y + 10;
+      };
+
+      const tableTheme = {
+        styles: { fontSize: 8.5, cellPadding: 2 },
+        headStyles: { fillColor: [30, 64, 175] as [number, number, number], textColor: 255, fontStyle: 'bold' as const },
+        alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
+        margin: { left: MARGIN, right: MARGIN, top: 18 },
+      };
+
+      // ── Page 1 : en-tête + statistiques + résultats globaux ──
+      drawHeader("Vue d'ensemble");
+
       doc.setTextColor(80, 80, 80);
       doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
       const metaLine = [
         election?.type,
         election?.status,
@@ -1960,83 +2022,190 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         election?.localisation,
         `Exporté le ${new Date().toLocaleDateString('fr-FR')}`,
       ].filter(Boolean).join('  •  ');
-      doc.text(metaLine, 14, 24);
+      doc.text(metaLine, MARGIN, 22);
 
-      // Stats
-      doc.setFontSize(9);
-      doc.setTextColor(40, 40, 40);
-      const statsLine = [
-        `Inscrits : ${(results?.total_voters_election || 0).toLocaleString('fr-FR')}`,
-        `Suffrages exprimés : ${(results?.total_votes_cast || 0).toLocaleString('fr-FR')}`,
-        `Participation : ${(results?.participation_rate || 0).toFixed(1)} %`,
-      ].join('   |   ');
-      doc.text(statsLine, 14, 30);
+      const totalRegistered = results?.total_voters_election || 0;
+      const totalVoters = centerRows.reduce((s, c) => s + (Number(c.total_voters) || 0), 0);
+      const totalNull = centerRows.reduce((s, c) => s + (Number(c.total_null_votes) || 0), 0);
+      const totalExpressed = results?.total_votes_cast || 0;
+      const participation = results?.participation_rate || 0;
+      const abstention = 100 - participation;
 
-      // Tableau
-      const headers = isProResults
+      const statBoxes = [
+        { label: electorsLabel || 'Inscrits', value: fmtNum(totalRegistered) },
+        { label: 'Votants', value: fmtNum(totalVoters) },
+        { label: 'Suffrages exprimés', value: fmtNum(totalExpressed) },
+        { label: 'Bulletins nuls', value: fmtNum(totalNull) },
+        { label: 'Participation', value: `${participation.toFixed(1)} %` },
+        { label: 'Abstention', value: `${abstention.toFixed(1)} %` },
+      ];
+
+      const boxGap = 3;
+      const boxW = (PAGE_W - MARGIN * 2 - boxGap * (statBoxes.length - 1)) / statBoxes.length;
+      const boxY = 27;
+      statBoxes.forEach((s, i) => {
+        const bx = MARGIN + i * (boxW + boxGap);
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(226, 232, 240);
+        doc.roundedRect(bx, boxY, boxW, 14, 1.5, 1.5, 'FD');
+        doc.setTextColor(30, 64, 175);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text(s.value, bx + boxW / 2, boxY + 6.5, { align: 'center' });
+        doc.setTextColor(100, 116, 139);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.text(s.label, bx + boxW / 2, boxY + 11.5, { align: 'center' });
+      });
+
+      const globalSectionY = drawSectionTitle(
+        isProResults ? 'Résultats globaux par syndicat' : 'Résultats globaux par candidat',
+        boxY + 18
+      );
+
+      const globalHeaders = isProResults
         ? ['Rang', 'Syndicat', 'Voix', '% des voix', 'Sièges']
-        : ['Rang', 'Candidat', 'Parti', 'Voix', '% des voix'];
+        : ['Rang', 'Candidat', 'Parti / Liste', 'Voix', '% des voix'];
 
-      const body = (results?.candidates || []).map(c =>
+      const globalBody = (results?.candidates || []).map(c =>
         isProResults
-          ? [c.rank > 0 ? `#${c.rank}` : '—', c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`, c.seats ?? '—']
-          : [c.rank > 0 ? `#${c.rank}` : '—', c.candidate_name, c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`]
+          ? [c.rank > 0 ? `#${c.rank}` : '—', c.party_name, fmtNum(c.total_votes), `${c.percentage.toFixed(2)} %`, c.seats ?? '—']
+          : [c.rank > 0 ? `#${c.rank}` : '—', c.candidate_name, c.party_name, fmtNum(c.total_votes), `${c.percentage.toFixed(2)} %`]
       );
 
       // @ts-ignore
       autoTable(doc, {
-        head: [headers],
-        body,
-        startY: 35,
-        styles: { fontSize: 9, cellPadding: 2.5 },
-        headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
+        ...tableTheme,
+        head: [globalHeaders],
+        body: globalBody,
+        startY: globalSectionY,
         columnStyles: { 0: { halign: 'center', cellWidth: 14 } },
+        didDrawPage: () => drawHeader("Vue d'ensemble"),
       });
+
+      // ── Résultats par collège (élections professionnelles) ──
+      if (isProResults && collegeDetailRows.length > 0) {
+        doc.addPage();
+        drawHeader('Résultats par collège');
+        const collegeY = drawSectionTitle('Résultats par collège', 22);
+
+        const byCollege = new Map<string, CollegeDetailRow[]>();
+        collegeDetailRows.forEach(row => {
+          if (!byCollege.has(row.collegeName)) byCollege.set(row.collegeName, []);
+          byCollege.get(row.collegeName)!.push(row);
+        });
+
+        const collegeBody: any[] = [];
+        byCollege.forEach((rows, collegeName) => {
+          collegeBody.push([
+            { content: collegeName, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
+          ]);
+          rows.forEach(r => {
+            collegeBody.push([r.syndicatName, fmtNum(r.votes), r.seats]);
+          });
+        });
+
+        // @ts-ignore
+        autoTable(doc, {
+          ...tableTheme,
+          head: [['Syndicat', 'Voix', 'Sièges']],
+          body: collegeBody,
+          startY: collegeY,
+          columnStyles: { 1: { halign: 'right', cellWidth: 35 }, 2: { halign: 'center', cellWidth: 25 } },
+          didDrawPage: () => drawHeader('Résultats par collège'),
+        });
+      }
+
+      // ── Résultats par établissement ──
+      if (centerRows.length > 0) {
+        doc.addPage();
+        drawHeader('Résultats par établissement');
+        const centerY = drawSectionTitle('Résultats par établissement', 22);
+
+        const centerHeaders = ['Établissement', electorsLabel || 'Inscrits', 'Votants', 'Exprimés', 'Nuls', 'Participation'];
+        const centerBody = [...centerRows]
+          .sort((a, b) => (a.center_name || '').localeCompare(b.center_name || ''))
+          .map(c => [
+            c.center_name || '',
+            fmtNum(c.total_registered || 0),
+            fmtNum(c.total_voters || 0),
+            fmtNum(c.total_expressed_votes || 0),
+            fmtNum(c.total_null_votes || 0),
+            `${(c.participation_pct || 0).toFixed(1)} %`,
+          ]);
+
+        // @ts-ignore
+        autoTable(doc, {
+          ...tableTheme,
+          head: [centerHeaders],
+          body: centerBody,
+          startY: centerY,
+          columnStyles: {
+            1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' },
+            4: { halign: 'right' }, 5: { halign: 'right' },
+          },
+          didDrawPage: () => drawHeader('Résultats par établissement'),
+        });
+      }
+
+      // ── Détail par syndicat et par établissement (élections professionnelles) ──
+      if (isProResults && bureauRows.some((b: any) => (b.syndicats || []).length > 0)) {
+        doc.addPage();
+        drawHeader('Détail par établissement');
+        const detailY = drawSectionTitle('Détail des résultats par syndicat et par établissement', 22);
+
+        const centerNameById = new Map(centerRows.map((c: any) => [c.center_id, c.center_name]));
+        const aggregated = new Map<string, Map<string, { votes: number; seats: number }>>();
+        bureauRows.forEach((b: any) => {
+          if (!b.center_id) return;
+          if (!aggregated.has(b.center_id)) aggregated.set(b.center_id, new Map());
+          const m = aggregated.get(b.center_id)!;
+          (b.syndicats || []).forEach((s: any) => {
+            const cur = m.get(s.syndicatName) || { votes: 0, seats: 0 };
+            m.set(s.syndicatName, { votes: cur.votes + (Number(s.votes) || 0), seats: cur.seats + (Number(s.seats) || 0) });
+          });
+        });
+
+        const detailBody: any[] = [];
+        Array.from(aggregated.entries())
+          .sort(([a], [b]) => (centerNameById.get(a) || '').localeCompare(centerNameById.get(b) || ''))
+          .forEach(([centerId, syndicatMap]) => {
+            detailBody.push([
+              { content: centerNameById.get(centerId) || centerId, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
+            ]);
+            Array.from(syndicatMap.entries())
+              .sort((a, b) => b[1].votes - a[1].votes)
+              .forEach(([syndicatName, data]) => {
+                detailBody.push([syndicatName, fmtNum(data.votes), data.seats]);
+              });
+          });
+
+        // @ts-ignore
+        autoTable(doc, {
+          ...tableTheme,
+          head: [['Syndicat', 'Voix', 'Sièges']],
+          body: detailBody,
+          startY: detailY,
+          columnStyles: { 1: { halign: 'right', cellWidth: 35 }, 2: { halign: 'center', cellWidth: 25 } },
+          didDrawPage: () => drawHeader('Détail par établissement'),
+        });
+      }
+
+      // Pagination
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7.5);
+        doc.setTextColor(150, 150, 150);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Page ${i} / ${pageCount}`, PAGE_W - MARGIN, 205, { align: 'right' });
+        doc.text("o'Hitu — Plateforme de gestion électorale", MARGIN, 205);
+      }
 
       doc.save(`${buildExportFilename()}.pdf`);
     } catch (e) {
       console.error('Export PDF:', e);
       toast.error('Erreur lors de la génération du PDF');
-    }
-  };
-
-  const handleExportExcel = async () => {
-    try {
-      const XLSX = await import('xlsx');
-      const wb = XLSX.utils.book_new();
-
-      // Feuille 1 — Résumé
-      const summaryRows = [
-        ['Champ', 'Valeur'],
-        ['Élection', results?.election?.title || ''],
-        ['Date', results?.election?.election_date ? new Date(results.election.election_date).toLocaleDateString('fr-FR') : ''],
-        ['Type', results?.election?.type || ''],
-        ['Statut', results?.election?.status || ''],
-        ['Localisation', results?.election?.localisation || ''],
-        [],
-        ['Inscrits total', results?.total_voters_election || 0],
-        ['Suffrages exprimés', results?.total_votes_cast || 0],
-        ['Taux de participation', `${(results?.participation_rate || 0).toFixed(2)} %`],
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Résumé');
-
-      // Feuille 2 — Résultats
-      const resHeaders = isProResults
-        ? ['Rang', 'Syndicat', 'Voix', '% des voix', 'Sièges']
-        : ['Rang', 'Candidat', 'Parti', 'Voix', '% des voix'];
-
-      const resRows = (results?.candidates || []).map(c =>
-        isProResults
-          ? [c.rank > 0 ? c.rank : '', c.party_name, c.total_votes, `${c.percentage.toFixed(2)} %`, c.seats ?? '']
-          : [c.rank > 0 ? c.rank : '', c.candidate_name, c.party_name, c.total_votes, `${c.percentage.toFixed(2)} %`]
-      );
-
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([resHeaders, ...resRows]), 'Résultats');
-      XLSX.writeFile(wb, `${buildExportFilename()}.xlsx`);
-    } catch (e) {
-      console.error('Export Excel:', e);
-      toast.error('Erreur lors de la génération du fichier Excel');
     }
   };
 
@@ -2246,35 +2415,13 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
                   {/* Bouton téléchargement — admin uniquement */}
                   {isGlobalAdmin && showPublicResults && (
-                    <div className="relative w-full sm:w-auto">
-                      <button
-                        onClick={() => setExportMenuOpen(v => !v)}
-                        className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-colors text-sm sm:text-base w-full sm:w-auto justify-center"
-                      >
-                        <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        <span>Télécharger</span>
-                        <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportMenuOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportMenuOpen && (
-                        <div className="absolute top-full mt-1.5 left-0 sm:left-auto sm:right-0 bg-white border rounded-xl shadow-xl z-50 min-w-[200px] py-1 overflow-hidden">
-                          <button
-                            onClick={() => { handleExportPDF(); setExportMenuOpen(false); }}
-                            className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 transition-colors"
-                          >
-                            <FileText className="w-4 h-4 text-red-500 flex-shrink-0" />
-                            Télécharger en PDF
-                          </button>
-                          <div className="border-t mx-3 my-0.5" />
-                          <button
-                            onClick={() => { handleExportExcel(); setExportMenuOpen(false); }}
-                            className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-green-50 transition-colors"
-                          >
-                            <FileSpreadsheet className="w-4 h-4 text-green-600 flex-shrink-0" />
-                            Télécharger en Excel
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      onClick={handleExportPDF}
+                      className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-colors text-sm sm:text-base w-full sm:w-auto justify-center"
+                    >
+                      <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span>Télécharger les résultats (PDF)</span>
+                    </button>
                   )}
 
                   {/* Texte d'information sur les résultats provisoires */}
@@ -2574,7 +2721,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                             )}
                             {isProResults && (
                               <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right font-semibold text-xs sm:text-sm">
-                                {c.seats ?? 0}
+                                <span className="inline-flex items-center justify-end gap-1">
+                                  {c.seats ?? 0}
+                                  {c.tiebreak && (
+                                    <Scale className="w-3 h-3 text-amber-500" title="Siège attribué par départage (ancienneté/âge)" />
+                                  )}
+                                </span>
                               </td>
                             )}
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right text-xs sm:text-sm">{typeof c.total_votes === 'number' ? c.total_votes.toLocaleString('fr-FR') : (c.total_votes ?? '-')}</td>
@@ -2668,6 +2820,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
                                     <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
                                     <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
+                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Décision</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -2687,14 +2840,30 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                       <React.Fragment key={i}>
                                         <tr className="hover:bg-gray-50 transition-colors">
                                           <td className="py-2 pr-2 font-medium text-gray-800">{r.collegeName}</td>
-                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{r.syndicat.seats}</td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">
+                                            {r.syndicat.seats}
+                                          </td>
                                           <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{r.syndicat.votes?.toLocaleString() || '0'}</td>
                                           <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
                                           <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                          <td className="py-2 pl-2 hidden sm:table-cell">
+                                            {tiebreakLabel(r.syndicat.tiebreakType) && (
+                                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                                {tiebreakLabel(r.syndicat.tiebreakType)}
+                                              </span>
+                                            )}
+                                          </td>
                                         </tr>
                                         {delegueDisplay && delegueDisplay !== '—' && (
                                           <tr className="sm:hidden bg-slate-50">
-                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">Délégué : {delegueDisplay}</td>
+                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">
+                                              Délégué : {delegueDisplay}
+                                              {tiebreakLabel(r.syndicat.tiebreakType) && (
+                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap not-italic">
+                                                  {tiebreakLabel(r.syndicat.tiebreakType)}
+                                                </span>
+                                              )}
+                                            </td>
                                           </tr>
                                         )}
                                       </React.Fragment>
@@ -3074,6 +3243,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
                                     <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
                                     <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
+                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Décision</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -3095,21 +3265,37 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                           <td className="py-2 pr-2 font-medium text-gray-800 break-words max-w-[120px] sm:max-w-none">
                                             {s.syndicat}
                                           </td>
-                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{s.seats}</td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">
+                                            {s.seats}
+                                          </td>
                                           <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{s.votes?.toLocaleString() || '0'}</td>
                                           <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
                                           <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                          <td className="py-2 pl-2 hidden sm:table-cell">
+                                            {tiebreakLabel(s.tiebreakType) && (
+                                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                                {tiebreakLabel(s.tiebreakType)}
+                                              </span>
+                                            )}
+                                          </td>
                                         </tr>
                                         {delegueDisplay && delegueDisplay !== '—' && (
                                           <tr className="sm:hidden bg-white">
-                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">Délégué : {delegueDisplay}</td>
+                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">
+                                              Délégué : {delegueDisplay}
+                                              {tiebreakLabel(s.tiebreakType) && (
+                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap not-italic">
+                                                  {tiebreakLabel(s.tiebreakType)}
+                                                </span>
+                                              )}
+                                            </td>
                                           </tr>
                                         )}
                                       </React.Fragment>
                                     );
                                   }) : (
                                     <tr>
-                                      <td colSpan={5} className="py-3 text-center text-gray-400 text-xs">
+                                      <td colSpan={6} className="py-3 text-center text-gray-400 text-xs">
                                         Aucune donnée syndicale disponible
                                       </td>
                                     </tr>
