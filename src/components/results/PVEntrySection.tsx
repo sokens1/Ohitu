@@ -118,7 +118,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     bulletinsNuls: '',
     suffragesExprimes: '',
     candidateVotes: {} as Record<string, string>,
-    uploadedFile: null as File | null
+    uploadedFile: null as File | null,
+    is_second_tour: false,
   });
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const network = useNetworkQuality();
@@ -185,6 +186,15 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     setHasDraft(false);
     toast.info('Brouillon supprimé.');
   };
+
+  // Auto-calcul is_second_tour : quorum non atteint → second tour par défaut
+  useEffect(() => {
+    const inscrits = parseInt(formData.inscrits) || 0;
+    const exprimes = parseInt(formData.suffragesExprimes) || 0;
+    if (inscrits > 0) {
+      setFormData(prev => ({ ...prev, is_second_tour: exprimes < inscrits / 2 }));
+    }
+  }, [formData.inscrits, formData.suffragesExprimes]);
 
   // Référence stable vers prefill pour l'utiliser dans loadAll sans le mettre en dépendance
   const prefillRef = useRef(prefill);
@@ -890,6 +900,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             pv_photo_url: pvPhotoUrl || undefined,
             participation_list_url: participationListUrl || undefined,
             college_type: collegeType,
+            is_second_tour: formData.is_second_tour,
           })
           .eq('id', existingPv.id)
           .select()
@@ -912,6 +923,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
             pv_photo_url: pvPhotoUrl,
             participation_list_url: participationListUrl,
             college_type: collegeType,
+            is_second_tour: formData.is_second_tour,
           })
           .select()
           .single();
@@ -2123,6 +2135,45 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                       <div className="text-gray-400 text-sm italic">Aucune liste attachée (optionnel)</div>
                     )}
                   </div>
+
+                  {/* Statut du scrutin */}
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-3">Statut du scrutin</h4>
+                    <div className={`rounded-lg border p-4 ${formData.is_second_tour ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="scrutin_statut"
+                            checked={!formData.is_second_tour}
+                            onChange={() => setFormData(prev => ({ ...prev, is_second_tour: false }))}
+                            className="w-4 h-4 accent-green-600"
+                          />
+                          <span className={`text-sm font-semibold ${!formData.is_second_tour ? 'text-green-800' : 'text-gray-500'}`}>
+                            ✓ Valide (1er tour)
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="scrutin_statut"
+                            checked={formData.is_second_tour}
+                            onChange={() => setFormData(prev => ({ ...prev, is_second_tour: true }))}
+                            className="w-4 h-4 accent-orange-600"
+                          />
+                          <span className={`text-sm font-semibold ${formData.is_second_tour ? 'text-orange-800' : 'text-gray-500'}`}>
+                            ↻ Second tour requis
+                          </span>
+                        </label>
+                      </div>
+                      {formData.is_second_tour && (
+                        <p className="text-xs text-orange-600 mt-2">
+                          Quorum non atteint — ce bureau nécessite un second tour. Modifiable si besoin.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
                 </CardContent>
               </Card>
             </div>
