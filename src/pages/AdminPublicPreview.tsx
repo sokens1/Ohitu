@@ -45,7 +45,8 @@ const AdminPublicPreview: React.FC = () => {
     };
 
     fetch();
-  }, [isGlobalAdmin, assignedElectionIds]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGlobalAdmin, assignedElectionIds.join(',')]);
 
   const selected = elections.find(e => e.id === selectedId);
   const isVisible = selected?.is_published && selected?.is_public_visible !== false;

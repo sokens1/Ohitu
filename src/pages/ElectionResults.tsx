@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown, Download, FileText, FileSpreadsheet } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
@@ -337,6 +337,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   const [bureauSeatsMap, setBureauSeatsMap] = useState<Map<string, number>>(new Map());
   // État pour stocker les IDs des bureaux avec PV publiés
   const [publishedBureauIds, setPublishedBureauIds] = useState<Set<string>>(new Set());
+  // Menu téléchargement résultats (admin uniquement)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   // Fonctions pour vérifier la présence de données
   const hasCenterData = () => {
@@ -591,7 +593,9 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
     };
 
     fetchAvailableElections();
-  }, [user, isGlobalAdmin, assignedElectionIds]);
+  // Dépendances primitives stables — évite la boucle infinie due au tableau assignedElectionIds
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isGlobalAdmin, assignedElectionIds.join(',')]);
 
   // Reset couverture quand l'élection change (totalBureaux est désormais défini dans fetchElectionResults)
   useEffect(() => {
@@ -735,7 +739,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const centerNamesMap = new Map((centersNamesData || []).map((c: any) => [c.id, c.name]));
 
       // Paramètre admin : afficher ou non les lignes rouges quorum sur la page publique
-      const showQuorumFailedPublic = election.show_quorum_failed_public !== false;
+      // election may not have show_quorum_failed_public on its typed interface
+      const showQuorumFailedPublic = (election as any)?.show_quorum_failed_public !== false;
 
       // Mapper tous les PV publiés (sans filtre quorum) — utilisé pour les cartes stats
       const allPublishedBureaux = (pvsData || []).map((pv: any) => {
@@ -865,7 +870,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         candidateVotesMap.set(groupKey, existing);
       });
 
-      let filteredSummaryData = Array.from(candidateVotesMap.values());
+      const filteredSummaryData = Array.from(candidateVotesMap.values());
 
       // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
       // unionLists et electoralCollegesForPro sont déjà chargés au round 2
@@ -897,34 +902,43 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         });
         setBureauSeatsMap(new Map(bureauSeats));
 
-        // 2) Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority }
-        const candidateInfoMap = new Map<string, { age: number; seniority: number }>();
+        // 2) Construire une Map des attributs des candidats : "syndicat_college" -> { age, seniority, age2?, seniority2? }
+        // unionLists est trié par order_num ASC → order_num=1 traité avant order_num=2.
+        // Pour un collège 2 sièges, un syndicat peut avoir deux listes (order_num=1 et order_num=2).
+        // seniority/age  = 1er titulaire (liste order_num=1)
+        // seniority2/age2 = 2ème titulaire (liste order_num=2) — cas particulier départage 2 sièges
+        const candidateInfoMap = new Map<string, { age: number; seniority: number; age2?: number; seniority2?: number }>();
         unionLists.forEach((ul: any) => {
           const acronym = ul.unions?.acronym?.trim();
           const name = ul.unions?.name?.trim();
           const collegeKey = normalizeCollegeKey(ul.college);
-          
-          let age = 0;
-          let seniority = 0;
-          
-          const t = Array.isArray(ul.titulaires) && ul.titulaires.length > 0
-            ? ul.titulaires[0]
-            : (typeof ul.titulaires === 'string' ? JSON.parse(ul.titulaires || '[]')[0] : null);
+          if (!collegeKey) return;
 
-          if (t) {
-            age = Number(t.age) || 0;
-            seniority = Number(t.anciennete) || 0;
-          }
-          
-          if (collegeKey) {
-            if (acronym) candidateInfoMap.set(`${acronym}_${collegeKey}`, { age, seniority });
-            if (name) candidateInfoMap.set(`${name}_${collegeKey}`, { age, seniority });
-          }
+          const tArr = Array.isArray(ul.titulaires)
+            ? ul.titulaires
+            : (typeof ul.titulaires === 'string' ? (JSON.parse(ul.titulaires || '[]') as any[]) : []);
+          const t = tArr[0] ?? null;
+          if (!t) return;
+
+          const orderNum = Number(ul.order_num) || 1;
+          const thisAge = Number(t.age) || 0;
+          const thisSeniority = Number(t.anciennete) || 0;
+
+          [acronym, name].filter(Boolean).forEach(k => {
+            const mapKey = `${k!}_${collegeKey}`;
+            const existing = candidateInfoMap.get(mapKey);
+            if (!existing) {
+              candidateInfoMap.set(mapKey, { age: thisAge, seniority: thisSeniority });
+            } else if (orderNum >= 2) {
+              // Données du 2ème titulaire — ne pas écraser le 1er
+              candidateInfoMap.set(mapKey, { ...existing, age2: thisAge, seniority2: thisSeniority });
+            }
+          });
         });
 
         // 3) Algorithme de répartition légal CSE
         const allocateSeatsForCollege = (
-          syndicats: { partyKey: string; votes: number; age: number; anciennete: number }[],
+          syndicats: { partyKey: string; votes: number; age: number; anciennete: number; anciennete2?: number; age2?: number }[],
           seatsToFill: number
         ) => {
           const empty: Record<string, number> = {};
@@ -933,12 +947,27 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           const suffrages = syndicats.reduce((sum, s) => sum + s.votes, 0);
           if (suffrages === 0) return { seats: empty };
 
+          // Départage ancienneté → âge (1er titulaire — Cas 1 et Cas 2 sans siège attribué)
           const ancAgeTie = (tied: typeof syndicats) => {
             const maxAnc = Math.max(...tied.map(t => t.anciennete));
             const byAnc = tied.filter(t => t.anciennete === maxAnc);
             if (byAnc.length === 1) return byAnc[0];
             const maxAge = Math.max(...byAnc.map(t => t.age));
             const byAge = byAnc.filter(t => t.age === maxAge);
+            return byAge.length === 1 ? byAge[0] : null;
+          };
+
+          // Cas particulier (PDF p.3) : si un syndicat a déjà 1 siège, utiliser le 2ème titulaire
+          const ancAgeTieDynamic = (tied: typeof syndicats, allocState: Record<string, number>) => {
+            const getAnc = (t: typeof syndicats[0]) =>
+              (t.anciennete2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.anciennete2 : t.anciennete;
+            const getAge = (t: typeof syndicats[0]) =>
+              (t.age2 !== undefined && (allocState[t.partyKey] || 0) >= 1) ? t.age2 : t.age;
+            const maxAnc = Math.max(...tied.map(getAnc));
+            const byAnc = tied.filter(t => getAnc(t) === maxAnc);
+            if (byAnc.length === 1) return byAnc[0];
+            const maxAge = Math.max(...byAnc.map(getAge));
+            const byAge = byAnc.filter(t => getAge(t) === maxAge);
             return byAge.length === 1 ? byAge[0] : null;
           };
 
@@ -966,11 +995,11 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               const tied = withMoy.filter(m => m.moy === maxMoy);
               if (tied.length === 1) { allocated[tied[0].partyKey]++; remaining--; continue; }
 
-              // Égalité de moyenne -> voix totales -> ancienneté -> âge -> manuel
+              // Égalité de moyenne → voix totales → ancienneté/âge (avec 2ème titulaire si déjà 1 siège) → manuel
               const maxV = Math.max(...tied.map(t => t.votes));
               const byVotes = tied.filter(t => t.votes === maxV);
               if (byVotes.length === 1) { allocated[byVotes[0].partyKey]++; remaining--; continue; }
-              const winner = ancAgeTie(byVotes);
+              const winner = ancAgeTieDynamic(byVotes, allocated);
               if (!winner) return { seats: allocated, manualTie: byVotes.map(s => s.partyKey) };
               allocated[winner.partyKey]++;
               remaining--;
@@ -1040,7 +1069,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           const colKey  = normalizeCollegeKey(colType) || '';
           const syndicats = Array.from(aggVotes.entries()).map(([pk, v]) => {
             const info = candidateInfoMap.get(`${pk}_${colKey}`) || { age: 0, seniority: 0 };
-            return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age };
+            return { partyKey: pk, votes: v, anciennete: info.seniority, age: info.age, anciennete2: info.seniority2, age2: info.age2 };
           });
           const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
           groupAllocations.set(gk, alloc.seats);
@@ -1896,6 +1925,121 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
   const showPublicResults =
     !!results?.election && (isAdminPreview || isElectionPublishedForPublic(results.election));
 
+  // ── Export résultats (admin) ───────────────────────────────────────────────
+
+  const buildExportFilename = () => {
+    const slug = (results?.election?.title || 'election')
+      .toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    return `resultats_${slug}_${new Date().toISOString().split('T')[0]}`;
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      const jsPDF = (await import('jspdf')).default;
+      const autoTable = (await import('jspdf-autotable')).default;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const election = results?.election;
+
+      // Bandeau titre
+      doc.setFillColor(30, 64, 175);
+      doc.rect(0, 0, 297, 18, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.text(`Résultats officiels — ${election?.title || 'Élection'}`, 14, 12);
+
+      // Méta
+      doc.setTextColor(80, 80, 80);
+      doc.setFontSize(8.5);
+      const metaLine = [
+        election?.type,
+        election?.status,
+        election?.election_date ? new Date(election.election_date).toLocaleDateString('fr-FR') : '',
+        election?.localisation,
+        `Exporté le ${new Date().toLocaleDateString('fr-FR')}`,
+      ].filter(Boolean).join('  •  ');
+      doc.text(metaLine, 14, 24);
+
+      // Stats
+      doc.setFontSize(9);
+      doc.setTextColor(40, 40, 40);
+      const statsLine = [
+        `Inscrits : ${(results?.total_voters_election || 0).toLocaleString('fr-FR')}`,
+        `Suffrages exprimés : ${(results?.total_votes_cast || 0).toLocaleString('fr-FR')}`,
+        `Participation : ${(results?.participation_rate || 0).toFixed(1)} %`,
+      ].join('   |   ');
+      doc.text(statsLine, 14, 30);
+
+      // Tableau
+      const headers = isProResults
+        ? ['Rang', 'Syndicat', 'Voix', '% des voix', 'Sièges']
+        : ['Rang', 'Candidat', 'Parti', 'Voix', '% des voix'];
+
+      const body = (results?.candidates || []).map(c =>
+        isProResults
+          ? [c.rank > 0 ? `#${c.rank}` : '—', c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`, c.seats ?? '—']
+          : [c.rank > 0 ? `#${c.rank}` : '—', c.candidate_name, c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`]
+      );
+
+      // @ts-ignore
+      autoTable(doc, {
+        head: [headers],
+        body,
+        startY: 35,
+        styles: { fontSize: 9, cellPadding: 2.5 },
+        headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: { 0: { halign: 'center', cellWidth: 14 } },
+      });
+
+      doc.save(`${buildExportFilename()}.pdf`);
+    } catch (e) {
+      console.error('Export PDF:', e);
+      toast.error('Erreur lors de la génération du PDF');
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.utils.book_new();
+
+      // Feuille 1 — Résumé
+      const summaryRows = [
+        ['Champ', 'Valeur'],
+        ['Élection', results?.election?.title || ''],
+        ['Date', results?.election?.election_date ? new Date(results.election.election_date).toLocaleDateString('fr-FR') : ''],
+        ['Type', results?.election?.type || ''],
+        ['Statut', results?.election?.status || ''],
+        ['Localisation', results?.election?.localisation || ''],
+        [],
+        ['Inscrits total', results?.total_voters_election || 0],
+        ['Suffrages exprimés', results?.total_votes_cast || 0],
+        ['Taux de participation', `${(results?.participation_rate || 0).toFixed(2)} %`],
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Résumé');
+
+      // Feuille 2 — Résultats
+      const resHeaders = isProResults
+        ? ['Rang', 'Syndicat', 'Voix', '% des voix', 'Sièges']
+        : ['Rang', 'Candidat', 'Parti', 'Voix', '% des voix'];
+
+      const resRows = (results?.candidates || []).map(c =>
+        isProResults
+          ? [c.rank > 0 ? c.rank : '', c.party_name, c.total_votes, `${c.percentage.toFixed(2)} %`, c.seats ?? '']
+          : [c.rank > 0 ? c.rank : '', c.candidate_name, c.party_name, c.total_votes, `${c.percentage.toFixed(2)} %`]
+      );
+
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([resHeaders, ...resRows]), 'Résultats');
+      XLSX.writeFile(wb, `${buildExportFilename()}.xlsx`);
+    } catch (e) {
+      console.error('Export Excel:', e);
+      toast.error('Erreur lors de la génération du fichier Excel');
+    }
+  };
+
   const getSortedCollegeRows = (): CollegeDetailRow[] => {
     return [...collegeDetailRows].sort((a, b) => {
       let comparison = 0;
@@ -2100,11 +2244,44 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     {new Date(results.election?.election_date || '').toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' })}
                   </span>
 
+                  {/* Bouton téléchargement — admin uniquement */}
+                  {isGlobalAdmin && showPublicResults && (
+                    <div className="relative w-full sm:w-auto">
+                      <button
+                        onClick={() => setExportMenuOpen(v => !v)}
+                        className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-colors text-sm sm:text-base w-full sm:w-auto justify-center"
+                      >
+                        <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <span>Télécharger</span>
+                        <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportMenuOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {exportMenuOpen && (
+                        <div className="absolute top-full mt-1.5 left-0 sm:left-auto sm:right-0 bg-white border rounded-xl shadow-xl z-50 min-w-[200px] py-1 overflow-hidden">
+                          <button
+                            onClick={() => { handleExportPDF(); setExportMenuOpen(false); }}
+                            className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 transition-colors"
+                          >
+                            <FileText className="w-4 h-4 text-red-500 flex-shrink-0" />
+                            Télécharger en PDF
+                          </button>
+                          <div className="border-t mx-3 my-0.5" />
+                          <button
+                            onClick={() => { handleExportExcel(); setExportMenuOpen(false); }}
+                            className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-green-50 transition-colors"
+                          >
+                            <FileSpreadsheet className="w-4 h-4 text-green-600 flex-shrink-0" />
+                            Télécharger en Excel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Texte d'information sur les résultats provisoires */}
                   <div className="w-full mt-2">
                     <p className="text-xs text-gray-500">
-                      * {results.election?.type === 'Élection Professionnelle' 
-                        ? "Résultat provisoire avant validation par l'Inspecteur du Travail." 
+                      * {results.election?.type === 'Élection Professionnelle'
+                        ? "Résultat provisoire avant validation par l'Inspecteur du Travail."
                         : "Résultats provisoires (à confirmer par le Ministère de l'Intérieur)."}
                     </p>
                   </div>
@@ -2366,8 +2543,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                   })}
                 </div>
               ) : (
-                <div className="overflow-x-auto -mx-2 sm:-mx-4 lg:-mx-6">
-                  <table className="min-w-full bg-white border rounded-lg">
+                <div className="overflow-x-auto">
+                  <table className="min-w-[380px] w-full bg-white border rounded-lg">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="text-left px-2 sm:px-4 py-2 sm:py-3 border text-xs sm:text-sm">
@@ -2424,7 +2601,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         {showPublicResults && (
         <Dialog open={!!openCandidateId} onOpenChange={(o) => !o && setOpenCandidateId(null)}>
           <DialogContent
-            className="w-[min(28rem,calc(100vw-2rem))] sm:w-full sm:max-w-4xl lg:max-w-5xl max-h-[calc(100vh-2rem)] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6"
+            className="w-[calc(100vw-1rem)] sm:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto p-3 sm:p-6"
           >
             <DialogHeader>
               <DialogTitle className="text-lg sm:text-xl">
@@ -2481,15 +2658,16 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                             <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200">
                               <h4 className="font-semibold text-gray-800 text-sm">{group.center.center_name}</h4>
                             </div>
-                            <div className="px-4 py-3">
-                              <table className="w-full text-xs sm:text-sm">
+                            <div className="px-3 py-3">
+                              <div className="overflow-x-auto">
+                              <table className="w-full min-w-[280px] text-xs sm:text-sm">
                                 <thead>
                                   <tr className="border-b border-gray-200">
-                                    <th className="text-left py-1.5 font-semibold text-gray-600">Collège</th>
-                                    <th className="text-center py-1.5 font-semibold text-gray-600 whitespace-nowrap">Sièges obtenus</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600">Voix</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600 pr-1">Score</th>
-                                    <th className="text-left py-1.5 font-semibold text-gray-600 pl-4">Délégué</th>
+                                    <th className="text-left py-1.5 pr-2 font-semibold text-gray-600">Collège</th>
+                                    <th className="text-center py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Sièges</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
+                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -2506,17 +2684,25 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                       ? `${(r.syndicat.votes / r.total_expressed_votes * 100).toFixed(1)} %`
                                       : '—';
                                     return (
-                                      <tr key={i} className="hover:bg-gray-50 transition-colors">
-                                        <td className="py-2 font-medium text-gray-800">{r.collegeName}</td>
-                                        <td className="py-2 text-center font-bold text-blue-600">{r.syndicat.seats}</td>
-                                        <td className="py-2 text-right text-gray-600">{r.syndicat.votes?.toLocaleString() || '0'}</td>
-                                        <td className="py-2 text-right text-gray-500 pr-1">{score}</td>
-                                        <td className="py-2 text-gray-600 pl-4">{delegueDisplay}</td>
-                                      </tr>
+                                      <React.Fragment key={i}>
+                                        <tr className="hover:bg-gray-50 transition-colors">
+                                          <td className="py-2 pr-2 font-medium text-gray-800">{r.collegeName}</td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{r.syndicat.seats}</td>
+                                          <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{r.syndicat.votes?.toLocaleString() || '0'}</td>
+                                          <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
+                                          <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                        </tr>
+                                        {delegueDisplay && delegueDisplay !== '—' && (
+                                          <tr className="sm:hidden bg-slate-50">
+                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">Délégué : {delegueDisplay}</td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
                                     );
                                   })}
                                 </tbody>
                               </table>
+                              </div>
                             </div>
                           </div>
                         );
@@ -2762,24 +2948,24 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                         <div className="hidden sm:block" />
                         {centerTotalSeats > 0 && (
                           <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                            <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Sièges en lice</div>
+                            <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Sièges en lice</div>
                             <div className="font-bold text-gray-800 text-sm sm:text-base">{centerTotalSeats}</div>
                           </div>
                         )}
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">{electorsLabel}</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_registered === 'number' ? c.total_registered.toLocaleString('fr-FR') : (c.total_registered || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Votants</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Votants</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_voters === 'number' ? c.total_voters.toLocaleString('fr-FR') : (c.total_voters || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Exprimés</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Exprimés</div>
                           <div className="font-bold text-gray-800 text-sm sm:text-base">{typeof c.total_expressed_votes === 'number' ? c.total_expressed_votes.toLocaleString('fr-FR') : (c.total_expressed_votes || '-')}</div>
                         </div>
                         <div className="bg-white rounded-lg px-3 py-2 border border-gray-200 shadow-sm text-left">
-                          <div className="text-[9px] sm:text-[10px] uppercase text-gray-500 font-medium mb-0.5">Abstention</div>
+                          <div className="text-[10px] sm:text-xs uppercase text-gray-500 font-medium mb-0.5">Abstention</div>
                           <div className={`font-bold text-sm sm:text-base ${typeof c.participation_pct === 'number'
                             ? ((100 - c.participation_pct) >= 49.51 ? 'text-red-600' : ((100 - c.participation_pct) > 20.5 ? 'text-yellow-600' : 'text-green-600'))
                             : 'text-gray-400'}`}>
@@ -2855,38 +3041,39 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   </div>
                                   <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${abstBadge}`}>Abs. {abstPct !== null ? `${abstPct.toFixed(2)}%` : '-'}</span>
                                 </div>
-                                <div className={`mt-2 grid ${centerTotalSeats > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-2 text-xs text-center ml-6`}>
+                                <div className={`mt-2 grid ${centerTotalSeats > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5 text-center ml-4 sm:ml-6`}>
                                   {centerTotalSeats > 0 && (
-                                    <div>
-                                      <div className="text-gray-500 uppercase">Sièges</div>
-                                      <div className="font-semibold text-gray-800">{rowSeats > 0 ? rowSeats : '-'}</div>
+                                    <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                      <div className="text-[10px] text-gray-500 uppercase leading-tight">Sièges</div>
+                                      <div className="text-xs font-semibold text-gray-800">{rowSeats > 0 ? rowSeats : '-'}</div>
                                     </div>
                                   )}
-                                  <div>
-                                    <div className="text-gray-500 uppercase">{electorsLabel}</div>
-                                    <div className="font-semibold text-gray-800">{row.total_registered?.toLocaleString() || '-'}</div>
+                                  <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                    <div className="text-[10px] text-gray-500 uppercase leading-tight truncate">{electorsLabel}</div>
+                                    <div className="text-xs font-semibold text-gray-800">{row.total_registered?.toLocaleString() || '-'}</div>
                                   </div>
-                                  <div>
-                                    <div className="text-gray-500 uppercase">Votants</div>
-                                    <div className="font-semibold text-gray-800">{row.total_voters?.toLocaleString() || '-'}</div>
+                                  <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                    <div className="text-[10px] text-gray-500 uppercase leading-tight">Votants</div>
+                                    <div className="text-xs font-semibold text-gray-800">{row.total_voters?.toLocaleString() || '-'}</div>
                                   </div>
-                                  <div>
-                                    <div className="text-gray-500 uppercase">Exprimés</div>
-                                    <div className="font-semibold text-gray-800">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
+                                  <div className="bg-white rounded px-1 py-1 border border-gray-100">
+                                    <div className="text-[10px] text-gray-500 uppercase leading-tight">Exprimés</div>
+                                    <div className="text-xs font-semibold text-gray-800">{row.total_expressed_votes?.toLocaleString() || '-'}</div>
                                   </div>
                                 </div>
                               </div>
                             </summary>
                             {/* Accordéon syndicats */}
-                            <div className="px-4 sm:px-8 lg:px-12 py-3 bg-slate-50 border-t border-gray-100">
-                              <table className="w-full text-xs sm:text-sm">
+                            <div className="px-2 sm:px-6 lg:px-10 py-3 bg-slate-50 border-t border-gray-100">
+                              <div className="overflow-x-auto">
+                              <table className="w-full min-w-[280px] text-xs sm:text-sm">
                                 <thead>
                                   <tr className="border-b border-gray-200">
-                                    <th className="text-left py-1.5 font-semibold text-gray-600">Syndicat</th>
-                                    <th className="text-center py-1.5 font-semibold text-gray-600 whitespace-nowrap">Sièges obtenus</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600">Voix</th>
-                                    <th className="text-right py-1.5 font-semibold text-gray-600 pr-1">Score</th>
-                                    <th className="text-left py-1.5 font-semibold text-gray-600 pl-4">Délégué</th>
+                                    <th className="text-left py-1.5 pr-2 font-semibold text-gray-600">Syndicat</th>
+                                    <th className="text-center py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Sièges</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
+                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -2903,15 +3090,22 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                       ? `${(s.votes / row.total_expressed_votes * 100).toFixed(1)} %`
                                       : '—';
                                     return (
-                                      <tr key={si} className="hover:bg-white transition-colors">
-                                        <td className="py-2 font-medium text-gray-800">
-                                          {s.syndicat}
-                                        </td>
-                                        <td className="py-2 text-center font-bold text-blue-600">{s.seats}</td>
-                                        <td className="py-2 text-right text-gray-600">{s.votes?.toLocaleString() || '0'}</td>
-                                        <td className="py-2 text-right text-gray-500 pr-1">{score}</td>
-                                        <td className="py-2 text-gray-600 pl-4">{delegueDisplay}</td>
-                                      </tr>
+                                      <React.Fragment key={si}>
+                                        <tr className="hover:bg-white transition-colors">
+                                          <td className="py-2 pr-2 font-medium text-gray-800 break-words max-w-[120px] sm:max-w-none">
+                                            {s.syndicat}
+                                          </td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{s.seats}</td>
+                                          <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{s.votes?.toLocaleString() || '0'}</td>
+                                          <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
+                                          <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                        </tr>
+                                        {delegueDisplay && delegueDisplay !== '—' && (
+                                          <tr className="sm:hidden bg-white">
+                                            <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">Délégué : {delegueDisplay}</td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
                                     );
                                   }) : (
                                     <tr>
@@ -2922,6 +3116,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   )}
                                 </tbody>
                               </table>
+                              </div>
                             </div>
                           </details>
                         );

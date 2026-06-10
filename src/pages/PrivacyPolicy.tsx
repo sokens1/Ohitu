@@ -52,7 +52,7 @@ const SECTIONS = [
     title: 'Données collectées et finalités',
     body: (
       <div className="space-y-4">
-        <p>La plateforme traite deux catégories distinctes de données, soumises à des régimes différents.</p>
+        <p>La plateforme traite quatre catégories distinctes de données, soumises à des régimes différents.</p>
 
         <div>
           <p className="font-semibold text-gray-900 mb-2">Données publiées relatives aux résultats électoraux</p>
@@ -67,7 +67,7 @@ const SECTIONS = [
               'Le nom, le prénom et le syndicat des candidats élus à l\'issue du scrutin',
               'Le collège électoral et l\'établissement pour lesquels ils ont été élus',
               'Les résultats agrégés par syndicat, par collège et par établissement',
-              'Les statistiques de participation (nombre d\'inscrits, de votants, taux de participation, suffrages exprimés)',
+              'Les statistiques de participation (nombre d\'inscrits, de votants, taux de participation, taux d\'abstention, suffrages exprimés)',
             ].map((item, i) => (
               <li key={i} className="flex items-start gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0 mt-2" />
@@ -81,7 +81,7 @@ const SECTIONS = [
           <p className="font-semibold text-gray-900 mb-2">Données personnelles des candidats</p>
           <p>
             Les données personnelles individuelles des candidats — qu'ils aient ou non obtenu un siège —
-            telles que l'âge, l'ancienneté et la situation familiale, ne sont pas publiées sur la partie
+            telles que le genre, l'âge et l'ancienneté, ne sont pas publiées sur la partie
             publique de la plateforme. Elles sont conservées uniquement dans les systèmes internes à des
             fins de traçabilité du processus électoral et de départage en cas d'égalité, conformément aux
             Articles 17 et 18 de l'Arrêté n°000147.
@@ -89,12 +89,35 @@ const SECTIONS = [
         </div>
 
         <div>
-          <p className="font-semibold text-gray-900 mb-2">Données de connexion des utilisateurs administrateurs</p>
+          <p className="font-semibold text-gray-900 mb-2">Données d'interactions avec la plateforme des utilisateurs administrateurs et animateurs</p>
           <p>
             Les accès à l'interface d'administration font l'objet d'une journalisation (piste d'audit)
             enregistrant l'identité de l'utilisateur, la date et l'heure de connexion, ainsi que des
             actions effectuées. Ces données sont exclusivement destinées à garantir l'intégrité du
             processus de saisie et de publication des résultats.
+          </p>
+        </div>
+
+        <div>
+          <p className="font-semibold text-gray-900 mb-2">Données relatives à l'entreprise et aux membres du dispositif électoral</p>
+          <p className="mb-2">
+            Dans le cadre de la création et de la gestion de l'élection sur la plateforme, sont collectées et conservées les données suivantes :
+          </p>
+          <ul className="space-y-2 pl-4">
+            <li className="flex items-start gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0 mt-2" />
+              <span><strong>Données relatives à l'entreprise organisatrice</strong> : dénomination sociale, secteur institutionnel, d'immatriculation, organisation de tutelle, établissements et bureaux de vote, collèges représentés et toute autre information renseignée lors de la configuration de l'élection sur la plateforme. Ces données sont utilisées exclusivement à des fins d'identification de l'élection concernée et de génération des documents officiels associés.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0 mt-2" />
+              <span><strong>Données relatives aux membres du dispositif électoral</strong> : nom, prénom, adresse électronique professionnelle et numéro de téléphone professionnel des personnes désignées pour administrer le processus électoral, notamment les responsables de la Direction du Capital Humain et les Présidents de Bureau de vote, ainsi que les membres de la Commission Technique Bipartite.</span>
+            </li>
+          </ul>
+          <p className="mt-2">
+            Les données relatives aux membres du dispositif électoral sont collectées dans le strict cadre de l'organisation des opérations électorales — coordination logistique, transmission des procès-verbaux et listes d'émargements des bureaux, notifications relatives au déroulement du scrutin — et ne sont accessibles qu'aux utilisateurs habilités de la plateforme. Elles ne sont en aucun cas publiées sur la partie publique.
+          </p>
+          <p className="mt-2">
+            Ces données sont supprimées à l'issue de la période de conservation définie à la section 7.
           </p>
         </div>
       </div>
@@ -167,8 +190,8 @@ const SECTIONS = [
       <div className="space-y-3">
         <p>
           Les données publiées relatives aux élus sont conservées par l'employeur pendant la durée du
-          mandat de trois ans. À l'issue de ce mandat, elles sont archivées à des fins d'historique
-          institutionnel.
+          mandat de trois ans. À l'issue de ce mandat, elles sont archivées par l'employeur à des fins
+          d'historique institutionnel.
         </p>
         <p>
           Les données de la piste d'audit sont conservées pendant une durée d'un mois à compter de la
@@ -178,8 +201,9 @@ const SECTIONS = [
           Préélectoral</em> (Article 13).
         </p>
         <p>
-          Les données personnelles des candidats conservées en interne sont supprimées à l'issue de cette
-          même période d'un mois, une fois le processus électoral définitivement clos.
+          Les données de toutes les autres catégories citées en section 3, conservées en interne dans la
+          plateforme, sont supprimées à l'issue de cette même période d'un mois, une fois le processus
+          électoral définitivement clos.
         </p>
       </div>
     ),
@@ -194,10 +218,14 @@ const SECTIONS = [
           disposant d'un accès internet, conformément à l'objectif de transparence du processus électoral.
         </p>
         <p>
-          Les données internes (piste d'audit, données personnelles des candidats) sont accessibles
-          uniquement aux personnes habilitées au sein de la Direction Générale et de la Direction du
-          Capital Humain de la SEEG, ainsi qu'à la Commission Technique Bipartite prévue par le
-          Protocole d'Accord Préélectoral et, en cas de contentieux, à l'Inspecteur du Travail compétent.
+          Les données internes sont accessibles uniquement aux personnes habilitées au sein de la Direction
+          Générale et de la Direction du Capital Humain de la SEEG, aux équipes techniques de CNX 4.0,
+          ainsi qu'à la Commission Technique Bipartite prévue par le Protocole d'Accord Préélectoral et,
+          en cas de contentieux, à l'Inspecteur du Travail compétent.
+        </p>
+        <p>
+          Cet accès est limité à la période allant du lancement de l'organisation des élections jusqu'à
+          un mois après la publication des résultats officiels.
         </p>
         <p>
           Les équipes techniques de CNX 4.0 peuvent accéder aux données dans le strict cadre de leurs
@@ -248,8 +276,8 @@ const SECTIONS = [
         La plateforme met en œuvre des mesures techniques et organisationnelles appropriées pour protéger
         les données contre tout accès non autorisé, toute modification ou toute divulgation non prévue,
         notamment via un système de gestion des rôles et d'authentification des utilisateurs
-        administrateurs, ainsi qu'une piste d'audit horodatée de toutes les actions effectuées sur
-        les données.
+        administrateurs et animateurs, ainsi qu'une piste d'audit horodatée de toutes les actions
+        effectuées dans la plateforme, en particulier sur les données.
       </p>
     ),
   },
@@ -260,7 +288,7 @@ const SECTIONS = [
       <p>
         La présente politique peut être mise à jour pour refléter d'éventuelles évolutions du traitement.
         Toute modification substantielle sera portée à la connaissance des personnes concernées par voie
-        d'affichage interne.
+        de notification sur la page d'accueil.
       </p>
     ),
   },

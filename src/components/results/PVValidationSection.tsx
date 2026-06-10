@@ -32,6 +32,7 @@ import {
   notifyOpinionReaction,
 } from '@/lib/notificationService';
 import { auditService } from '@/services/auditService';
+import DocumentPreviewModal from '@/components/ui/DocumentPreviewModal';
 
 // ── Composant Timeline circuit de validation ──────────────────────────────────
 interface ObserverOpinion {
@@ -131,24 +132,53 @@ const PVTimeline: React.FC<PVTimelineProps> = ({ pv }) => {
   ];
 
   return (
-    <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border border-slate-200 p-4">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">
+    <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border border-slate-200 p-3 sm:p-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
         Circuit de validation
       </p>
-      <div className="flex items-start gap-0">
+
+      {/* ── Mobile : vertical ─────────────────────────────────────────── */}
+      <div className="flex flex-col sm:hidden">
+        {steps.map((step, i) => (
+          <div key={i} className="flex items-start gap-3">
+            {/* Point + ligne verticale */}
+            <div className="flex flex-col items-center flex-shrink-0 w-7">
+              <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center z-10 flex-shrink-0 ${step.color.dot} shadow-sm`}>
+                {step.icon}
+              </div>
+              {i < steps.length - 1 && (
+                <div className={`w-0.5 flex-1 min-h-[1.75rem] ${step.color.line} mt-0.5`} />
+              )}
+            </div>
+            {/* Texte pleine largeur */}
+            <div className={`min-w-0 flex-1 ${i < steps.length - 1 ? 'pb-3' : ''}`}>
+              <p className={`text-xs font-semibold leading-tight ${step.color.text}`}>
+                {step.label}
+              </p>
+              {step.description && (
+                <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">{step.description}</p>
+              )}
+              {step.sublabel && (
+                <p className="text-[10px] font-medium text-gray-700 mt-0.5 break-words">{step.sublabel}</p>
+              )}
+              {step.date && (
+                <p className="text-[10px] text-gray-400 mt-0.5">{step.date}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Desktop : horizontal (inchangé) ──────────────────────────── */}
+      <div className="hidden sm:flex items-start gap-0">
         {steps.map((step, i) => (
           <div key={i} className="flex-1 flex flex-col items-center relative">
-            {/* Ligne de connexion gauche */}
             {i > 0 && (
               <div className={`absolute top-3.5 right-1/2 w-full h-0.5 ${steps[i - 1].color.line} -z-0`} />
             )}
-
-            {/* Point */}
             <div className={`relative z-10 w-7 h-7 rounded-full border-2 flex items-center justify-center ${step.color.dot} shadow-sm`}>
               {step.icon}
             </div>
-
-            {/* Texte */}
             <div className="mt-2 text-center px-1 w-full">
               <p className={`text-xs font-semibold leading-tight ${step.color.text}`}>
                 {step.label}
@@ -202,7 +232,6 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -559,7 +588,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         votes_expressed: pv.votes_expressed,
         null_votes: pv.null_votes,
         pv_photo_url: pv.pv_photo_url,
-        entered_by: pv.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : 'Inconnu',
+        entered_by: pv.entered_by ? (usersMap.get(pv.entered_by) || pv.entered_by) : null,
         entered_at_str: pv.entered_at ? new Date(pv.entered_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.entered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         validated_by: pv.validated_by ? (usersMap.get(pv.validated_by) || pv.validated_by) : 'Inconnu',
         validated_at_str: pv.validated_at ? new Date(pv.validated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.validated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
@@ -917,25 +946,25 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       {/* Filtres et statistiques */}
       <Card className="gov-card">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between text-gov-gray">
-            <div className="flex items-center space-x-2">
-              <FileCheck className="w-5 h-5" />
-              <span>File d'Attente de Validation</span>
+          <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-gov-gray">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileCheck className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm sm:text-base leading-tight">File d'Attente de Validation</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               {!readOnly && (role === 'super-admin' || role === 'admin') && (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2.5 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                  className="h-7 px-2 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
                   disabled={resettingAll || pvs.filter(p => p.status !== 'published').length === 0}
                   onClick={() => setShowResetAllConfirm(true)}
                 >
-                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                  Réinitialiser tous les PV
+                  <RotateCcw className="w-3.5 h-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">Réinitialiser tous les PV</span>
                 </Button>
               )}
-              <Badge className="bg-orange-100 text-orange-800">
+              <Badge className="bg-orange-100 text-orange-800 whitespace-nowrap">
                 {loading ? '...' : pvs.length} PV
               </Badge>
             </div>
@@ -944,7 +973,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         <CardContent className="space-y-3">
           {/* Barre de filtre locale */}
           <div className="flex flex-wrap gap-2 mb-4">
-            <div className="relative flex-1 min-w-48">
+            <div className="relative w-full sm:flex-1 sm:min-w-48">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <input
                 type="text"
@@ -1077,8 +1106,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   onClick={() => { setSelectedPV(pv.id); setDetailOpen(true); }}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center space-x-2 flex-wrap gap-1">
-                      <span className={`font-medium ${quorumAtteint ? 'text-gray-900' : 'text-red-800'}`}>{pv.bureauLabel}</span>
+                    <div className="flex items-center space-x-2 flex-wrap gap-1 min-w-0">
+                      <span className={`font-medium truncate max-w-[180px] sm:max-w-none ${quorumAtteint ? 'text-gray-900' : 'text-red-800'}`}>{pv.bureauLabel}</span>
                       {pv.college_type && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
                           pv.college_type === 'cadres'   ? 'bg-orange-50 text-orange-700 border-orange-200' :
@@ -1099,7 +1128,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     </div>
                     {getPriorityBadge(pv.status)}
                   </div>
-                  <div className="flex items-center space-x-4 text-sm text-gray-600">
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
                     <div className="flex items-center space-x-1">
                       <Clock className="w-4 h-4" />
                       <span>{pv.timestamp}</span>
@@ -1130,22 +1159,21 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       </div>
 
       {/* Modal détails PV */}
-      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setEditMode(false); setPreviewOpen(false); } }}>
-        <DialogContent className={`${previewOpen ? 'max-w-7xl' : 'max-w-4xl'} max-h-[90vh] overflow-y-auto transition-all duration-300`}>
+      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setEditMode(false); setPreviewUrl(null); } }}>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-x-hidden overflow-y-auto transition-all duration-300">
           <DialogHeader>
             <DialogTitle>Détails du PV</DialogTitle>
           </DialogHeader>
             {selectedPVData ? (
-              <div className={previewOpen ? 'flex gap-6 items-start' : ''}>
-              <div className={previewOpen ? 'w-[480px] flex-shrink-0 space-y-6 overflow-y-auto max-h-[75vh] pr-2' : 'space-y-6'}>
+              <div className="space-y-4 min-w-0 overflow-x-hidden">
 
               {/* ── Timeline circuit de validation ──────────────────────────── */}
               <PVTimeline pv={selectedPVData} />
 
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center space-x-2 flex-wrap gap-1">
+              <div className="flex items-center justify-between flex-wrap gap-2 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
                   {getStatusIcon(selectedPVData.status)}
-                  <span className="font-semibold">{(() => {
+                  <span className="font-semibold truncate">{(() => {
                     const bureau = bureauxMap.get(pvs.find(p=>p.id===selectedPVData.id)?.bureau_id || '');
                     const center = bureau ? centersMap.get(bureau.center_id) : undefined;
                     return `${center?.name || 'Centre'} - ${bureau?.name || 'Bureau'}`;
@@ -1168,7 +1196,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 {getPriorityBadge(selectedPVData.status)}
               </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
                   <div>
                   <h4 className="font-medium text-gray-900 mb-3">Participation</h4>
                   <div className="p-3 bg-gray-50 rounded-lg space-y-1 text-sm">
@@ -1176,19 +1204,19 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                         <div className="space-y-2">
                         <div className="flex items-center justify-between gap-4">
                           <span>Inscrits:</span>
-                          <input className={`border rounded px-2 py-1 w-28 ${editErrors.votants ? 'border-red-500' : ''}`} type="number" value={editValues.total_registered} onChange={e => setEditValues(v => ({ ...v, total_registered: parseInt(e.target.value) || 0 }))} />
+                          <input className={`border rounded px-2 py-1 w-20 sm:w-28 ${editErrors.votants ? 'border-red-500' : ''}`} type="number" value={editValues.total_registered} onChange={e => setEditValues(v => ({ ...v, total_registered: parseInt(e.target.value) || 0 }))} />
                               </div>
                         <div className="flex items-center justify-between gap-4">
                             <span>Votants:</span>
-                          <input className={`border rounded px-2 py-1 w-28 ${editErrors.votants ? 'border-red-500' : ''}`} type="number" value={editValues.total_voters} onChange={e => setEditValues(v => ({ ...v, total_voters: parseInt(e.target.value) || 0 }))} />
+                          <input className={`border rounded px-2 py-1 w-20 sm:w-28 ${editErrors.votants ? 'border-red-500' : ''}`} type="number" value={editValues.total_voters} onChange={e => setEditValues(v => ({ ...v, total_voters: parseInt(e.target.value) || 0 }))} />
                             </div>
                         <div className="flex items-center justify-between gap-4">
                             <span>Bulletins nuls:</span>
-                          <input className={`border rounded px-2 py-1 w-28 ${editErrors.total ? 'border-red-500' : ''}`} type="number" value={editValues.null_votes} onChange={e => setEditValues(v => ({ ...v, null_votes: parseInt(e.target.value) || 0 }))} />
+                          <input className={`border rounded px-2 py-1 w-20 sm:w-28 ${editErrors.total ? 'border-red-500' : ''}`} type="number" value={editValues.null_votes} onChange={e => setEditValues(v => ({ ...v, null_votes: parseInt(e.target.value) || 0 }))} />
                         </div>
                         <div className="flex items-center justify-between gap-4">
                             <span>Suffrages exprimés:</span>
-                          <input className={`border rounded px-2 py-1 w-28 ${editErrors.total || editErrors.candidateTotal ? 'border-red-500' : ''}`} type="number" value={editValues.votes_expressed} onChange={e => setEditValues(v => ({ ...v, votes_expressed: parseInt(e.target.value) || 0 }))} />
+                          <input className={`border rounded px-2 py-1 w-20 sm:w-28 ${editErrors.total || editErrors.candidateTotal ? 'border-red-500' : ''}`} type="number" value={editValues.votes_expressed} onChange={e => setEditValues(v => ({ ...v, votes_expressed: parseInt(e.target.value) || 0 }))} />
                       </div>
                         {(editErrors.votants || editErrors.total || editErrors.candidateTotal) && (
                           <div className="text-xs text-red-600 mt-2">
@@ -1218,7 +1246,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       </div>
                   <div>
                     <h4 className="font-medium text-gray-900 mb-3">Document Scanné</h4>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center bg-gray-50">
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-3 sm:p-6 text-center bg-gray-50">
                       <FileText className="w-10 h-10 text-gray-400 mx-auto mb-3" />
                       {!selectedPVData.pv_photo_url && (
                         <h5 className="font-medium text-gray-900 mb-2">Aucun document</h5>
@@ -1228,7 +1256,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           variant="outline" 
                           size="sm" 
                           disabled={!selectedPVData.pv_photo_url} 
-                          onClick={() => { if (selectedPVData.pv_photo_url) { setPreviewUrl(selectedPVData.pv_photo_url); setPreviewOpen(true); } }}
+                          onClick={() => { if (selectedPVData.pv_photo_url) setPreviewUrl(selectedPVData.pv_photo_url); }}
                         >
                           <Eye className="w-4 h-4 mr-2" /> Voir
                         </Button>
@@ -1294,7 +1322,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                     <div key={candidate.id} className="p-3 border border-gray-200 rounded-xl bg-white space-y-2">
                                       <p className="font-bold text-blue-700 text-sm">{syndicat}</p>
                                       {hasMultiple ? (
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                           {names.map((n, i) => (
                                             <div key={i} className="bg-gray-50 rounded-lg p-2 space-y-0.5">
                                               <p className="text-xs text-gray-400 font-medium">Titulaire #{i + 1}</p>
@@ -1364,7 +1392,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                             {editMode ? (
                               <input
                                 type="number"
-                                className="border rounded px-2 py-1 w-24 text-right"
+                                className="border rounded px-2 py-1 w-20 sm:w-24 text-right"
                                 value={cr.votes}
                                 onChange={e => {
                                   const value = parseInt(e.target.value || '0');
@@ -1589,7 +1617,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
 
               {/* isLocked : PV validé ou publié — boutons grisés, seul "Se rétracter" reste actif */}
-              <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-6">
+              <div className="flex flex-wrap gap-2 justify-end mt-4">
                 {!editMode && !readOnly && (
                   <Button disabled={isLocked} onClick={() => {
                     setEditValues({
@@ -1679,8 +1707,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         variant="outline"
         className="border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <RotateCcw className="w-4 h-4 mr-2" />
-        {resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres du bureau'}
+        <RotateCcw className="w-4 h-4 mr-1.5" />
+        <span className="hidden sm:inline">{resetting ? 'Réinitialisation...' : 'Réinitialiser les chiffres'}</span>
+        <span className="sm:hidden">{resetting ? '...' : 'Réinitialiser'}</span>
       </Button>}
 
                 {/* Se rétracter — admin + validateur uniquement, grisé si PV non validé/rejeté */}
@@ -1715,7 +1744,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       }
                     }}
                   >
-                    <RotateCcw className="w-4 h-4 mr-2" />
+                    <RotateCcw className="w-4 h-4 mr-1.5" />
                     {retracting ? 'Rétractation…' : 'Se rétracter'}
                   </Button>
                 )}
@@ -1777,34 +1806,22 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 </>}
                 </div>
               </div>
-              {previewOpen && previewUrl && (
-                <div className="flex-1 flex flex-col">
-                  <div className="flex items-center justify-between mb-3 flex-shrink-0">
-                    <h4 className="font-medium text-gray-900 text-sm">Document scanné</h4>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPreviewOpen(false)}
-                      className="text-gray-400 hover:text-gray-600 h-7 w-7 p-0"
-                    >
-                      <XCircle className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <div style={{ height: '70vh' }}>
-                    {previewUrl.toLowerCase().endsWith('.pdf') ? (
-                      <iframe src={previewUrl} className="w-full h-full border-0 rounded-lg shadow-sm" title="Document PV" />
-                    ) : (
-                      <div className="flex items-center justify-center h-full bg-gray-50 rounded-lg border border-gray-200">
-                        <img src={previewUrl} alt="PV" className="max-w-full max-h-full object-contain p-2" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              </div>
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Modal de prévisualisation du document PV */}
+      <DocumentPreviewModal
+        url={previewUrl}
+        title="Document PV"
+        subtitle={selectedPVData ? (() => {
+          const pv = pvs.find(p => p.id === selectedPVData.id);
+          const bureau = pv ? bureauxMap.get(pv.bureau_id) : undefined;
+          const center = bureau ? centersMap.get(bureau.center_id) : undefined;
+          return center && bureau ? `${center.name} — ${bureau.name}` : undefined;
+        })() : undefined}
+        onClose={() => setPreviewUrl(null)}
+      />
 
       {/* Modal de confirmation de réinitialisation */}
       <Dialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
