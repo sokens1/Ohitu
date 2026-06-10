@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable no-constant-binary-expression */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -2038,8 +2040,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         { label: 'Votants', value: fmtNum(totalVoters) },
         { label: 'Suffrages exprimés', value: fmtNum(totalExpressed) },
         { label: 'Bulletins nuls', value: fmtNum(totalNull) },
-        { label: 'Participation', value: `${participation.toFixed(1)} %` },
-        { label: 'Abstention', value: `${abstention.toFixed(1)} %` },
+        { label: 'Participation', value: `${participation.toFixed(2)} %` },
+        { label: 'Abstention', value: `${abstention.toFixed(2)} %` },
       ];
 
       const boxGap = 3;
@@ -2176,11 +2178,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             ],
           ];
 
-          sortedCenters.forEach(center => {
-            doc.addPage();
-            drawHeader('Résultats par établissement');
-            const y = drawSectionTitle(center.center_name || 'Établissement', 22);
+          // Plusieurs tableaux établissement par page (économie de pages) :
+          // une nouvelle page n'est ajoutée que si le bloc suivant ne tient plus.
+          const CONTENT_BOTTOM = 195;
+          doc.addPage();
+          drawHeader('Résultats par établissement');
+          let currentY = 22;
 
+          sortedCenters.forEach(center => {
             const centerBureaux = bureauRows.filter((b: any) => b.center_id === center.center_id);
             const collegeRows = getProCollegeTableRows(centerBureaux, String(center.center_id || ''));
             const collegeRowByName = new Map(collegeRows.map((r: any) => [r.collegeName, r]));
@@ -2228,6 +2233,18 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             });
             totalRow.push(fmtNum(center.total_expressed_votes || 0), etabTotalSeats || '-', fmtPct(etabAbst));
 
+            // Estimation de la hauteur du bloc (titre + entêtes + lignes + total) pour décider
+            // s'il faut passer à la page suivante avant de dessiner ce tableau.
+            const estimatedRows = 2 + body.length + 1;
+            const estimatedHeight = 10 + estimatedRows * 5 + 4;
+            if (currentY + estimatedHeight > CONTENT_BOTTOM) {
+              doc.addPage();
+              drawHeader('Résultats par établissement');
+              currentY = 22;
+            }
+
+            const y = drawSectionTitle(center.center_name || 'Établissement', currentY);
+
             // @ts-ignore
             autoTable(doc, {
               ...tableTheme,
@@ -2240,6 +2257,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               columnStyles: { 0: { cellWidth: 32, fontStyle: 'bold' } },
               didDrawPage: () => drawHeader('Résultats par établissement'),
             });
+
+            currentY = (doc as any).lastAutoTable.finalY + 6;
           });
         } else {
           doc.addPage();
@@ -2253,7 +2272,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             fmtNum(c.total_voters || 0),
             fmtNum(c.total_expressed_votes || 0),
             fmtNum(c.total_null_votes || 0),
-            `${(c.participation_pct || 0).toFixed(1)} %`,
+            `${(c.participation_pct || 0).toFixed(2)} %`,
           ]);
 
           const totalRegisteredAll = sortedCenters.reduce((s, c) => s + (c.total_registered || 0), 0);
@@ -2273,7 +2292,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               fmtNum(totalVotersAll),
               fmtNum(totalExpressedAll),
               fmtNum(totalNullAll),
-              `${participationAll.toFixed(1)} %`,
+              `${participationAll.toFixed(2)} %`,
             ]],
             footStyles: { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold' },
             startY: centerY,
