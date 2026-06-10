@@ -695,22 +695,23 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
     const file = event.target.files?.[0];
     if (file) {
       const isSlowConnection = network.quality === 'poor' || network.quality === 'fair' || !network.isOnline;
-      
+
       if (isSlowConnection && file.type.startsWith('image/')) {
         const loadingToast = toast.loading('Qualité réseau limitée détectée. Compression du PV en cours...');
         try {
           const compressed = await compressImageFile(file);
-          setFormData({ ...formData, uploadedFile: compressed });
+          setFormData(prev => ({ ...prev, uploadedFile: compressed }));
           toast.dismiss(loadingToast);
           toast.success(`Compression terminée : ${(file.size / 1024 / 1024).toFixed(1)} Mo ➔ ${(compressed.size / 1024).toFixed(0)} Ko.`);
         } catch (e) {
           toast.dismiss(loadingToast);
-          setFormData({ ...formData, uploadedFile: file });
+          setFormData(prev => ({ ...prev, uploadedFile: file }));
         }
       } else {
-        setFormData({ ...formData, uploadedFile: file });
+        setFormData(prev => ({ ...prev, uploadedFile: file }));
       }
     }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const ensureBucketExists = async (bucket: string) => {
@@ -1670,8 +1671,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                       <CheckCircle className="w-4 h-4 flex-shrink-0" />
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* Prévisualiser le fichier local via URL.createObjectURL */}
                       <button
+                        type="button"
                         onClick={() => {
                           const localUrl = URL.createObjectURL(formData.uploadedFile!);
                           setPreviewTitle(formData.uploadedFile!.name);
@@ -1682,8 +1683,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setFormData(prev => ({ ...prev, uploadedFile: null }))}
-                        className="text-green-600 hover:text-green-800 transition-colors"
+                        className="p-1 text-green-600 hover:text-green-800 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1703,6 +1705,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => {
                           setPreviewTitle('PV sélectionné');
                           setPreviewUrl(selectedExistingPvUrl);
@@ -1712,8 +1715,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setSelectedExistingPvUrl(null)}
-                        className="text-blue-500 hover:text-blue-700 transition-colors"
+                        className="p-1 text-blue-500 hover:text-blue-700 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1776,6 +1780,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
+                        type="button"
                         onClick={() => {
                           const localUrl = URL.createObjectURL(uploadedListFile);
                           setPreviewTitle(uploadedListFile.name);
@@ -1786,8 +1791,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setUploadedListFile(null)}
-                        className="text-green-600 hover:text-green-800 transition-colors"
+                        className="p-1 text-green-600 hover:text-green-800 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1807,6 +1813,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => {
                           setPreviewTitle('Liste de participation');
                           setPreviewUrl(selectedExistingListUrl);
@@ -1816,8 +1823,9 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                         Voir
                       </button>
                       <button
+                        type="button"
                         onClick={() => setSelectedExistingListUrl(null)}
-                        className="text-blue-500 hover:text-blue-700 transition-colors"
+                        className="p-1 text-blue-500 hover:text-blue-700 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
