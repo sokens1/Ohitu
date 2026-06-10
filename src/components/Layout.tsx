@@ -53,7 +53,10 @@ const getNotificationIcon = (severity: string) => {
 };
 
 // Rôles avec navigation allégée : pas d'Élections ni de Tableau de bord
-const LIMITED_NAV_ROLES: UserRole[] = ['president-bureau', 'president-etablissement', 'suppleant-president', 'observateur', 'employeur'];
+const LIMITED_NAV_ROLES: UserRole[] = ['president-bureau', 'president-etablissement', 'suppleant-president'];
+
+// Rôles sans Tableau de bord, mais avec accès en lecture seule à Élections
+const READONLY_ELECTIONS_ROLES: UserRole[] = ['observateur', 'employeur'];
 
 const ALL_MENU_ITEMS = [
   { icon: Home,     label: 'Tableau de Bord',      path: '/dashboard',     permission: 'view:dashboard'  as const },
@@ -95,10 +98,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   } = useNotifications();
 
   const isLimitedNavRole = !!user && LIMITED_NAV_ROLES.includes(user.role);
+  const isReadonlyElectionsRole = !!user && READONLY_ELECTIONS_ROLES.includes(user.role);
 
   const menuItems = ALL_MENU_ITEMS
     .filter(item => can(item.permission))
-    .filter(item => !isLimitedNavRole || (item.path !== '/dashboard' && item.path !== '/elections'));
+    .filter(item => !isLimitedNavRole || (item.path !== '/dashboard' && item.path !== '/elections'))
+    .filter(item => !isReadonlyElectionsRole || item.path !== '/dashboard');
 
   const handleLogout = () => {
     logout();
