@@ -16,7 +16,7 @@ import {
   Upload, Download, FileText, FileImage, Building2, BookOpen,
   CheckCircle, XCircle, AlertTriangle, Clock, Eye, ChevronDown, ChevronUp,
   ZoomIn, ZoomOut, RotateCw, ExternalLink, Trash2, LayoutGrid,
-  List, RefreshCw, Filter, BadgeCheck, EyeOff, Scale,
+  List, RefreshCw, Filter, BadgeCheck, EyeOff, Scale, MessageSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { auditService } from '@/services/auditService';
@@ -37,6 +37,7 @@ interface EstablishmentDocument {
   review_comment: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  uploader_comment: string | null;
   // enrichi
   center_name?: string;
   uploader_name?: string;
@@ -50,6 +51,12 @@ interface Center {
 }
 
 interface ReviewState {
+  docId: string;
+  comment: string;
+  submitting: boolean;
+}
+
+interface CommentEditState {
   docId: string;
   comment: string;
   submitting: boolean;
@@ -105,6 +112,7 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
   const [loading, setLoading]     = useState(true);
   const [uploading, setUploading] = useState<string | null>(null); // "centerId|college|docType"
   const [review, setReview]       = useState<ReviewState | null>(null);
+  const [commentEdit, setCommentEdit] = useState<CommentEditState | null>(null);
   const [expanded, setExpanded]   = useState<Set<string>>(new Set());
   const [electionStatus, setElectionStatus] = useState<string | null>(null);
   const [deleting, setDeleting]   = useState<string | null>(null);
@@ -500,6 +508,24 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
     }
   };
 
+  // ── Commentaire du déposant (optionnel, sert aussi de réponse à un avis admin) ─
+  const submitUploaderComment = async (docId: string) => {
+    const comment = (commentEdit?.comment ?? '').trim();
+    setCommentEdit(prev => prev ? { ...prev, submitting: true } : null);
+    try {
+      const { error } = await supabase
+        .from('establishment_documents')
+        .update({ uploader_comment: comment || null })
+        .eq('id', docId);
+      if (error) { toast.error('Erreur lors de l\'enregistrement du commentaire'); return; }
+      setDocs(prev => prev.map(d => d.id === docId ? { ...d, uploader_comment: comment || null } : d));
+      toast.success('Commentaire enregistré');
+      setCommentEdit(null);
+    } finally {
+      setCommentEdit(prev => prev ? { ...prev, submitting: false } : null);
+    }
+  };
+
   // ── Modal de prévisualisation ────────────────────────────────────────────────
   const COLLEGE_LABELS: Record<string, string> = {
     cadres: 'Cadres', employes: 'Maîtrise', ouvriers: 'Exécution', general: 'Encadrement',
@@ -575,6 +601,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
           {previewDoc.review_comment && (
             <p className="mt-1.5 text-xs text-gray-600 italic border-t pt-1.5">
               💬 Commentaire admin : "{previewDoc.review_comment}"
+            </p>
+          )}
+          {previewDoc.uploader_comment && (
+            <p className="mt-1.5 text-xs text-teal-700 italic border-t pt-1.5">
+              💬 Commentaire du déposant : "{previewDoc.uploader_comment}"
             </p>
           )}
         </DialogHeader>
@@ -855,6 +886,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                           "{existing.review_comment}"
                                         </span>
                                       )}
+                                      {existing.uploader_comment && (
+                                        <span className="text-[10px] text-teal-600 italic truncate max-w-[100px]" title={existing.uploader_comment}>
+                                          💬 {existing.uploader_comment}
+                                        </span>
+                                      )}
                                     </div>
                                   ) : (
                                     <p className="text-[10px] text-gray-400">Non déposé</p>
@@ -867,6 +903,21 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                     <button onClick={() => openPreview(existing)}
                                       className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors" title="Voir">
                                       <Eye className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  {existing && (
+                                    <button
+                                      onClick={() => setCommentEdit(prev =>
+                                        prev?.docId === existing.id
+                                          ? null
+                                          : { docId: existing.id, comment: existing.uploader_comment ?? '', submitting: false }
+                                      )}
+                                      className={`p-1.5 rounded-lg transition-colors hover:bg-teal-50 ${
+                                        existing.uploader_comment ? 'text-teal-600' : 'text-gray-400'
+                                      }`}
+                                      title="Commentaire"
+                                    >
+                                      <MessageSquare className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                   {/* Upload : bloqué si validé
@@ -897,6 +948,25 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                                   )}
                                 </div>
                               </div>
+                              {existing && commentEdit?.docId === existing.id && (
+                                <div className="px-2.5 pb-2.5 space-y-1.5">
+                                  <Textarea rows={2} placeholder="Commentaire (optionnel)…"
+                                    value={commentEdit.comment}
+                                    onChange={e => setCommentEdit(prev => prev ? { ...prev, comment: e.target.value } : null)}
+                                    className="text-xs resize-none rounded-lg border-gray-200 focus:border-teal-400 bg-white" />
+                                  <div className="flex items-center gap-1.5">
+                                    <button disabled={commentEdit.submitting}
+                                      onClick={() => submitUploaderComment(existing.id)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50">
+                                      <CheckCircle size={12} /> Enregistrer
+                                    </button>
+                                    <button onClick={() => setCommentEdit(null)}
+                                      className="p-1 rounded-lg text-gray-400 hover:bg-gray-100">
+                                      <RefreshCw size={14} />
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1095,6 +1165,12 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                     </p>
                   )}
 
+                  {doc.uploader_comment && !isReviewing && (
+                    <p className="text-[10px] text-teal-600 italic bg-teal-50 rounded px-2 py-1 line-clamp-1 flex items-center gap-1" title={doc.uploader_comment}>
+                      <MessageSquare size={10} className="flex-shrink-0" /> {doc.uploader_comment}
+                    </p>
+                  )}
+
                   {/* Séparateur */}
                   <div className="border-t border-gray-100" />
 
@@ -1132,11 +1208,11 @@ const DocumentsSection: React.FC<Props> = ({ selectedElection }) => {
                           <Download size={16} />
                         </button>
                       )}
-                      {/* Valider : masqué si déjà validé */}
+                      {/* Évaluer : masqué si déjà validé */}
                       {canReview && doc.status !== 'validated' && (
                         <button onClick={() => setReview({ docId: doc.id, comment: doc.review_comment ?? '', submitting: false })}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors ml-auto">
-                          <CheckCircle size={13} /> Valider
+                          <Scale size={13} /> Évaluer
                         </button>
                       )}
                       {/* Rétracter : uniquement admin/super-admin si document validé */}
