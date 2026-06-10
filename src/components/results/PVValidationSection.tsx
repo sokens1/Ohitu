@@ -245,6 +245,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [inlinePreviewUrl, setInlinePreviewUrl] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resettingAll, setResettingAll] = useState(false);
@@ -1222,6 +1223,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     setSelectedPvUrl(pv.pv_photo_url ?? null);
                     setNewListFile(null);
                     setNewPvFile(null);
+                    setInlinePreviewUrl(null);
                   }}
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -1278,11 +1280,14 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
       </div>
 
       {/* Modal détails PV */}
-      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setEditMode(false); setPreviewUrl(null); } }}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-x-hidden overflow-y-auto transition-all duration-300">
-          <DialogHeader>
+      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setEditMode(false); setPreviewUrl(null); setInlinePreviewUrl(null); } }}>
+        <DialogContent className={`w-[calc(100vw-1rem)] max-h-[90vh] transition-all duration-300 ${inlinePreviewUrl ? 'overflow-hidden lg:max-w-6xl xl:max-w-7xl flex flex-col' : 'sm:max-w-2xl lg:max-w-3xl overflow-y-auto'}`}>
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Détails du PV</DialogTitle>
           </DialogHeader>
+          <div className={`flex min-h-0 flex-1 flex-col ${inlinePreviewUrl ? 'lg:flex-row' : ''}`}>
+          {/* Colonne gauche : détails */}
+          <div className={inlinePreviewUrl ? 'w-full lg:w-1/2 overflow-y-auto lg:border-r lg:border-gray-200 lg:pr-2' : 'w-full'}>
             {selectedPVData ? (
               <div className="space-y-4 min-w-0 overflow-x-hidden">
 
@@ -1378,7 +1383,10 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => setPreviewUrl(selectedPvUrl)}
+                              onClick={() => {
+                                if (window.innerWidth >= 1024) setInlinePreviewUrl(selectedPvUrl);
+                                else setPreviewUrl(selectedPvUrl);
+                              }}
                             >
                               <Eye className="w-4 h-4 mr-2" /> Voir
                             </Button>
@@ -1441,7 +1449,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                               size="sm"
                               onClick={() => {
                                 const url = selectedListUrl || selectedPVData.participation_list_url;
-                                if (url) setPreviewUrl(url);
+                                if (!url) return;
+                                if (window.innerWidth >= 1024) setInlinePreviewUrl(url);
+                                else setPreviewUrl(url);
                               }}
                             >
                               <Eye className="w-4 h-4 mr-2" /> Voir
@@ -2040,7 +2050,37 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 </>}
                 </div>
               </div>
-          ) : null}
+            ) : null}
+          </div>
+          {/* Colonne droite : aperçu inline */}
+          {inlinePreviewUrl && (
+            <div className="hidden lg:flex lg:w-1/2 flex-col min-h-0">
+              <div className="flex items-center justify-between px-3 py-2 border-b bg-gray-50 flex-shrink-0">
+                <span className="text-sm font-medium text-gray-700">Document</span>
+                <button
+                  onClick={() => setInlinePreviewUrl(null)}
+                  className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-800"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 bg-gray-100 overflow-hidden">
+                {inlinePreviewUrl.toLowerCase().includes('.pdf') || inlinePreviewUrl.toLowerCase().includes('application/pdf') ? (
+                  <iframe
+                    src={inlinePreviewUrl}
+                    className="w-full h-full border-0"
+                    style={{ minHeight: '65vh' }}
+                    title="Aperçu document"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center overflow-auto p-2" style={{ minHeight: '65vh' }}>
+                    <img src={inlinePreviewUrl} alt="Document" className="max-w-full max-h-full object-contain" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          </div>
         </DialogContent>
       </Dialog>
 
