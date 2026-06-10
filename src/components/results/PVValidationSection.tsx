@@ -1439,19 +1439,17 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       {/* ── Liste de participation ── */}
                       <div className="p-3 sm:p-4">
                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Liste de participation</p>
-                        {!selectedPVData.participation_list_url && !selectedListUrl && !newListFile && (
+                        {!selectedListUrl && !newListFile && (
                           <p className="text-sm text-gray-400 italic mb-2">Aucune liste attachée</p>
                         )}
                         <div className="flex items-center gap-2 flex-wrap">
-                          {(selectedListUrl || selectedPVData.participation_list_url) && !newListFile && (
+                          {selectedListUrl && !newListFile && (
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => {
-                                const url = selectedListUrl || selectedPVData.participation_list_url;
-                                if (!url) return;
-                                if (window.innerWidth >= 1024) setInlinePreviewUrl(url);
-                                else setPreviewUrl(url);
+                                if (window.innerWidth >= 1024) setInlinePreviewUrl(selectedListUrl);
+                                else setPreviewUrl(selectedListUrl);
                               }}
                             >
                               <Eye className="w-4 h-4 mr-2" /> Voir
@@ -1460,7 +1458,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           {newListFile && (
                             <span className="text-xs text-green-700 font-medium flex items-center gap-1">
                               <FileText className="w-3 h-3" />{newListFile.name}
-                              <button onClick={() => setNewListFile(null)} className="ml-1 text-gray-400 hover:text-red-500">
+                              <button type="button" onClick={() => setNewListFile(null)} className="ml-1 text-gray-400 hover:text-red-500">
                                 <XIcon className="w-3 h-3" />
                               </button>
                             </span>
@@ -1476,7 +1474,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                               />
                               <Button variant="secondary" size="sm" onClick={() => listFileInputRef.current?.click()}>
                                 <Upload className="w-4 h-4 mr-2" />
-                                {selectedListUrl || selectedPVData.participation_list_url ? 'Remplacer' : 'Importer'}
+                                {selectedListUrl ? 'Remplacer' : 'Importer'}
                               </Button>
                               <div className="flex items-center gap-1">
                                 <Button
@@ -1488,7 +1486,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                   <FolderOpen className="w-4 h-4 mr-2" />
                                   Sélectionner existante
                                 </Button>
-                                {(selectedListUrl || selectedPVData.participation_list_url) && (
+                                {selectedListUrl && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
