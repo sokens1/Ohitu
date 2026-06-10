@@ -1943,6 +1943,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const PAGE_W = 297;
       const MARGIN = 14;
 
+      // toLocaleString('fr-FR') sépare les milliers par une espace insécable fine (U+202F),
+      // que la police Helvetica de jsPDF affiche comme "/" — on la remplace par une espace normale
+      const fmtNum = (n: number) => n.toLocaleString('fr-FR').replace(/[  ]/g, ' ');
+
       const drawHeader = (subtitle: string) => {
         doc.setFillColor(30, 64, 175);
         doc.rect(0, 0, PAGE_W, 16, 'F');
@@ -1995,10 +1999,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       const abstention = 100 - participation;
 
       const statBoxes = [
-        { label: electorsLabel || 'Inscrits', value: totalRegistered.toLocaleString('fr-FR') },
-        { label: 'Votants', value: totalVoters.toLocaleString('fr-FR') },
-        { label: 'Suffrages exprimés', value: totalExpressed.toLocaleString('fr-FR') },
-        { label: 'Bulletins nuls', value: totalNull.toLocaleString('fr-FR') },
+        { label: electorsLabel || 'Inscrits', value: fmtNum(totalRegistered) },
+        { label: 'Votants', value: fmtNum(totalVoters) },
+        { label: 'Suffrages exprimés', value: fmtNum(totalExpressed) },
+        { label: 'Bulletins nuls', value: fmtNum(totalNull) },
         { label: 'Participation', value: `${participation.toFixed(1)} %` },
         { label: 'Abstention', value: `${abstention.toFixed(1)} %` },
       ];
@@ -2032,8 +2036,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
       const globalBody = (results?.candidates || []).map(c =>
         isProResults
-          ? [c.rank > 0 ? `#${c.rank}` : '—', c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`, c.seats ?? '—']
-          : [c.rank > 0 ? `#${c.rank}` : '—', c.candidate_name, c.party_name, c.total_votes.toLocaleString('fr-FR'), `${c.percentage.toFixed(2)} %`]
+          ? [c.rank > 0 ? `#${c.rank}` : '—', c.party_name, fmtNum(c.total_votes), `${c.percentage.toFixed(2)} %`, c.seats ?? '—']
+          : [c.rank > 0 ? `#${c.rank}` : '—', c.candidate_name, c.party_name, fmtNum(c.total_votes), `${c.percentage.toFixed(2)} %`]
       );
 
       // @ts-ignore
@@ -2064,7 +2068,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             { content: collegeName, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
           ]);
           rows.forEach(r => {
-            collegeBody.push([r.syndicatName, r.votes.toLocaleString('fr-FR'), r.seats || '—']);
+            collegeBody.push([r.syndicatName, fmtNum(r.votes), r.seats || '—']);
           });
         });
 
@@ -2090,10 +2094,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           .sort((a, b) => (a.center_name || '').localeCompare(b.center_name || ''))
           .map(c => [
             c.center_name || '',
-            (c.total_registered || 0).toLocaleString('fr-FR'),
-            (c.total_voters || 0).toLocaleString('fr-FR'),
-            (c.total_expressed_votes || 0).toLocaleString('fr-FR'),
-            (c.total_null_votes || 0).toLocaleString('fr-FR'),
+            fmtNum(c.total_registered || 0),
+            fmtNum(c.total_voters || 0),
+            fmtNum(c.total_expressed_votes || 0),
+            fmtNum(c.total_null_votes || 0),
             `${(c.participation_pct || 0).toFixed(1)} %`,
           ]);
 
@@ -2139,7 +2143,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             Array.from(syndicatMap.entries())
               .sort((a, b) => b[1].votes - a[1].votes)
               .forEach(([syndicatName, data]) => {
-                detailBody.push([syndicatName, data.votes.toLocaleString('fr-FR'), data.seats || '—']);
+                detailBody.push([syndicatName, fmtNum(data.votes), data.seats || '—']);
               });
           });
 
