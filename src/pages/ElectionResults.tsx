@@ -2848,7 +2848,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                           <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
                                           <td className="py-2 pl-2 hidden sm:table-cell">
                                             {tiebreakLabel(r.syndicat.tiebreakType) && (
-                                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
                                                 {tiebreakLabel(r.syndicat.tiebreakType)}
                                               </span>
                                             )}
@@ -2859,7 +2859,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                             <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">
                                               Délégué : {delegueDisplay}
                                               {tiebreakLabel(r.syndicat.tiebreakType) && (
-                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap not-italic">
+                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap not-italic">
                                                   {tiebreakLabel(r.syndicat.tiebreakType)}
                                                 </span>
                                               )}
@@ -3273,7 +3273,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                           <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
                                           <td className="py-2 pl-2 hidden sm:table-cell">
                                             {tiebreakLabel(s.tiebreakType) && (
-                                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
                                                 {tiebreakLabel(s.tiebreakType)}
                                               </span>
                                             )}
@@ -3284,7 +3284,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                             <td colSpan={4} className="pb-2 pt-0 pl-2 text-[10px] text-gray-500 italic">
                                               Délégué : {delegueDisplay}
                                               {tiebreakLabel(s.tiebreakType) && (
-                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap not-italic">
+                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap not-italic">
                                                   {tiebreakLabel(s.tiebreakType)}
                                                 </span>
                                               )}
