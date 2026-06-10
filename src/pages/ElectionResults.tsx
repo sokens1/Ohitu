@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable no-constant-binary-expression */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -1984,6 +1986,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       // que la police Helvetica de jsPDF affiche comme "/" — on la remplace par une espace normale
       const fmtNum = (n: number) => n.toLocaleString('fr-FR').replace(/[  ]/g, ' ');
 
+      const fmtPct = (n: number | null) => (n === null ? '-' : `${n.toFixed(2)} %`);
+
       const drawHeader = (subtitle: string) => {
         doc.setFillColor(30, 64, 175);
         doc.rect(0, 0, PAGE_W, 16, 'F');
@@ -2040,8 +2044,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         { label: 'Votants', value: fmtNum(totalVoters) },
         { label: 'Suffrages exprimés', value: fmtNum(totalExpressed) },
         { label: 'Bulletins nuls', value: fmtNum(totalNull) },
-        { label: 'Participation', value: `${participation.toFixed(1)} %` },
-        { label: 'Abstention', value: `${abstention.toFixed(1)} %` },
+        { label: 'Participation', value: `${participation.toFixed(2)} %` },
+        { label: 'Abstention', value: `${abstention.toFixed(2)} %` },
       ];
 
       const boxGap = 3;
@@ -2077,11 +2081,19 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           : [c.rank > 0 ? `#${c.rank}` : '—', c.candidate_name, c.party_name, fmtNum(c.total_votes), `${c.percentage.toFixed(2)} %`]
       );
 
+      const globalTotalVotes = (results?.candidates || []).reduce((s, c) => s + (c.total_votes || 0), 0);
+      const globalTotalSeats = (results?.candidates || []).reduce((s, c) => s + (c.seats || 0), 0);
+      const globalFootRow = isProResults
+        ? ['', 'TOTAL', fmtNum(globalTotalVotes), globalTotalVotes > 0 ? '100 %' : '-', globalTotalSeats]
+        : ['', 'TOTAL', '', fmtNum(globalTotalVotes), globalTotalVotes > 0 ? '100 %' : '-'];
+
       // @ts-ignore
       autoTable(doc, {
         ...tableTheme,
         head: [globalHeaders],
         body: globalBody,
+        foot: [globalFootRow],
+        footStyles: { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold' },
         startY: globalSectionY,
         columnStyles: { 0: { halign: 'center', cellWidth: 14 } },
         didDrawPage: () => drawHeader("Vue d'ensemble"),
@@ -2099,100 +2111,202 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           byCollege.get(row.collegeName)!.push(row);
         });
 
+        // Le collège est isolé dans sa propre colonne (fusionnée sur ses lignes via rowSpan)
+        // pour qu'il ne soit jamais confondu avec un nom de syndicat.
         const collegeBody: any[] = [];
         byCollege.forEach((rows, collegeName) => {
-          collegeBody.push([
-            { content: collegeName, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
-          ]);
-          rows.forEach(r => {
-            collegeBody.push([r.syndicatName, fmtNum(r.votes), r.seats]);
+          rows.forEach((r, idx) => {
+            const row: any[] = [];
+            if (idx === 0) {
+              row.push({
+                content: collegeName,
+                rowSpan: rows.length + 1,
+                styles: { valign: 'middle' as const, fontStyle: 'bold', fillColor: [241, 245, 249] as [number,number,number], textColor: [30, 64, 175] as [number,number,number] },
+              });
+            }
+            row.push(r.syndicatName, fmtNum(r.votes), r.seats);
+            collegeBody.push(row);
           });
+          const totalVotes = rows.reduce((s, r) => s + (r.votes || 0), 0);
+          const totalSeats = rows.reduce((s, r) => s + (r.seats || 0), 0);
+          collegeBody.push([
+            { content: 'TOTAL', styles: { fontStyle: 'bold' } },
+            { content: fmtNum(totalVotes), styles: { fontStyle: 'bold' } },
+            { content: totalSeats, styles: { fontStyle: 'bold' } },
+          ]);
         });
 
         // @ts-ignore
         autoTable(doc, {
           ...tableTheme,
-          head: [['Syndicat', 'Voix', 'Sièges']],
+          head: [['Collège', 'Syndicat', 'Voix', 'Sièges']],
           body: collegeBody,
           startY: collegeY,
-          columnStyles: { 1: { halign: 'right', cellWidth: 35 }, 2: { halign: 'center', cellWidth: 25 } },
+          columnStyles: {
+            0: { cellWidth: 35 },
+            2: { halign: 'right', cellWidth: 35 },
+            3: { halign: 'center', cellWidth: 25 },
+          },
           didDrawPage: () => drawHeader('Résultats par collège'),
         });
       }
 
       // ── Résultats par établissement ──
       if (centerRows.length > 0) {
-        doc.addPage();
-        drawHeader('Résultats par établissement');
-        const centerY = drawSectionTitle('Résultats par établissement', 22);
+        const sortedCenters = [...centerRows].sort((a, b) => (a.center_name || '').localeCompare(b.center_name || ''));
 
-        const centerHeaders = ['Établissement', electorsLabel || 'Inscrits', 'Votants', 'Exprimés', 'Nuls', 'Participation'];
-        const centerBody = [...centerRows]
-          .sort((a, b) => (a.center_name || '').localeCompare(b.center_name || ''))
-          .map(c => [
+        if (isProResults && collegeDetailRows.length > 0) {
+          // Tableau croisé par établissement : syndicats en lignes, collèges (Voix | Sièges | % Abst.) en colonnes
+          const CANONICAL_COLLEGES = ['Encadrement', 'Cadre', 'Maîtrise', 'Exécution'];
+          const presentColleges = new Set<string>();
+          collegeDetailRows.forEach(r => presentColleges.add(r.collegeName));
+          const collegeOrder = [
+            ...CANONICAL_COLLEGES.filter(c => presentColleges.has(c)),
+            ...Array.from(presentColleges).filter(c => !CANONICAL_COLLEGES.includes(c)),
+          ];
+
+          const allSyndicats = (results?.candidates || [])
+            .map(c => c.party_name || c.candidate_name)
+            .filter((v, i, arr): v is string => !!v && arr.indexOf(v) === i);
+
+          const subHeaders = ['Voix', 'Sièges', '% Abst.'];
+          const head = [
+            [
+              { content: 'Syndicat', rowSpan: 2, styles: { valign: 'middle' as const } },
+              ...collegeOrder.map(c => ({ content: c, colSpan: 3, styles: { halign: 'center' as const } })),
+              { content: 'Global établissement', colSpan: 3, styles: { halign: 'center' as const, fillColor: [22, 101, 52] as [number, number, number] } },
+            ],
+            [
+              ...collegeOrder.flatMap(() => subHeaders),
+              ...subHeaders,
+            ],
+          ];
+
+          // Plusieurs tableaux établissement par page (économie de pages) :
+          // une nouvelle page n'est ajoutée que si le bloc suivant ne tient plus.
+          const CONTENT_BOTTOM = 195;
+          doc.addPage();
+          drawHeader('Résultats par établissement');
+          let currentY = 22;
+
+          sortedCenters.forEach(center => {
+            const centerBureaux = bureauRows.filter((b: any) => b.center_id === center.center_id);
+            const collegeRows = getProCollegeTableRows(centerBureaux, String(center.center_id || ''));
+            const collegeRowByName = new Map(collegeRows.map((r: any) => [r.collegeName, r]));
+
+            const etabAbst = (center.total_registered || 0) > 0
+              ? 100 - ((center.total_voters || 0) / center.total_registered * 100)
+              : null;
+            const etabTotalSeats = collegeRows.reduce((s: number, r: any) => s + (r.seatsInLice || 0), 0);
+
+            const body = allSyndicats.map(syndicatName => {
+              const row: any[] = [syndicatName];
+              let globalVotes = 0;
+              let globalSeats = 0;
+              collegeRows.forEach((cRow: any) => {
+                const s = cRow.syndicats.find((x: any) => x.syndicat === syndicatName);
+                globalVotes += s?.votes || 0;
+                globalSeats += s?.seats || 0;
+              });
+              collegeOrder.forEach(collegeName => {
+                const cRow: any = collegeRowByName.get(collegeName);
+                if (!cRow) {
+                  row.push('-', '-', '-');
+                  return;
+                }
+                const s = cRow.syndicats.find((x: any) => x.syndicat === syndicatName);
+                const votes = s?.votes || 0;
+                const seats = s?.seats || 0;
+                const abst = (cRow.total_registered || 0) > 0
+                  ? 100 - ((cRow.total_voters || 0) / cRow.total_registered * 100)
+                  : null;
+                row.push(fmtNum(votes), seats || '-', fmtPct(abst));
+              });
+              row.push(fmtNum(globalVotes), globalSeats || '-', fmtPct(etabAbst));
+              return row;
+            });
+
+            const totalRow: any[] = ['TOTAL'];
+            collegeOrder.forEach(collegeName => {
+              const cRow: any = collegeRowByName.get(collegeName);
+              if (!cRow) { totalRow.push('-', '-', '-'); return; }
+              const abst = (cRow.total_registered || 0) > 0
+                ? 100 - ((cRow.total_voters || 0) / cRow.total_registered * 100)
+                : null;
+              totalRow.push(fmtNum(cRow.total_expressed_votes || 0), cRow.seatsInLice || '-', fmtPct(abst));
+            });
+            totalRow.push(fmtNum(center.total_expressed_votes || 0), etabTotalSeats || '-', fmtPct(etabAbst));
+
+            // Estimation de la hauteur du bloc (titre + entêtes + lignes + total) pour décider
+            // s'il faut passer à la page suivante avant de dessiner ce tableau.
+            const estimatedRows = 2 + body.length + 1;
+            const estimatedHeight = 10 + estimatedRows * 5 + 4;
+            if (currentY + estimatedHeight > CONTENT_BOTTOM) {
+              doc.addPage();
+              drawHeader('Résultats par établissement');
+              currentY = 22;
+            }
+
+            const y = drawSectionTitle(center.center_name || 'Établissement', currentY);
+
+            // @ts-ignore
+            autoTable(doc, {
+              ...tableTheme,
+              styles: { ...tableTheme.styles, fontSize: 7, cellPadding: 1.5 },
+              head,
+              body,
+              foot: [totalRow],
+              footStyles: { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold' },
+              startY: y,
+              columnStyles: { 0: { cellWidth: 32, fontStyle: 'bold' } },
+              didDrawPage: () => drawHeader('Résultats par établissement'),
+            });
+
+            currentY = (doc as any).lastAutoTable.finalY + 6;
+          });
+        } else {
+          doc.addPage();
+          drawHeader('Résultats par établissement');
+          const centerY = drawSectionTitle('Résultats par établissement', 22);
+
+          const centerHeaders = ['Établissement', electorsLabel || 'Inscrits', 'Votants', 'Exprimés', 'Nuls', 'Participation'];
+          const centerBody = sortedCenters.map(c => [
             c.center_name || '',
             fmtNum(c.total_registered || 0),
             fmtNum(c.total_voters || 0),
             fmtNum(c.total_expressed_votes || 0),
             fmtNum(c.total_null_votes || 0),
-            `${(c.participation_pct || 0).toFixed(1)} %`,
+            `${(c.participation_pct || 0).toFixed(2)} %`,
           ]);
 
-        // @ts-ignore
-        autoTable(doc, {
-          ...tableTheme,
-          head: [centerHeaders],
-          body: centerBody,
-          startY: centerY,
-          columnStyles: {
-            1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' },
-            4: { halign: 'right' }, 5: { halign: 'right' },
-          },
-          didDrawPage: () => drawHeader('Résultats par établissement'),
-        });
-      }
+          const totalRegisteredAll = sortedCenters.reduce((s, c) => s + (c.total_registered || 0), 0);
+          const totalVotersAll = sortedCenters.reduce((s, c) => s + (c.total_voters || 0), 0);
+          const totalExpressedAll = sortedCenters.reduce((s, c) => s + (c.total_expressed_votes || 0), 0);
+          const totalNullAll = sortedCenters.reduce((s, c) => s + (c.total_null_votes || 0), 0);
+          const participationAll = totalRegisteredAll > 0 ? (totalVotersAll / totalRegisteredAll) * 100 : 0;
 
-      // ── Détail par syndicat et par établissement (élections professionnelles) ──
-      if (isProResults && bureauRows.some((b: any) => (b.syndicats || []).length > 0)) {
-        doc.addPage();
-        drawHeader('Détail par établissement');
-        const detailY = drawSectionTitle('Détail des résultats par syndicat et par établissement', 22);
-
-        const centerNameById = new Map(centerRows.map((c: any) => [c.center_id, c.center_name]));
-        const aggregated = new Map<string, Map<string, { votes: number; seats: number }>>();
-        bureauRows.forEach((b: any) => {
-          if (!b.center_id) return;
-          if (!aggregated.has(b.center_id)) aggregated.set(b.center_id, new Map());
-          const m = aggregated.get(b.center_id)!;
-          (b.syndicats || []).forEach((s: any) => {
-            const cur = m.get(s.syndicatName) || { votes: 0, seats: 0 };
-            m.set(s.syndicatName, { votes: cur.votes + (Number(s.votes) || 0), seats: cur.seats + (Number(s.seats) || 0) });
+          // @ts-ignore
+          autoTable(doc, {
+            ...tableTheme,
+            head: [centerHeaders],
+            body: centerBody,
+            foot: [[
+              'TOTAL',
+              fmtNum(totalRegisteredAll),
+              fmtNum(totalVotersAll),
+              fmtNum(totalExpressedAll),
+              fmtNum(totalNullAll),
+              `${participationAll.toFixed(2)} %`,
+            ]],
+            footStyles: { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold' },
+            startY: centerY,
+            columnStyles: {
+              1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' },
+              4: { halign: 'right' }, 5: { halign: 'right' },
+            },
+            didDrawPage: () => drawHeader('Résultats par établissement'),
           });
-        });
-
-        const detailBody: any[] = [];
-        Array.from(aggregated.entries())
-          .sort(([a], [b]) => (centerNameById.get(a) || '').localeCompare(centerNameById.get(b) || ''))
-          .forEach(([centerId, syndicatMap]) => {
-            detailBody.push([
-              { content: centerNameById.get(centerId) || centerId, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
-            ]);
-            Array.from(syndicatMap.entries())
-              .sort((a, b) => b[1].votes - a[1].votes)
-              .forEach(([syndicatName, data]) => {
-                detailBody.push([syndicatName, fmtNum(data.votes), data.seats]);
-              });
-          });
-
-        // @ts-ignore
-        autoTable(doc, {
-          ...tableTheme,
-          head: [['Syndicat', 'Voix', 'Sièges']],
-          body: detailBody,
-          startY: detailY,
-          columnStyles: { 1: { halign: 'right', cellWidth: 35 }, 2: { halign: 'center', cellWidth: 25 } },
-          didDrawPage: () => drawHeader('Détail par établissement'),
-        });
+        }
       }
 
       // Pagination
@@ -2728,7 +2842,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                 <span className="inline-flex items-center justify-end gap-1">
                                   {c.seats ?? 0}
                                   {c.tiebreak && (
-                                    <span title="Siège attribué par départage (ancienneté/âge)"><Scale className="w-3 h-3 text-amber-500" /></span>
+                                    <Scale className="w-3 h-3 text-amber-500" aria-label="Siège attribué par départage (ancienneté/âge)" />
                                   )}
                                 </span>
                               </td>
@@ -2824,7 +2938,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
                                     <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
                                     <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
-                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Décision</th>
+                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell"> </th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -3103,6 +3217,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 const c = selectedGroup.center;
                 const collegeRows = getProCollegeTableRows(selectedGroup.bureaux, String(c.center_id || ''));
                 const centerTotalSeats = collegeRows.reduce((sum, row) => sum + ((row as any).seatsInLice || 0), 0);
+                // Largeur des colonnes du tableau syndicats alignée sur la grille de la ligne collège (6 ou 5 colonnes)
+                const innerColWidth = centerTotalSeats > 0 ? 'sm:w-1/6' : 'sm:w-1/5';
                 return (
                   <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
                     {/* En-tête établissement avec stats globales */}
@@ -3244,17 +3360,17 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                               </div>
                             </summary>
                             {/* Accordéon syndicats */}
-                            <div className="px-2 sm:px-6 lg:px-10 py-3 bg-slate-50 border-t border-gray-100">
+                            <div className="px-4 sm:px-6 py-3 bg-slate-50 border-t border-gray-100">
                               <div className="overflow-x-auto">
-                              <table className="w-full min-w-[280px] text-xs sm:text-sm">
+                              <table className="w-full min-w-[280px] text-xs sm:text-sm sm:table-fixed">
                                 <thead>
                                   <tr className="border-b border-gray-200">
-                                    <th className="text-left py-1.5 pr-2 font-semibold text-gray-600">Syndicat</th>
-                                    <th className="text-center py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Sièges</th>
-                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Voix</th>
-                                    <th className="text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap">Score</th>
-                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Délégué</th>
-                                    <th className="text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell">Décision</th>
+                                    <th className={`text-left py-1.5 pr-2 font-semibold text-gray-600 ${innerColWidth}`}>Syndicat</th>
+                                    <th className={`text-center py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap ${centerTotalSeats > 0 ? innerColWidth : 'sm:hidden'}`}>Sièges</th>
+                                    <th className={`text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap ${innerColWidth}`}>Voix</th>
+                                    <th className={`text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap ${innerColWidth}`}>Score</th>
+                                    <th className={`text-left py-1.5 pl-6 font-semibold text-gray-600 hidden sm:table-cell ${innerColWidth}`}>Délégué</th>
+                                    <th className={`text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell ${innerColWidth}`}> </th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -3276,12 +3392,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                           <td className="py-2 pr-2 font-medium text-gray-800 break-words max-w-[120px] sm:max-w-none">
                                             {s.syndicat}
                                           </td>
-                                          <td className="py-2 px-2 text-center font-bold text-blue-600">
+                                          <td className={`py-2 px-2 text-center font-bold text-blue-600 ${centerTotalSeats > 0 ? '' : 'sm:hidden'}`}>
                                             {s.seats}
                                           </td>
                                           <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{s.votes?.toLocaleString() || '0'}</td>
                                           <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
-                                          <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                          <td className="py-2 pl-6 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
                                           <td className="py-2 pl-2 hidden sm:table-cell">
                                             {tiebreakLabel(s.tiebreakType) && (
                                               <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
