@@ -3358,7 +3358,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                     <th className={`text-center py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap ${centerTotalSeats > 0 ? innerColWidth : 'sm:hidden'}`}>Sièges</th>
                                     <th className={`text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap ${innerColWidth}`}>Voix</th>
                                     <th className={`text-right py-1.5 px-2 font-semibold text-gray-600 whitespace-nowrap ${innerColWidth}`}>Score</th>
-                                    <th className={`text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell ${innerColWidth}`}>Délégué</th>
+                                    <th className={`text-left py-1.5 pl-6 font-semibold text-gray-600 hidden sm:table-cell ${innerColWidth}`}>Délégué</th>
                                     <th className={`text-left py-1.5 pl-2 font-semibold text-gray-600 hidden sm:table-cell ${innerColWidth}`}> </th>
                                   </tr>
                                 </thead>
@@ -3386,7 +3386,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                           </td>
                                           <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{s.votes?.toLocaleString() || '0'}</td>
                                           <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
-                                          <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
+                                          <td className="py-2 pl-6 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
                                           <td className="py-2 pl-2 hidden sm:table-cell">
                                             {tiebreakLabel(s.tiebreakType) && (
                                               <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
