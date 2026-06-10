@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown, Download } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Users, TrendingUp, Calendar, MapPin, Menu, X, Facebook, Link as LinkIcon, Trophy, Medal, Crown, Share2, Heart, Star, Vote, BarChart3, Building, Target, AlertCircle, CheckCircle, Clock, Eye, Filter, Globe, Home, Info, Layers, PieChart, Search, Settings, Shield, TrendingDown, User, Users2, Zap, RotateCcw, ArrowRightLeft, LayoutGrid, Table as TableIcon, ChevronDown, Download, Scale } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRBAC } from '@/hooks/useRBAC';
@@ -30,6 +30,7 @@ type CollegeDetailRow = {
   syndicatName: string;
   votes: number;
   seats: number;
+  tiebreak: boolean;
 };
 
 const getNormalizedCollegeLabel = (val: string | null | undefined): string => {
@@ -76,6 +77,7 @@ interface CandidateResult {
   percentage: number;
   rank: number;
   seats?: number;
+  tiebreak?: boolean;
   colleges?: string[];
   logo?: string;
 }
@@ -242,8 +244,11 @@ const CandidateCard: React.FC<{
           {/* Barre de progression moderne */}
           <div className="mb-3 sm:mb-4">
             <div className="flex flex-wrap justify-between items-baseline gap-x-2 gap-y-1 mb-2">
-              <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 whitespace-nowrap">
+              <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 whitespace-nowrap inline-flex items-center gap-1.5">
                 {candidate.seats !== undefined ? `${candidate.seats} siège${candidate.seats !== 1 ? 's' : ''}` : candidate.total_votes.toLocaleString()}
+                {candidate.tiebreak && (
+                  <Scale className="w-4 h-4 text-amber-500" title="Siège attribué par départage (ancienneté/âge)" />
+                )}
               </span>
               <span className="text-sm sm:text-base font-semibold text-blue-600 whitespace-nowrap">
                 {candidate.seats !== undefined ? `(${candidate.total_votes.toLocaleString()} voix · ${percentage.toFixed(2)}%)` : `${percentage.toFixed(2)}%`}
@@ -833,7 +838,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
       // Agréger les votes par candidat ou syndicat
       const isProfessional = isProElection;
-      const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number; colleges: Set<string>; seats: number; remainder: number }>();
+      const candidateVotesMap = new Map<string, { candidate_id: string; candidate_name: string; party: string; total_votes: number; colleges: Set<string>; seats: number; remainder: number; tiebreak: boolean }>();
       
       (candidateResultsData || []).forEach((cr: any) => {
         if (!quorumOkPvIds.has(cr.pv_id)) return; // PV sans quorum → exclu des totaux
@@ -860,6 +865,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           colleges: new Set<string>(),
           seats: 0,
           remainder: 0,
+          tiebreak: false,
         };
         existing.total_votes += Number(cr.votes) || 0;
         if (isProfessional) {
@@ -873,6 +879,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       // Calculer les sièges — par collège (total élection) avec quotient + plus forte moyenne
       // unionLists et electoralCollegesForPro sont déjà chargés au round 2
       let collegeSyndicatSeats = new Map<string, number>();
+      // Sièges attribués par départage ancienneté/âge (pour étiquette UI) — clé "collegeLabel_syndicat"
+      let collegeSyndicatTiebreak = new Map<string, boolean>();
 
       if (isProfessional) {
 
@@ -976,7 +984,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             if (tied.length === 1) return { seats: { ...empty, [tied[0].partyKey]: 1 } };
             const winner = ancAgeTie(tied);
             if (!winner) return { seats: empty, manualTie: tied.map(s => s.partyKey) };
-            return { seats: { ...empty, [winner.partyKey]: 1 } };
+            return { seats: { ...empty, [winner.partyKey]: 1 }, tiebreakKeys: [winner.partyKey] };
           }
 
           // Cas 2 : 2 sièges
@@ -987,6 +995,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             let remaining = 2 - Object.values(allocated).reduce((a, b) => a + b, 0);
             if (remaining === 0) return { seats: allocated };
 
+            const tiebreakKeys: string[] = [];
             while (remaining > 0) {
               const withMoy = syndicats.map(s => ({ ...s, moy: s.votes / (allocated[s.partyKey] + 1) }));
               const maxMoy = Math.max(...withMoy.map(m => m.moy));
@@ -1000,9 +1009,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               const winner = ancAgeTieDynamic(byVotes, allocated);
               if (!winner) return { seats: allocated, manualTie: byVotes.map(s => s.partyKey) };
               allocated[winner.partyKey]++;
+              tiebreakKeys.push(winner.partyKey);
               remaining--;
             }
-            return { seats: allocated };
+            return { seats: allocated, tiebreakKeys };
           }
 
           return { seats: empty };
@@ -1017,10 +1027,11 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         });
 
         // Réinitialiser les sièges dans filteredSummaryData
-        filteredSummaryData.forEach(c => { c.seats = 0; });
+        filteredSummaryData.forEach(c => { c.seats = 0; c.tiebreak = false; });
 
         // Map pour stocker les sièges cumulés par collège et par syndicat
         collegeSyndicatSeats = new Map<string, number>();
+        collegeSyndicatTiebreak = new Map<string, boolean>();
 
         // 5) Calcul des sièges par groupe (centerId_colKey) — UN SEUL calcul par collège×établissement.
         //    Plusieurs PVs publiés pour le même collège (ex : bureau physique + pseudo-bureau créés
@@ -1061,6 +1072,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
         // Phase B : une seule allocation par groupe sur les voix agrégées
         const groupAllocations = new Map<string, Record<string, number>>();
+        const groupTiebreakKeys = new Map<string, Set<string>>(); // gk → partyKeys départagés ancienneté/âge
         groupAggVotes.forEach((aggVotes, gk) => {
           const seatsToFill = bureauSeats.get(gk) || 0;
           const colType = groupColType.get(gk) || '';
@@ -1071,6 +1083,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           });
           const alloc = allocateSeatsForCollege(syndicats, seatsToFill);
           groupAllocations.set(gk, alloc.seats);
+          groupTiebreakKeys.set(gk, new Set(alloc.tiebreakKeys ?? []));
 
           // Répercuter dans filteredSummaryData et collegeSyndicatSeats (une fois par groupe)
           Object.entries(alloc.seats).forEach(([pk, s]) => {
@@ -1079,6 +1092,10 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             const collegeLabel = getNormalizedCollegeLabel(colType);
             const seatKey = `${collegeLabel}_${pk}`;
             collegeSyndicatSeats.set(seatKey, (collegeSyndicatSeats.get(seatKey) || 0) + s);
+            if (alloc.tiebreakKeys?.includes(pk)) {
+              if (entry) entry.tiebreak = true;
+              collegeSyndicatTiebreak.set(seatKey, true);
+            }
           });
         });
 
@@ -1090,6 +1107,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         pvCandidateResults.forEach((results, pvId) => {
           const gk = pvGroupKey.get(pvId);
           const groupAlloc = gk ? (groupAllocations.get(gk) || {}) : {};
+          const groupTiebreaks = gk ? (groupTiebreakKeys.get(gk) || new Set<string>()) : new Set<string>();
           const pvObject = (pvsData || []).find((pv: any) => String(pv.id) === String(pvId));
           const bureauName = pvObject?.voting_bureaux?.name || '';
           const isPseudo = bureauName.startsWith('College -');
@@ -1112,7 +1130,8 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             .map(([syndicatName, votes]) => ({
               syndicatName,
               votes,
-              seats: isPrimary ? (groupAlloc[syndicatName] || 0) : 0
+              seats: isPrimary ? (groupAlloc[syndicatName] || 0) : 0,
+              tiebreak: isPrimary && groupTiebreaks.has(syndicatName)
             }))
             .sort((a, b) => b.votes - a.votes);
 
@@ -1135,7 +1154,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             partyVotes.set(syndicat, (partyVotes.get(syndicat) || 0) + (Number(r.votes) || 0));
           });
           bRow.syndicats = Array.from(partyVotes.entries())
-            .map(([syndicatName, votes]) => ({ syndicatName, votes, seats: 0 }))
+            .map(([syndicatName, votes]) => ({ syndicatName, votes, seats: 0, tiebreak: false }))
             .sort((a: any, b: any) => b.votes - a.votes);
         });
 
@@ -1185,6 +1204,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             percentage: totalCandidateVotesForPct > 0 ? (100 * (c.total_votes || 0)) / totalCandidateVotesForPct : 0,
             rank: 0,
             seats: c.seats,
+            tiebreak: c.tiebreak,
             colleges: Array.from(c.colleges),
             logo: logosMap.get(c.candidate_id) || undefined
           }))
@@ -1244,6 +1264,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                 syndicatName,
                 votes,
                 seats: seats,
+                tiebreak: collegeSyndicatTiebreak.get(seatKey) || false,
               });
             });
         }
@@ -1475,7 +1496,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       total_voters: number;
       total_expressed_votes: number;
       quorum_failed: boolean;
-      syndicats: Map<string, { syndicat: string; seats: number; votes: number }>;
+      syndicats: Map<string, { syndicat: string; seats: number; votes: number; tiebreak: boolean }>;
     }>();
 
     bureaux.forEach((b: any) => {
@@ -1503,11 +1524,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       if (b.syndicats) {
         b.syndicats.forEach((s: any) => {
           if (!entry.syndicats.has(s.syndicatName)) {
-            entry.syndicats.set(s.syndicatName, { syndicat: s.syndicatName, seats: 0, votes: 0 });
+            entry.syndicats.set(s.syndicatName, { syndicat: s.syndicatName, seats: 0, votes: 0, tiebreak: false });
           }
           const sEntry = entry.syndicats.get(s.syndicatName)!;
           sEntry.seats += Number(s.seats) || 0;
           sEntry.votes += Number(s.votes) || 0;
+          if (s.tiebreak) sEntry.tiebreak = true;
         });
       }
     });
@@ -2068,7 +2090,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             { content: collegeName, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [219, 234, 254], textColor: [30, 64, 175] } }
           ]);
           rows.forEach(r => {
-            collegeBody.push([r.syndicatName, fmtNum(r.votes), r.seats || '—']);
+            collegeBody.push([r.syndicatName, fmtNum(r.votes), r.seats]);
           });
         });
 
@@ -2143,7 +2165,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             Array.from(syndicatMap.entries())
               .sort((a, b) => b[1].votes - a[1].votes)
               .forEach(([syndicatName, data]) => {
-                detailBody.push([syndicatName, fmtNum(data.votes), data.seats || '—']);
+                detailBody.push([syndicatName, fmtNum(data.votes), data.seats]);
               });
           });
 
@@ -2688,7 +2710,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                             )}
                             {isProResults && (
                               <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right font-semibold text-xs sm:text-sm">
-                                {c.seats ?? 0}
+                                <span className="inline-flex items-center justify-end gap-1">
+                                  {c.seats ?? 0}
+                                  {c.tiebreak && (
+                                    <Scale className="w-3 h-3 text-amber-500" title="Siège attribué par départage (ancienneté/âge)" />
+                                  )}
+                                </span>
                               </td>
                             )}
                             <td className="px-2 sm:px-4 py-2 sm:py-3 border text-right text-xs sm:text-sm">{typeof c.total_votes === 'number' ? c.total_votes.toLocaleString('fr-FR') : (c.total_votes ?? '-')}</td>
@@ -2801,7 +2828,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                       <React.Fragment key={i}>
                                         <tr className="hover:bg-gray-50 transition-colors">
                                           <td className="py-2 pr-2 font-medium text-gray-800">{r.collegeName}</td>
-                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{r.syndicat.seats}</td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">
+                                            <span className="inline-flex items-center justify-center gap-1">
+                                              {r.syndicat.seats}
+                                              {r.syndicat.tiebreak && (
+                                                <Scale className="w-3 h-3 text-amber-500" title="Siège attribué par départage (ancienneté/âge)" />
+                                              )}
+                                            </span>
+                                          </td>
                                           <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{r.syndicat.votes?.toLocaleString() || '0'}</td>
                                           <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
                                           <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>
@@ -3209,7 +3243,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                           <td className="py-2 pr-2 font-medium text-gray-800 break-words max-w-[120px] sm:max-w-none">
                                             {s.syndicat}
                                           </td>
-                                          <td className="py-2 px-2 text-center font-bold text-blue-600">{s.seats}</td>
+                                          <td className="py-2 px-2 text-center font-bold text-blue-600">
+                                            <span className="inline-flex items-center justify-center gap-1">
+                                              {s.seats}
+                                              {s.tiebreak && (
+                                                <Scale className="w-3 h-3 text-amber-500" title="Siège attribué par départage (ancienneté/âge)" />
+                                              )}
+                                            </span>
+                                          </td>
                                           <td className="py-2 px-2 text-right text-gray-600 whitespace-nowrap">{s.votes?.toLocaleString() || '0'}</td>
                                           <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">{score}</td>
                                           <td className="py-2 pl-2 text-gray-600 hidden sm:table-cell">{delegueDisplay}</td>

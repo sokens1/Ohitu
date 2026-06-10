@@ -60,6 +60,7 @@ const PERMISSIONS: Record<UserRole, Permission[]> = {
     'results:entry',           // voit l'onglet saisie
     // PAS results:submit → lecture seule sur l'onglet saisie
     'results:validate',
+    'results:documents', 'documents:upload', 'documents:download',
   ],
   'president-etablissement': [
     'view:dashboard', 'view:elections', 'view:results',
