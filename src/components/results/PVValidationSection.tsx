@@ -1517,8 +1517,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   {editMode && (
                     <div className="p-3 sm:p-4 border-t">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Statut du scrutin</p>
-                      <div className={`rounded-lg border p-3 flex flex-col sm:flex-row gap-3 ${isSecondTour ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
-                        <label className="flex items-center gap-2 cursor-pointer">
+                      <div className={`rounded-lg border p-3 flex flex-row flex-wrap gap-3 ${isSecondTour ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+                        <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
                           <input
                             type="radio"
                             name="pv_statut_scrutin"
@@ -1528,7 +1528,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                           />
                           <span className={`text-sm font-semibold ${!isSecondTour ? 'text-green-800' : 'text-gray-500'}`}>✓ Valide (1er tour)</span>
                         </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
+                        <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
                           <input
                             type="radio"
                             name="pv_statut_scrutin"
