@@ -2140,8 +2140,8 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                   <div>
                     <h4 className="font-medium text-gray-900 mb-3">Statut du scrutin</h4>
                     <div className={`rounded-lg border p-4 ${formData.is_second_tour ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
-                      <div className="flex flex-col sm:flex-row gap-3">
-                        <label className="flex items-center gap-2 cursor-pointer">
+                      <div className="flex flex-row flex-wrap gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
                           <input
                             type="radio"
                             name="scrutin_statut"
@@ -2153,7 +2153,7 @@ const PVEntrySection: React.FC<PVEntrySectionProps> = ({ onClose, selectedElecti
                             ✓ Valide (1er tour)
                           </span>
                         </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
+                        <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
                           <input
                             type="radio"
                             name="scrutin_statut"
