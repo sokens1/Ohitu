@@ -248,9 +248,6 @@ const CandidateCard: React.FC<{
             <div className="flex flex-wrap justify-between items-baseline gap-x-2 gap-y-1 mb-2">
               <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 whitespace-nowrap inline-flex items-center gap-1.5">
                 {candidate.seats !== undefined ? `${candidate.seats} siège${candidate.seats !== 1 ? 's' : ''}` : candidate.total_votes.toLocaleString()}
-                {candidate.tiebreak && (
-                  <span title="Siège attribué par départage (ancienneté/âge)"><Scale className="w-4 h-4 text-amber-500" /></span>
-                )}
               </span>
               <span className="text-sm sm:text-base font-semibold text-blue-600 whitespace-nowrap">
                 {candidate.seats !== undefined ? `(${candidate.total_votes.toLocaleString()} voix · ${percentage.toFixed(2)}%)` : `${percentage.toFixed(2)}%`}
