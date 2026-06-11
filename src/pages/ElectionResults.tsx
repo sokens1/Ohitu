@@ -2110,6 +2110,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         // Le collège est isolé dans sa propre colonne (fusionnée sur ses lignes via rowSpan)
         // pour qu'il ne soit jamais confondu avec un nom de syndicat.
         const collegeBody: any[] = [];
+        const collegeSeparatorRows = new Set<number>();
         byCollege.forEach((rows, collegeName) => {
           rows.forEach((r, idx) => {
             const row: any[] = [];
@@ -2130,18 +2131,39 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             { content: fmtNum(totalVotes), styles: { fontStyle: 'bold' } },
             { content: totalSeats, styles: { fontStyle: 'bold' } },
           ]);
+          collegeSeparatorRows.add(collegeBody.length - 1);
         });
+
+        // Largeurs fixes pour les 4 colonnes : la colonne Syndicat n'absorbe plus
+        // tout l'espace restant, ce qui garde Voix/Sièges bien alignés sous leur en-tête.
+        const collegeColWidths = { college: 38, syndicat: 60, voix: 38, sieges: 28 };
+        const collegeTableWidth = collegeColWidths.college + collegeColWidths.syndicat + collegeColWidths.voix + collegeColWidths.sieges;
+        const collegeMargin = (PAGE_W - collegeTableWidth) / 2;
 
         // @ts-ignore
         autoTable(doc, {
           ...tableTheme,
+          margin: { ...tableTheme.margin, left: collegeMargin, right: collegeMargin },
           head: [['Collège', 'Syndicat', 'Voix', 'Sièges']],
           body: collegeBody,
           startY: collegeY,
           columnStyles: {
-            0: { cellWidth: 35 },
-            2: { halign: 'right', cellWidth: 35 },
-            3: { halign: 'center', cellWidth: 25 },
+            0: { cellWidth: collegeColWidths.college },
+            1: { cellWidth: collegeColWidths.syndicat },
+            2: { halign: 'right', cellWidth: collegeColWidths.voix },
+            3: { halign: 'center', cellWidth: collegeColWidths.sieges },
+          },
+          // Ligne de séparation pleine largeur après le TOTAL de chaque collège,
+          // pour bien distinguer les collèges entre eux.
+          didDrawCell: (data: any) => {
+            if (data.section === 'body' && data.column.index === 3 && collegeSeparatorRows.has(data.row.index)) {
+              const y = data.cell.y + data.cell.height;
+              doc.setDrawColor(30, 64, 175);
+              doc.setLineWidth(0.4);
+              doc.line(collegeMargin, y, collegeMargin + collegeTableWidth, y);
+              doc.setDrawColor(0, 0, 0);
+              doc.setLineWidth(0.2);
+            }
           },
           didDrawPage: () => drawHeader('Résultats par collège'),
         });
