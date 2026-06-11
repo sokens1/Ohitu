@@ -2144,7 +2144,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         autoTable(doc, {
           ...tableTheme,
           margin: { ...tableTheme.margin, left: collegeMargin, right: collegeMargin },
-          head: [['Collège', 'Syndicat', 'Voix', 'Sièges']],
+          head: [[
+            'Collège',
+            'Syndicat',
+            { content: 'Voix', styles: { halign: 'right' } },
+            { content: 'Sièges', styles: { halign: 'center' } },
+          ]],
           body: collegeBody,
           startY: collegeY,
           columnStyles: {
