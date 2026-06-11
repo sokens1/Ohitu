@@ -249,7 +249,7 @@ const CandidateCard: React.FC<{
               <span className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 whitespace-nowrap inline-flex items-center gap-1.5">
                 {candidate.seats !== undefined ? `${candidate.seats} siège${candidate.seats !== 1 ? 's' : ''}` : candidate.total_votes.toLocaleString()}
                 {candidate.tiebreak && (
-                  <Scale className="w-4 h-4 text-amber-500" title="Siège attribué par départage (ancienneté/âge)" />
+                  <span title="Siège attribué par départage (ancienneté/âge)"><Scale className="w-4 h-4 text-amber-500" /></span>
                 )}
               </span>
               <span className="text-sm sm:text-base font-semibold text-blue-600 whitespace-nowrap">
@@ -681,7 +681,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           ? supabase.from('voting_bureaux').select('id, name, center_id, college, seats_to_fill, registered_voters').in('center_id', allCenterIds)
           : Promise.resolve({ data: [] as any[], error: null }),
         publishedPVIds.length > 0
-          ? supabase.from('procès_verbaux').select(`id, bureau_id, college_type, total_registered, total_voters, votes_expressed, null_votes, voting_bureaux!inner(id, name, center_id, registered_voters, college_type)`).in('id', publishedPVIds)
+          ? supabase.from('procès_verbaux').select(`id, bureau_id, college_type, total_registered, total_voters, votes_expressed, null_votes, is_second_tour, voting_bureaux!inner(id, name, center_id, registered_voters, college_type)`).in('id', publishedPVIds)
           : Promise.resolve({ data: [] as any[], error: null }),
       ]);
 
@@ -766,6 +766,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           participation_pct: reg > 0 ? (Number(pv.total_voters) / reg) * 100 : 0,
           quorum_failed,
           isActuallyQuorumFailed,
+          is_second_tour: !!(pv as any).is_second_tour || isActuallyQuorumFailed,
         };
       });
 
@@ -1509,6 +1510,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       total_voters: number;
       total_expressed_votes: number;
       quorum_failed: boolean;
+      is_second_tour: boolean;
       syndicats: Map<string, { syndicat: string; seats: number; votes: number; tiebreakType: 'anciennete' | 'age' | null }>;
     }>();
 
@@ -1523,6 +1525,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           total_voters: 0,
           total_expressed_votes: 0,
           quorum_failed: false,
+          is_second_tour: false,
           syndicats: new Map()
         });
       }
@@ -1532,6 +1535,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       entry.total_voters += Number(b.total_voters) || 0;
       entry.total_expressed_votes += Number(b.total_expressed_votes) || 0;
       if (b.quorum_failed) entry.quorum_failed = true;
+      if (b.is_second_tour) entry.is_second_tour = true;
 
       // Syndicats : tous les bureaux (sièges = 0 pour quorum non atteint, déjà géré à la source)
       if (b.syndicats) {
@@ -2118,7 +2122,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               row.push({
                 content: collegeName,
                 rowSpan: rows.length + 1,
-                styles: { valign: 'middle', fontStyle: 'bold', fillColor: [241, 245, 249], textColor: [30, 64, 175] },
+                styles: { valign: 'middle' as const, fontStyle: 'bold', fillColor: [241, 245, 249] as [number,number,number], textColor: [30, 64, 175] as [number,number,number] },
               });
             }
             row.push(r.syndicatName, fmtNum(r.votes), r.seats);
@@ -2195,7 +2199,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
           const subHeaders = ['Voix', 'Sièges', '% Abst.'];
           const head = [
             [
-              { content: 'Syndicat', rowSpan: 2, styles: { valign: 'middle' } },
+              { content: 'Syndicat', rowSpan: 2, styles: { valign: 'middle' as const } },
               ...collegeOrder.map(c => ({ content: c, colSpan: 3, styles: { halign: 'center' as const } })),
               { content: 'Global établissement', colSpan: 3, styles: { halign: 'center' as const, fillColor: [22, 101, 52] as [number, number, number] } },
             ],
@@ -3301,6 +3305,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     <div className="divide-y divide-gray-100">
                       {collegeRows.length > 0 ? collegeRows.map((row, rIdx) => {
                         const qFailed = (row as any).quorum_failed === true;
+                        const isSecondTour = !!(row as any).is_second_tour;
                         const abstPct = row.total_registered > 0
                           ? (100 - (row.total_voters / row.total_registered * 100))
                           : null;
@@ -3316,16 +3321,19 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                           : 'bg-green-100 text-green-700';
                         const rowSeats = (row as any).seatsInLice || 0;
                         return (
-                          <details key={rIdx} className={`group/col ${qFailed ? 'bg-red-50' : ''}`}>
+                          <details key={rIdx} className={`group/col ${qFailed ? 'bg-red-50' : isSecondTour ? 'bg-orange-50' : ''}`}>
                             <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                               {/* Ligne desktop */}
-                              <div className={`hidden sm:grid ${centerTotalSeats > 0 ? 'grid-cols-6' : 'grid-cols-5'} px-4 sm:px-6 py-3 transition-colors items-center ${qFailed ? 'hover:bg-red-100' : 'hover:bg-blue-50'}`}>
-                                <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : 'text-gray-800'}`}>
-                                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : 'text-blue-400'}`} />
+                              <div className={`hidden sm:grid ${centerTotalSeats > 0 ? 'grid-cols-6' : 'grid-cols-5'} px-4 sm:px-6 py-3 transition-colors items-center ${qFailed ? 'hover:bg-red-100' : isSecondTour ? 'hover:bg-orange-100' : 'hover:bg-blue-50'}`}>
+                                <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : isSecondTour ? 'text-orange-800' : 'text-gray-800'}`}>
+                                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : isSecondTour ? 'text-orange-400' : 'text-blue-400'}`} />
                                   <span className="flex items-center gap-1.5 flex-wrap">
                                     {row.collegeName}
                                     {qFailed && (
                                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 whitespace-nowrap">⚠ Quorum non atteint</span>
+                                    )}
+                                    {isSecondTour && (
+                                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-200 whitespace-nowrap">↻ 2nd tour</span>
                                     )}
                                   </span>
                                 </div>
@@ -3340,14 +3348,17 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                 </div>
                               </div>
                               {/* Ligne mobile : card */}
-                              <div className={`sm:hidden px-4 py-3 transition-colors ${qFailed ? 'hover:bg-red-100' : 'hover:bg-blue-50'}`}>
+                              <div className={`sm:hidden px-4 py-3 transition-colors ${qFailed ? 'hover:bg-red-100' : isSecondTour ? 'hover:bg-orange-100' : 'hover:bg-blue-50'}`}>
                                 <div className="flex items-center justify-between">
-                                  <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : 'text-gray-800'}`}>
-                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : 'text-blue-400'}`} />
+                                  <div className={`flex items-center gap-2 font-semibold text-sm ${qFailed ? 'text-red-800' : isSecondTour ? 'text-orange-800' : 'text-gray-800'}`}>
+                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 group-open/col:rotate-180 shrink-0 ${qFailed ? 'text-red-400' : isSecondTour ? 'text-orange-400' : 'text-blue-400'}`} />
                                     <span className="flex flex-col gap-0.5">
                                       {row.collegeName}
                                       {qFailed && (
                                         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 w-fit">⚠ Quorum non atteint</span>
+                                      )}
+                                      {isSecondTour && (
+                                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-200 w-fit">↻ 2nd tour</span>
                                       )}
                                     </span>
                                   </div>
@@ -3458,7 +3469,76 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                     </div>
                   </div>
                 );
-              })() : (
+              })() : viewMode === 'bureau' ? (
+                /* Vue non-PRO : tableau plat par bureau */
+                <div className="bg-white rounded-lg sm:rounded-xl lg:rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                  <div className="relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                    <table className="min-w-full" style={{ minWidth: '600px' }}>
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <th className="text-left px-3 sm:px-4 lg:px-6 py-2 sm:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                            <div className="flex items-center gap-1 sm:gap-1.5 lg:gap-2"><Building className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" /><span>Centre</span></div>
+                          </th>
+                          <th className="text-left px-3 sm:px-4 lg:px-6 py-2 sm:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                            <div className="flex items-center gap-1 sm:gap-1.5 lg:gap-2"><Target className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" /><span>Bureau</span></div>
+                          </th>
+                          <th className="text-right px-3 sm:px-4 lg:px-6 py-2 sm:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2"><Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" /><span className="hidden sm:inline">{electorsLabel}</span><span className="sm:hidden">Insc.</span></div>
+                          </th>
+                          <th className="text-right px-3 sm:px-4 lg:px-6 py-2 sm:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2"><Vote className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" /><span className="hidden sm:inline">Votants</span><span className="sm:hidden">Vot.</span></div>
+                          </th>
+                          <th className="text-right px-3 sm:px-4 lg:px-6 py-2 sm:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2"><BarChart3 className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" /><span className="hidden sm:inline">Exprimés</span><span className="sm:hidden">Expr.</span></div>
+                          </th>
+                          <th className="text-right px-3 sm:px-4 lg:px-6 py-2 sm:py-3 font-semibold text-gray-700 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5 lg:gap-2"><TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4" /><span className="hidden sm:inline">Abstention</span><span className="sm:hidden">Abs.</span></div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {(getSortedAndGroupedData() as BureauData[]).map((b: any, idx) => (
+                          <tr key={idx} className={`transition-colors duration-200 ${b.quorum_failed ? 'bg-red-50 hover:bg-red-100' : b.is_second_tour ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-blue-50'}`}>
+                            <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-[10px] sm:text-xs lg:text-sm text-gray-600 whitespace-nowrap">
+                              {centerNameById[b.center_id] || '—'}
+                            </td>
+                            <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
+                              <span className={`font-medium ${b.quorum_failed ? 'text-red-700' : b.is_second_tour ? 'text-orange-700' : 'text-gray-800'}`}>{b.bureau_name}</span>
+                              {b.quorum_failed && (
+                                <span className="ml-1.5 text-[9px] text-red-500 font-normal italic">quorum non atteint</span>
+                              )}
+                              {b.is_second_tour && (
+                                <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-orange-100 text-orange-700 border border-orange-200">2nd tour</span>
+                              )}
+                            </td>
+                            <td className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-[10px] sm:text-xs lg:text-sm ${b.quorum_failed ? 'text-red-600' : 'text-gray-700'}`}>{typeof b.total_registered === 'number' ? b.total_registered.toLocaleString('fr-FR') : (b.total_registered ?? '—')}</td>
+                            <td className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-[10px] sm:text-xs lg:text-sm ${b.quorum_failed ? 'text-red-600' : 'text-gray-700'}`}>{typeof b.total_voters === 'number' ? b.total_voters.toLocaleString('fr-FR') : (b.total_voters ?? '—')}</td>
+                            <td className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-[10px] sm:text-xs lg:text-sm ${b.quorum_failed ? 'text-red-600' : 'text-gray-700'}`}>{typeof b.total_expressed_votes === 'number' ? b.total_expressed_votes.toLocaleString('fr-FR') : (b.total_expressed_votes ?? '—')}</td>
+                            <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right">
+                              <span className={`px-1 sm:px-1.5 lg:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium ${b.quorum_failed ? 'bg-red-100 text-red-700' :
+                                typeof b.participation_pct === 'number' && (100 - b.participation_pct) >= 49.51 ? 'bg-red-100 text-red-800' :
+                                typeof b.participation_pct === 'number' && ((100 - b.participation_pct) > 20.5 && (100 - b.participation_pct) <= 49.5) ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-green-100 text-green-800'}`}>
+                                {typeof b.participation_pct === 'number' ? `${(100 - Math.min(Math.max(b.participation_pct, 0), 100)).toFixed(2)}%` : '—'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {(getSortedAndGroupedData() as BureauData[]).length === 0 && (
+                          <tr>
+                            <td className="px-4 py-8 text-center text-gray-500 text-xs" colSpan={6}>
+                              <div className="flex flex-col items-center gap-2">
+                                <Target className="w-6 h-6 text-gray-400" />
+                                <span>Aucun bureau à afficher.</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
                 /* Vue non-PRO : accordions par centre */
                 <div className="space-y-3 sm:space-y-4 lg:space-y-6">
                   {(getSortedAndGroupedData() as CenterGroup[]).map((group, idx) => {
@@ -3547,11 +3627,14 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
                                   const numB = parseInt(b.bureau_name?.match(/\d+/)?.[0] || '0');
                                   return numA - numB;
                                 }).map((b, i2) => (
-                                  <tr key={i2} className={`transition-colors duration-200 ${(b as any).quorum_failed ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-blue-50'}`}>
+                                  <tr key={i2} className={`transition-colors duration-200 ${(b as any).quorum_failed ? 'bg-red-50 hover:bg-red-100' : (b as any).is_second_tour ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-blue-50'}`}>
                                     <td className="px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-[10px] sm:text-xs lg:text-sm whitespace-nowrap">
-                                      <span className={`font-medium ${(b as any).quorum_failed ? 'text-red-700' : 'text-gray-800'}`}>{b.bureau_name}</span>
+                                      <span className={`font-medium ${(b as any).quorum_failed ? 'text-red-700' : (b as any).is_second_tour ? 'text-orange-700' : 'text-gray-800'}`}>{b.bureau_name}</span>
                                       {(b as any).quorum_failed && (
                                         <span className="ml-1.5 text-[9px] text-red-500 font-normal italic">quorum non atteint</span>
+                                      )}
+                                      {(b as any).is_second_tour && (
+                                        <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-orange-100 text-orange-700 border border-orange-200">2nd tour</span>
                                       )}
                                     </td>
                                     <td className={`px-3 sm:px-4 lg:px-6 py-1.5 sm:py-2 lg:py-3 text-right font-semibold text-[10px] sm:text-xs lg:text-sm ${(b as any).quorum_failed ? 'text-red-600' : 'text-gray-700'}`}>{typeof b.total_registered === 'number' ? b.total_registered.toLocaleString('fr-FR') : (b.total_registered ?? '-')}</td>
