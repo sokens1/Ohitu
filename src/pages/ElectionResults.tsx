@@ -2167,33 +2167,32 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
 
       // ── Signatures (bas de la page 1) ──
       if (isProResults) {
-        const sigSectionY = Math.max((doc as any).lastAutoTable.finalY + 10, 168);
+        const sigSectionY = Math.max((doc as any).lastAutoTable.finalY + 6, 142);
         const sigY = drawSectionTitle('Signatures', sigSectionY);
 
-        const signatories = [
-          'Président de la Commission Technique Bipartite',
-          'Représentant SYNTEE+',
-          'Représentant SYPEG',
-          'Représentant SYTSEEG',
-          'Représentant SAEEG',
-        ];
-        const sigGap = 3;
-        const sigColW = (PAGE_W - MARGIN * 2 - sigGap * (signatories.length - 1)) / signatories.length;
-        const sigLineY = sigY + 12;
-
-        signatories.forEach((label, i) => {
-          const x = MARGIN + i * (sigColW + sigGap);
-          doc.setFontSize(7.5);
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(50, 50, 50);
-          doc.text(label, x + sigColW / 2, sigY + 3, { align: 'center', maxWidth: sigColW });
-          doc.setDrawColor(150, 150, 150);
-          doc.setLineWidth(0.2);
-          doc.line(x + 3, sigLineY, x + sigColW - 3, sigLineY);
-          doc.setFontSize(6.5);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(140, 140, 140);
-          doc.text('Nom et signature', x + sigColW / 2, sigLineY + 4, { align: 'center' });
+        // Président et Membre disposent d'un seul champ de signature, chaque syndicat de deux
+        // @ts-ignore
+        autoTable(doc, {
+          ...tableTheme,
+          startY: sigY,
+          head: [['Président de la Commission Technique Bipartite', 'Membre', 'SYNTEE+', 'SYPEG', 'SYTSEEG', 'SAEEG']],
+          body: [
+            [{ content: '', rowSpan: 2 }, { content: '', rowSpan: 2 }, '', '', '', ''],
+            ['', '', '', ''],
+          ],
+          theme: 'grid',
+          columnStyles: {
+            0: { cellWidth: 60 },
+            1: { cellWidth: 30 },
+            2: { cellWidth: 44.75 },
+            3: { cellWidth: 44.75 },
+            4: { cellWidth: 44.75 },
+            5: { cellWidth: 44.75 },
+          },
+          styles: { ...tableTheme.styles, minCellHeight: 10, valign: 'middle' },
+          headStyles: { ...tableTheme.headStyles, halign: 'center', fontSize: 7.5 },
+          alternateRowStyles: { fillColor: [255, 255, 255] },
+          didDrawPage: () => drawHeader("Vue d'ensemble"),
         });
       }
 
