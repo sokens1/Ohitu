@@ -517,7 +517,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         if (!selectedElection) { setPvs([]); setBureauxMap(new Map()); setCentersMap(new Map()); setLoading(false); return; }
         const { data: pvRows, error: pvErr } = await supabase
           .from('procès_verbaux')
-          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url, participation_list_url, observer_annotation, observer_conformity, observer_id, observer_annotated_at, college_type, is_second_tour')
+          .select('id, bureau_id, total_registered, total_voters, null_votes, votes_expressed, status, entered_by, entered_at, validated_by, validated_at, pv_photo_url, participation_list_url, observer_annotation, observer_conformity, observer_id, observer_annotated_at, college_type, is_second_tour, validation_comment')
           .eq('election_id', selectedElection)
           .order('created_at', { ascending: false })
           .limit(500);
@@ -710,6 +710,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
         college_type: (pv.college_type ?? null) as string | null,
         observer_annotation: pv.observer_annotation ?? null,
         observer_conformity: (pv.observer_conformity ?? null) as 'conforme' | 'non_conforme' | null,
+        validation_comment: (pv as any).validation_comment ?? null,
         observer_name: pv.observer_id ? (usersMap.get(pv.observer_id) || pv.observer_id) : null,
         observer_annotated_at_str: pv.observer_annotated_at ? new Date(pv.observer_annotated_at).toLocaleDateString('fr-FR') + ' à ' + new Date(pv.observer_annotated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '',
         bureau_id: pv.bureau_id,
@@ -1224,6 +1225,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     setSelectedListUrl((pv as any).participation_list_url ?? null);
                     setSelectedPvUrl(pv.pv_photo_url ?? null);
                     setIsSecondTour(!!(pv as any).is_second_tour);
+                    setComment((pv as any).validation_comment ?? '');
                     setNewListFile(null);
                     setNewPvFile(null);
                     setInlinePreviewUrl(null);
@@ -1941,6 +1943,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                       updatePayload.pv_photo_url = pvPhotoUrl;
                       updatePayload.participation_list_url = listUrl;
                       updatePayload.is_second_tour = isSecondTour;
+                      updatePayload.observer_annotation = observerAnnotation.trim() || null;
+                      updatePayload.observer_conformity = observerConformity;
+                      updatePayload.validation_comment = comment.trim() || null;
                       const { error: pvErr } = await supabase
                         .from('procès_verbaux')
                         .update(updatePayload)
@@ -1974,6 +1979,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                         pv_photo_url: pvPhotoUrl,
                         participation_list_url: listUrl,
                         is_second_tour: isSecondTour,
+                        observer_annotation: observerAnnotation.trim() || null,
+                        observer_conformity: observerConformity,
+                        validation_comment: comment.trim() || null,
                       } : p));
                       setSelectedPvUrl(pvPhotoUrl);
                       setSelectedListUrl(listUrl);
