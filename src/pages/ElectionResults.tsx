@@ -1997,10 +1997,12 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         doc.text(subtitle, PAGE_W - MARGIN, 10, { align: 'right' });
       };
 
-      const drawSectionTitle = (title: string, y: number) => {
-        doc.setFillColor(219, 234, 254);
+      const drawSectionTitle = (title: string, y: number, colors?: { fill: [number, number, number]; text: [number, number, number] }) => {
+        const [fr, fg, fb] = colors?.fill ?? [219, 234, 254];
+        const [tr, tg, tb] = colors?.text ?? [30, 64, 175];
+        doc.setFillColor(fr, fg, fb);
         doc.rect(MARGIN, y, PAGE_W - MARGIN * 2, 7, 'F');
-        doc.setTextColor(30, 64, 175);
+        doc.setTextColor(tr, tg, tb);
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.text(title, MARGIN + 2, y + 5);
@@ -2013,6 +2015,37 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
         margin: { left: MARGIN, right: MARGIN, top: 18 },
       };
+
+      // ── Palettes alternatives pour les tableaux "2nd tour" / collèges invalidés ──
+      const GRAY_THEME = {
+        sectionFill: [226, 232, 240] as [number, number, number],
+        sectionText: [71, 85, 105] as [number, number, number],
+        headFill: [100, 116, 139] as [number, number, number],
+      };
+      const BORDEAUX_THEME = {
+        sectionFill: [127, 29, 29] as [number, number, number],
+        sectionText: [255, 255, 255] as [number, number, number],
+        headFill: [127, 29, 29] as [number, number, number],
+        headText: [255, 255, 255] as [number, number, number],
+        bodyFill: [254, 226, 226] as [number, number, number],
+        bodyText: [0, 0, 0] as [number, number, number],
+        footFill: [220, 38, 38] as [number, number, number],
+        footText: [255, 255, 255] as [number, number, number],
+      };
+
+      // ── Pré-calcul : voix par syndicat dans les collèges en 2nd tour (résultats invalidés) ──
+      const secondTourSyndicatVotesGlobal = new Map<string, number>();
+      if (isProResults) {
+        centerRows.forEach(c => {
+          const centerBureaux = bureauRows.filter((b: any) => b.center_id === c.center_id);
+          const collegeRows = getProCollegeTableRows(centerBureaux, String(c.center_id || ''));
+          collegeRows.filter((r: any) => r.is_second_tour).forEach((r: any) => {
+            r.syndicats.forEach((s: any) => {
+              secondTourSyndicatVotesGlobal.set(s.syndicat, (secondTourSyndicatVotesGlobal.get(s.syndicat) || 0) + (s.votes || 0));
+            });
+          });
+        });
+      }
 
       // ── Page 1 : en-tête + statistiques + résultats globaux ──
       drawHeader("Vue d'ensemble");
@@ -2064,7 +2097,7 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
       });
 
       const globalSectionY = drawSectionTitle(
-        isProResults ? 'Résultats globaux par syndicat' : 'Résultats globaux par candidat',
+        isProResults ? 'Résultats globaux par syndicat (Validés)' : 'Résultats globaux par candidat',
         boxY + 18
       );
 
@@ -2095,6 +2128,42 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         columnStyles: { 0: { halign: 'center', cellWidth: 14 } },
         didDrawPage: () => drawHeader("Vue d'ensemble"),
       });
+
+      // ── Résultats globaux par syndicat (Invalidés, 2nd tour) ──
+      if (isProResults && secondTourSyndicatVotesGlobal.size > 0) {
+        const secondTourEntries = Array.from(secondTourSyndicatVotesGlobal.entries())
+          .filter(([, votes]) => votes > 0)
+          .sort((a, b) => b[1] - a[1]);
+
+        if (secondTourEntries.length > 0) {
+          const secondTourTotalVotes = secondTourEntries.reduce((s, [, v]) => s + v, 0);
+
+          const secondTourY = drawSectionTitle(
+            'Résultats globaux par syndicat (Invalidés, 2nd tour)',
+            (doc as any).lastAutoTable.finalY + 8,
+            { fill: GRAY_THEME.sectionFill, text: GRAY_THEME.sectionText }
+          );
+
+          const secondTourBody = secondTourEntries.map(([name, votes]) => [
+            '—',
+            name,
+            fmtNum(votes),
+            secondTourTotalVotes > 0 ? `${(votes / secondTourTotalVotes * 100).toFixed(2)} %` : '-',
+            '—',
+          ]);
+
+          // @ts-ignore
+          autoTable(doc, {
+            ...tableTheme,
+            head: [globalHeaders],
+            body: secondTourBody,
+            headStyles: { fillColor: GRAY_THEME.headFill, textColor: 255, fontStyle: 'bold' as const },
+            startY: secondTourY,
+            columnStyles: { 0: { halign: 'center', cellWidth: 14 } },
+            didDrawPage: () => drawHeader("Vue d'ensemble"),
+          });
+        }
+      }
 
       // ── Résultats par collège (élections professionnelles) ──
       if (isProResults && collegeDetailRows.length > 0) {
@@ -2194,17 +2263,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             .filter((v, i, arr): v is string => !!v && arr.indexOf(v) === i);
 
           const subHeaders = ['Voix', 'Sièges', '% Abst.'];
-          const head = [
-            [
-              { content: 'Syndicat', rowSpan: 2, styles: { valign: 'middle' as const } },
-              ...collegeOrder.map(c => ({ content: c, colSpan: 3, styles: { halign: 'center' as const } })),
-              { content: 'Global établissement', colSpan: 3, styles: { halign: 'center' as const, fillColor: [22, 101, 52] as [number, number, number] } },
-            ],
-            [
-              ...collegeOrder.flatMap(() => subHeaders),
-              ...subHeaders,
-            ],
-          ];
 
           // Plusieurs tableaux établissement par page (économie de pages) :
           // une nouvelle page n'est ajoutée que si le bloc suivant ne tient plus.
@@ -2218,11 +2276,37 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             const collegeRows = getProCollegeTableRows(centerBureaux, String(center.center_id || ''));
             const collegeRowByName = new Map(collegeRows.map((r: any) => [r.collegeName, r]));
 
+            // Indices des colonnes (Voix/Sièges/% Abst.) appartenant à un collège en 2nd tour
+            // (résultats invalidés) — seules ces colonnes sont mises en rouge bordeaux,
+            // les autres collèges du même établissement gardent le thème par défaut.
+            const invalidatedColIndices = new Set<number>();
+            collegeOrder.forEach((c, i) => {
+              if (collegeRowByName.get(c)?.is_second_tour) {
+                const base = 1 + i * 3;
+                invalidatedColIndices.add(base);
+                invalidatedColIndices.add(base + 1);
+                invalidatedColIndices.add(base + 2);
+              }
+            });
+
+            const head = [
+              [
+                { content: 'Syndicat', rowSpan: 2, styles: { valign: 'middle' as const } },
+                ...collegeOrder.map(c => ({ content: c, colSpan: 3, styles: { halign: 'center' as const } })),
+                { content: 'Global établissement', colSpan: 3, styles: { halign: 'center' as const, fillColor: [22, 101, 52] as [number, number, number] } },
+              ],
+              [
+                ...collegeOrder.flatMap(() => subHeaders),
+                ...subHeaders,
+              ],
+            ];
+
             const etabAbst = (center.total_registered || 0) > 0
               ? 100 - ((center.total_voters || 0) / center.total_registered * 100)
               : null;
             const etabTotalSeats = collegeRows.reduce((s: number, r: any) => s + (r.seatsInLice || 0), 0);
 
+            // Le taux d'abstention n'est renseigné qu'à la ligne GLOBAL, pas par syndicat
             const body = allSyndicats.map(syndicatName => {
               const row: any[] = [syndicatName];
               let globalVotes = 0;
@@ -2235,22 +2319,19 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               collegeOrder.forEach(collegeName => {
                 const cRow: any = collegeRowByName.get(collegeName);
                 if (!cRow) {
-                  row.push('-', '-', '-');
+                  row.push('-', '-', '');
                   return;
                 }
                 const s = cRow.syndicats.find((x: any) => x.syndicat === syndicatName);
                 const votes = s?.votes || 0;
                 const seats = s?.seats || 0;
-                const abst = (cRow.total_registered || 0) > 0
-                  ? 100 - ((cRow.total_voters || 0) / cRow.total_registered * 100)
-                  : null;
-                row.push(fmtNum(votes), seats || '-', fmtPct(abst));
+                row.push(fmtNum(votes), seats || '-', '');
               });
-              row.push(fmtNum(globalVotes), globalSeats || '-', fmtPct(etabAbst));
+              row.push(fmtNum(globalVotes), globalSeats || '-', '');
               return row;
             });
 
-            const totalRow: any[] = ['TOTAL'];
+            const totalRow: any[] = ['GLOBAL'];
             collegeOrder.forEach(collegeName => {
               const cRow: any = collegeRowByName.get(collegeName);
               if (!cRow) { totalRow.push('-', '-', '-'); return; }
@@ -2283,6 +2364,20 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
               footStyles: { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold' },
               startY: y,
               columnStyles: { 0: { cellWidth: 32, fontStyle: 'bold' } },
+              // Met en rouge bordeaux uniquement les colonnes du/des collège(s) en 2nd tour
+              didParseCell: (data: any) => {
+                if (!invalidatedColIndices.has(data.column.index)) return;
+                if (data.section === 'head') {
+                  data.cell.styles.fillColor = BORDEAUX_THEME.headFill;
+                  data.cell.styles.textColor = BORDEAUX_THEME.headText;
+                } else if (data.section === 'body') {
+                  data.cell.styles.fillColor = BORDEAUX_THEME.bodyFill;
+                  data.cell.styles.textColor = BORDEAUX_THEME.bodyText;
+                } else if (data.section === 'foot') {
+                  data.cell.styles.fillColor = BORDEAUX_THEME.footFill;
+                  data.cell.styles.textColor = BORDEAUX_THEME.footText;
+                }
+              },
               didDrawPage: () => drawHeader('Résultats par établissement'),
             });
 
