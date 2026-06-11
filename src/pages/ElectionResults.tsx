@@ -2165,37 +2165,6 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         }
       }
 
-      // ── Signatures (bas de la page 1) ──
-      if (isProResults) {
-        const sigSectionY = Math.max((doc as any).lastAutoTable.finalY + 6, 142);
-        const sigY = drawSectionTitle('Signatures', sigSectionY);
-
-        // Président et Membre disposent d'un seul champ de signature, chaque syndicat de deux
-        // @ts-ignore
-        autoTable(doc, {
-          ...tableTheme,
-          startY: sigY,
-          head: [['Président de la Commission Technique Bipartite', 'Membre', 'SYNTEE+', 'SYPEG', 'SYTSEEG', 'SAEEG']],
-          body: [
-            [{ content: '', rowSpan: 2 }, { content: '', rowSpan: 2 }, '', '', '', ''],
-            ['', '', '', ''],
-          ],
-          theme: 'grid',
-          columnStyles: {
-            0: { cellWidth: 60 },
-            1: { cellWidth: 30 },
-            2: { cellWidth: 44.75 },
-            3: { cellWidth: 44.75 },
-            4: { cellWidth: 44.75 },
-            5: { cellWidth: 44.75 },
-          },
-          styles: { ...tableTheme.styles, minCellHeight: 10, valign: 'middle' },
-          headStyles: { ...tableTheme.headStyles, halign: 'center', fontSize: 7.5 },
-          alternateRowStyles: { fillColor: [255, 255, 255] },
-          didDrawPage: () => drawHeader("Vue d'ensemble"),
-        });
-      }
-
       // ── Résultats par collège (élections professionnelles) ──
       if (isProResults && collegeDetailRows.length > 0) {
         doc.addPage();
@@ -2457,6 +2426,26 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
             didDrawPage: () => drawHeader('Résultats par établissement'),
           });
         }
+      }
+
+      // ── Page de signatures (dernière page) ──
+      if (isProResults) {
+        doc.addPage();
+        drawHeader('Signatures');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(0, 0, 0);
+
+        const leftItems = ['Président de la Commission Technique Bipartite', 'Rapporteur(s)'];
+        const rightItems = ['SAEEG', 'SYNTEE+', 'SYPEG', 'SYTSEEG'];
+        const leftX = MARGIN + 10;
+        const rightX = PAGE_W - MARGIN - 90;
+        const startY = 50;
+        const blockH = 45;
+
+        leftItems.forEach((label, i) => doc.text(label, leftX, startY + i * blockH));
+        rightItems.forEach((label, i) => doc.text(label, rightX, startY + i * blockH));
       }
 
       // Pagination
