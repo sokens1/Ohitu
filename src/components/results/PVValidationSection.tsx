@@ -212,6 +212,9 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
     || role === 'president-etablissement' || role === 'president-bureau' || role === 'suppleant-president';
   // Rôles pouvant réagir à un avis existant (approuver / annuler réserves)
   const canReact = role === 'super-admin' || role === 'admin';
+  // Rôles pouvant gérer un PV (modifier, réinitialiser, rejeter, valider, commenter)
+  // — exclut observateur, employeur, président de bureau et suppléant (lecture seule)
+  const canManagePV = !isObserver && role !== 'employeur' && role !== 'suppleant-president';
 
   const [selectedPV, setSelectedPV] = useState<string | null>(null);
   const [observerAnnotation, setObserverAnnotation] = useState('');
@@ -1684,12 +1687,19 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                 )}
                 </div>
 
-                {/* Commentaire de validation — masqué pour l'observateur et l'employeur */}
-                {!isObserver && role !== 'employeur' && (
+                {/* Commentaire de validation — éditable pour les rôles de gestion, lecture seule sinon */}
+                {canManagePV ? (
                   <div>
                     <Label htmlFor="comment">Commentaire de validation</Label>
                     <Textarea id="comment" placeholder="Ajouter un commentaire..." value={comment} onChange={(e) => setComment(e.target.value)} rows={3} />
                   </div>
+                ) : (
+                  comment.trim() && (
+                    <div>
+                      <Label>Commentaire de validation</Label>
+                      <div className="text-sm text-gray-700 bg-slate-50 border border-slate-200 rounded-xl p-3 whitespace-pre-wrap break-words">{comment}</div>
+                    </div>
+                  )
                 )}
 
                 {/* ── Annotation observateur ──────────────────────────────── */}
@@ -1766,7 +1776,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                 {op.conformity === 'conforme' ? <><CheckCircle className="w-3 h-3" /> Conforme</> : <><AlertTriangle className="w-3 h-3" /> Réserves</>}
                               </span>
                             )}
-                            {op.annotation && <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>}
+                            {op.annotation && <span className="text-slate-600 italic break-words w-full">"{op.annotation}"</span>}
                             {((op as any).reactions ?? []).length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1 pl-3 w-full">
                                 {((op as any).reactions ?? []).map((r: any) => (
@@ -1810,7 +1820,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                                 </span>
                               )}
                               {op.annotation && (
-                                <span className="text-slate-600 italic truncate max-w-xs" title={op.annotation}>"{op.annotation}"</span>
+                                <span className="text-slate-600 italic break-words w-full">"{op.annotation}"</span>
                               )}
                               {/* React button — only when opinion is réserves */}
                               {canReact && op.conformity === 'non_conforme' && !isTargeted && (
@@ -1890,7 +1900,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
 
               {/* isLocked : PV validé ou publié — boutons grisés, seul "Se rétracter" reste actif */}
               <div className="flex flex-wrap gap-2 justify-end mt-4">
-                {!editMode && !readOnly && (
+                {!editMode && !readOnly && canManagePV && (
                   <Button disabled={isLocked} onClick={() => {
                     setEditValues({
                       total_registered: (editValues.total_registered || 0),
@@ -2000,7 +2010,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                     {saving ? 'Enregistrement…' : 'Enregistrer'}
                   </Button>
                 )}
-      {!readOnly && <Button
+      {!readOnly && canManagePV && <Button
         onClick={() => setShowResetConfirm(true)}
         disabled={resetting || isLocked}
         variant="outline"
@@ -2048,8 +2058,8 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                   </Button>
                 )}
 
-                {/* Boutons d'action — masqués pour l'observateur, grisés si PV verrouillé */}
-                {!readOnly && <>
+                {/* Boutons d'action — masqués pour l'observateur, l'employeur, le président de bureau et le suppléant ; grisés si PV verrouillé */}
+                {!readOnly && canManagePV && <>
                 {/* Rejeter — grisé pour tous si PV validé ou publié */}
                 <Button
                   variant="outline"
