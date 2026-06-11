@@ -2165,6 +2165,38 @@ const ElectionResults: React.FC<ElectionResultsProps> = ({ isAdminPreview = fals
         }
       }
 
+      // ── Signatures (bas de la page 1) ──
+      if (isProResults) {
+        const sigSectionY = Math.max((doc as any).lastAutoTable.finalY + 10, 168);
+        const sigY = drawSectionTitle('Signatures', sigSectionY);
+
+        const signatories = [
+          'Président de la Commission Technique Bipartite',
+          'Représentant SYNTEE+',
+          'Représentant SYPEG',
+          'Représentant SYTSEEG',
+          'Représentant SAEEG',
+        ];
+        const sigGap = 3;
+        const sigColW = (PAGE_W - MARGIN * 2 - sigGap * (signatories.length - 1)) / signatories.length;
+        const sigLineY = sigY + 12;
+
+        signatories.forEach((label, i) => {
+          const x = MARGIN + i * (sigColW + sigGap);
+          doc.setFontSize(7.5);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(50, 50, 50);
+          doc.text(label, x + sigColW / 2, sigY + 3, { align: 'center', maxWidth: sigColW });
+          doc.setDrawColor(150, 150, 150);
+          doc.setLineWidth(0.2);
+          doc.line(x + 3, sigLineY, x + sigColW - 3, sigLineY);
+          doc.setFontSize(6.5);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(140, 140, 140);
+          doc.text('Nom et signature', x + sigColW / 2, sigLineY + 4, { align: 'center' });
+        });
+      }
+
       // ── Résultats par collège (élections professionnelles) ──
       if (isProResults && collegeDetailRows.length > 0) {
         doc.addPage();
