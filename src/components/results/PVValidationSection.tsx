@@ -1976,6 +1976,7 @@ const PVValidationSection: React.FC<PVValidationSectionProps> = ({ selectedElect
                         is_second_tour: isSecondTour,
                       } : p));
                       setSelectedPvUrl(pvPhotoUrl);
+                      setSelectedListUrl(listUrl);
                       setEditMode(false);
                       setNewPvFile(null);
                       setNewListFile(null);
